@@ -18,7 +18,7 @@ pub mod schemas;
 
 // URLs
 
-fn get_game_branches_url(edition: GameEdition) -> String {
+fn get_game_branches_url(edition: &GameEdition) -> String {
     format!(
         "{}/hyp/hyp-connect/api/getGameBranches?launcher_id={}",
         edition.branches_host(),
@@ -26,7 +26,7 @@ fn get_game_branches_url(edition: GameEdition) -> String {
     )
 }
 
-fn get_game_scan_info_url(edition: GameEdition) -> String {
+fn get_game_scan_info_url(edition: &GameEdition) -> String {
     format!(
         "{}/hyp/hyp-connect/api/getGameScanInfo?launcher_id={}",
         edition.branches_host(),
@@ -34,7 +34,7 @@ fn get_game_scan_info_url(edition: GameEdition) -> String {
     )
 }
 
-fn sophon_patch_info_url(package_info: &PackageInfo, edition: GameEdition) -> String {
+fn sophon_patch_info_url(package_info: &PackageInfo, edition: &GameEdition) -> String {
     format!(
         "{}/downloader/sophon_chunk/api/getPatchBuild?branch={}&password={}&package_id={}",
         edition.api_host(),
@@ -44,7 +44,7 @@ fn sophon_patch_info_url(package_info: &PackageInfo, edition: GameEdition) -> St
     )
 }
 
-fn sophon_download_info_url(package_info: &PackageInfo, edition: GameEdition) -> String {
+fn sophon_download_info_url(package_info: &PackageInfo, edition: &GameEdition) -> String {
     format!(
         "{}/downloader/sophon_chunk/api/getBuild?branch={}&password={}&package_id={}",
         edition.api_host(),
@@ -130,28 +130,28 @@ pub fn get_protobuf_from_url_raw(
 
 pub fn get_game_branches_info(
     client: &Client,
-    edition: GameEdition,
+    edition: &GameEdition,
 ) -> Result<GameBranches, SophonError> {
     api_get_request(client, get_game_branches_url(edition))
 }
 
 pub fn get_game_branches_info_raw(
     client: &Client,
-    edition: GameEdition,
+    edition: &GameEdition,
 ) -> Result<String, SophonError> {
     api_get_request_raw(client, get_game_branches_url(edition))
 }
 
 pub fn get_game_scan_info(
     client: &Client,
-    edition: GameEdition,
+    edition: &GameEdition,
 ) -> Result<GameScanInfo, SophonError> {
     api_get_request(client, get_game_scan_info_url(edition))
 }
 
 pub fn get_game_scan_info_raw(
     client: &Client,
-    edition: GameEdition,
+    edition: &GameEdition,
 ) -> Result<String, SophonError> {
     api_get_request_raw(client, get_game_scan_info_url(edition))
 }
@@ -159,7 +159,7 @@ pub fn get_game_scan_info_raw(
 pub fn get_game_download_sophon_info(
     client: &Client,
     package_info: &PackageInfo,
-    edition: GameEdition,
+    edition: &GameEdition,
 ) -> Result<SophonDownloads, SophonError> {
     let url = sophon_download_info_url(package_info, edition);
 
@@ -169,7 +169,7 @@ pub fn get_game_download_sophon_info(
 pub fn get_game_download_sophon_info_raw(
     client: &Client,
     package_info: &PackageInfo,
-    edition: GameEdition,
+    edition: &GameEdition,
 ) -> Result<String, SophonError> {
     let url = sophon_download_info_url(package_info, edition);
 
@@ -209,7 +209,7 @@ pub fn get_download_manifest_raw(
 pub fn get_game_diffs_sophon_info(
     client: &Client,
     package_info: &PackageInfo,
-    edition: GameEdition,
+    edition: &GameEdition,
 ) -> Result<SophonDiffs, SophonError> {
     let url = sophon_patch_info_url(package_info, edition);
 

@@ -260,12 +260,12 @@ fn dump_game_scan_info(
     if matches!(format, DumpFormat::Raw) {
         println!(
             "{}",
-            sophon_lib::api::get_game_scan_info_raw(client, edition).unwrap()
+            sophon_lib::api::get_game_scan_info_raw(client, &edition).unwrap()
         );
         return Ok(());
     }
 
-    let game_scan_info = sophon_lib::api::get_game_scan_info(client, edition).unwrap();
+    let game_scan_info = sophon_lib::api::get_game_scan_info(client, &edition).unwrap();
 
     let Some(game_id) = game else {
         dump_value_formatted(&game_scan_info, format);
@@ -322,12 +322,12 @@ fn dump_game_branches(
     if matches!(format, DumpFormat::Raw) {
         println!(
             "{}",
-            sophon_lib::api::get_game_branches_info_raw(client, edition).unwrap()
+            sophon_lib::api::get_game_branches_info_raw(client, &edition).unwrap()
         );
         return Ok(());
     }
 
-    let game_branches = sophon_lib::api::get_game_branches_info(client, edition).unwrap();
+    let game_branches = sophon_lib::api::get_game_branches_info(client, &edition).unwrap();
 
     let Some(game_id_or_biz) = game else {
         dump_value_formatted(&game_branches, format);
@@ -372,7 +372,7 @@ fn dump_package_info(
             "Unable to filter and extract package information with raw formatting".to_string(),
         );
     }
-    let game_branches = sophon_lib::api::get_game_branches_info(client, edition).unwrap();
+    let game_branches = sophon_lib::api::get_game_branches_info(client, &edition).unwrap();
 
     if latest {
         if let Some(latest_branch) =
@@ -407,7 +407,7 @@ fn dump_download_info(
     version: Option<String>,
     preload: bool,
 ) -> Result<(), String> {
-    let game_branches = sophon_lib::api::get_game_branches_info(client, edition).unwrap();
+    let game_branches = sophon_lib::api::get_game_branches_info(client, &edition).unwrap();
 
     let Some(package) = game_branches
         .get_packages_by_id_or_biz(&game, version.as_deref(), preload)
@@ -419,13 +419,13 @@ fn dump_download_info(
     if matches!(format, DumpFormat::Raw) {
         println!(
             "{}",
-            sophon_lib::api::get_game_download_sophon_info_raw(client, package, edition).unwrap()
+            sophon_lib::api::get_game_download_sophon_info_raw(client, package, &edition).unwrap()
         );
         return Ok(());
     }
 
     let download_info =
-        sophon_lib::api::get_game_download_sophon_info(client, package, edition).unwrap();
+        sophon_lib::api::get_game_download_sophon_info(client, package, &edition).unwrap();
 
     dump_value_formatted(&download_info, format);
 
@@ -441,7 +441,7 @@ fn dump_download_manifest(
     matching_field: String,
     preload: bool,
 ) -> Result<(), String> {
-    let game_branches = sophon_lib::api::get_game_branches_info(client, edition).unwrap();
+    let game_branches = sophon_lib::api::get_game_branches_info(client, &edition).unwrap();
 
     let Some(package) = game_branches
         .get_packages_by_id_or_biz(&game, version.as_deref(), preload)
@@ -451,7 +451,7 @@ fn dump_download_manifest(
     };
 
     let downloads =
-        sophon_lib::api::get_game_download_sophon_info(client, package, edition).unwrap();
+        sophon_lib::api::get_game_download_sophon_info(client, package, &edition).unwrap();
     let Some(download_info) = downloads
         .manifests
         .iter()
