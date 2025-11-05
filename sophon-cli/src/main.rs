@@ -5,17 +5,27 @@ use std::{
 };
 
 use clap::{Parser, Subcommand, ValueEnum};
+use indicatif::ProgressBar;
 use protobuf::MessageDyn;
 use protobuf_json_mapping::PrintOptions;
 use serde::Serialize;
 use sophon_lib::{
     GameEdition,
-    api::{get_download_manifest, get_download_manifest_raw},
-    reqwest::blocking::Client,
+    api::{
+        get_download_manifest, get_download_manifest_raw, get_game_branches_info,
+        get_game_download_sophon_info,
+    },
+    reqwest::{self, blocking::Client},
 };
 
 mod pretty_print;
 use pretty_print::PrettyPrint;
+use tracing_subscriber::{
+    Layer,
+    filter::{LevelFilter, filter_fn},
+    layer::SubscriberExt,
+    util::SubscriberInitExt,
+};
 
 #[derive(Debug, Parser)]
 #[command(version, about, long_about = None)]
@@ -25,7 +35,7 @@ struct Cli {
     edition: String,
 
     /// Cache directory
-    #[arg(short, long, default_value_os_t = PathBuf::from("~/.cache/sophon-tools/"))]
+    #[arg(short, long, default_value_os_t = std::env::home_dir().unwrap().join(".cache/sophon-tools"))]
     cache_dir: PathBuf,
 
     #[command(subcommand)]
@@ -46,6 +56,9 @@ enum Action {
         /// Game component(s) to download, defaults to `game` if unset
         #[arg(short, long)]
         component: Option<Vec<String>>,
+        /// Whether to use the preload
+        #[arg(short, long)]
+        preload: bool,
     },
 
     /// Update the game from one version to anotehr
@@ -176,6 +189,19 @@ fn is_piped() -> bool {
 }
 
 fn main() {
+    // Prepare stdout logger
+    let stdout = tracing_subscriber::fmt::layer()
+        .pretty()
+        .with_filter(LevelFilter::TRACE)
+        .with_filter(filter_fn(move |metadata| {
+            !metadata.target().contains("rustls")
+                && !metadata.target().contains("reqwest")
+                && !metadata.target().contains("h2")
+                && !metadata.target().contains("hyper_util")
+        }));
+
+    tracing_subscriber::registry().with(stdout).init();
+
     let cli_args = Cli::parse();
     let edition = GameEdition::from_str(&cli_args.edition).unwrap();
 
@@ -192,6 +218,24 @@ fn main() {
             }),
             target,
         ),
+        Action::Download {
+            game,
+            game_dir,
+            version,
+            component: components,
+            preload,
+        } => {
+            let matching_fields = components.unwrap_or_else(|| vec!["game".to_owned()]);
+            download(
+                edition,
+                game,
+                game_dir,
+                cli_args.cache_dir,
+                matching_fields,
+                version,
+                preload,
+            )
+        }
         _ => todo!(),
     };
 
@@ -199,6 +243,64 @@ fn main() {
         eprintln!("{err}");
         std::process::exit(1)
     }
+}
+
+fn download(
+    edition: GameEdition,
+    game: String,
+    game_dir: PathBuf,
+    temp_dir: PathBuf,
+    components: Vec<String>,
+    version: Option<String>,
+    preload: bool,
+) -> Result<(), String> {
+    let client = reqwest::blocking::Client::new();
+    let branches = get_game_branches_info(&client, &edition).expect("Failed to get game branches");
+    let package_info = if version.is_some() {
+        branches
+            .get_packages_by_id_or_biz(&game, version.as_deref(), preload)
+            .next()
+            .expect("Failed to find game branch")
+    } else {
+        branches
+            .get_package_by_id_or_biz_latest(&game, preload)
+            .expect("Failed to find game")
+    };
+    let downloads_info = get_game_download_sophon_info(&client, package_info, &edition)
+        .expect("Failed to get download info");
+
+    for download_info in downloads_info
+        .manifests
+        .iter()
+        .filter(|download_info| components.contains(&download_info.matching_field))
+    {
+        let total_download = download_info.stats.compressed_size.parse::<u64>().unwrap();
+
+        let progress_bar = ProgressBar::new(total_download);
+        let progress_bar_clone = progress_bar.clone();
+
+        let matching_field = download_info.matching_field.clone();
+
+        let downloader =
+            sophon_lib::installer::SophonInstaller::new(client.clone(), download_info, &temp_dir)
+                .expect("Failed to construct downloader")
+                .with_free_space_check(false);
+        if let Err(why) = downloader.install(&game_dir, 12, move |msg| match msg {
+            sophon_lib::installer::Update::DownloadingProgressBytes {
+                downloaded_bytes, ..
+            } => progress_bar_clone.set_position(downloaded_bytes),
+            sophon_lib::installer::Update::DownloadingFinished => progress_bar_clone
+                .finish_with_message(format!("Finished downloadign component {}", matching_field)),
+            _ => {}
+        }) {
+            progress_bar.abandon_with_message(format!(
+                "Failed to download component {}: {why:?}",
+                download_info.matching_field
+            ));
+        }
+    }
+
+    Ok(())
 }
 
 fn dump_api_data(
