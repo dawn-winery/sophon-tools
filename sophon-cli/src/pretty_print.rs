@@ -1,3 +1,4 @@
+use indicatif::HumanBytes;
 use sophon_lib::{
     api::schemas::{
         game_branches::{GameBranchInfo, GameBranches, PackageInfo},
@@ -6,14 +7,13 @@ use sophon_lib::{
             DownloadInfo, Manifest, ManifestStats, SophonDownloadInfo, SophonDownloads,
         },
     },
-    prettify_bytes,
     protos::SophonManifest::{
         SophonManifestAssetChunk, SophonManifestAssetProperty, SophonManifestProto,
     },
 };
 
 fn prettify_bytes_str(bytes_str: &str) -> String {
-    prettify_bytes(bytes_str.parse().expect("Valid numebr returned by the API"))
+    HumanBytes(bytes_str.parse().expect("Valid number returned by the API")).to_string()
 }
 
 pub trait PrettyPrint {
@@ -206,7 +206,7 @@ impl PrettyPrint for SophonManifestAssetProperty {
         } else {
             println!();
         }
-        println!("  Size: {}", prettify_bytes(self.AssetSize));
+        println!("  Size: {}", HumanBytes(self.AssetSize));
         println!("  MD5 hash: `{}`", self.AssetHashMd5);
         if !self.AssetChunks.is_empty() {
             println!("  Chunks:");
@@ -225,13 +225,13 @@ impl PrettyPrint for SophonManifestAssetChunk {
         println!("    Name: `{}`", self.ChunkName);
         println!(
             "    Compressed: size {}, MD5 hash `{}`, unknown field `{:#018x}`",
-            prettify_bytes(self.ChunkSize),
+            HumanBytes(self.ChunkSize),
             self.ChunkCompressedHashMd5,
             self.ChunkCompressedHashXxh
         );
         println!(
             "    Decompressed: size {}, MD5 hash `{}`",
-            prettify_bytes(self.ChunkSizeDecompressed),
+            HumanBytes(self.ChunkSizeDecompressed),
             self.ChunkDecompressedHashMd5
         );
         println!("    On-file offset: {:#x}", self.ChunkOnFileOffset);
