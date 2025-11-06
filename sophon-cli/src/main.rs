@@ -288,7 +288,7 @@ fn download(
             sophon_lib::installer::SophonInstaller::new(client.clone(), download_info, &temp_dir)
                 .expect("Failed to construct downloader")
                 .with_free_space_check(false);
-        if let Err(why) = downloader.install(&game_dir, 12, move |msg| match msg {
+        if let Err(why) = downloader.install(&game_dir, 4, move |msg| match msg {
             sophon_lib::installer::Update::DownloadingProgressBytes {
                 downloaded_bytes, ..
             } => progress_bar_clone.set_position(downloaded_bytes),
