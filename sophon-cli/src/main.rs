@@ -5,7 +5,7 @@ use std::{
 };
 
 use clap::{Parser, Subcommand, ValueEnum};
-use indicatif::ProgressBar;
+use indicatif::{ProgressBar, ProgressStyle};
 use protobuf::MessageDyn;
 use protobuf_json_mapping::PrintOptions;
 use serde::Serialize;
@@ -276,7 +276,10 @@ fn download(
     {
         let total_download = download_info.stats.compressed_size.parse::<u64>().unwrap();
 
-        let progress_bar = ProgressBar::new(total_download);
+        let progress_bar = ProgressBar::new(total_download)
+            .with_style(ProgressStyle::default_bar()
+                .template("{msg}\n{spinner} [{elapsed_precise}] [{wide_bar}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})")
+                .unwrap());
         let progress_bar_clone = progress_bar.clone();
 
         let matching_field = download_info.matching_field.clone();
