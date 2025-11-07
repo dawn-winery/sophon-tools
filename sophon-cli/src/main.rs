@@ -21,10 +21,7 @@ use sophon_lib::{
 mod pretty_print;
 use pretty_print::PrettyPrint;
 use tracing_subscriber::{
-    Layer,
-    filter::{LevelFilter, filter_fn},
-    layer::SubscriberExt,
-    util::SubscriberInitExt,
+    EnvFilter, Layer, filter::filter_fn, layer::SubscriberExt, util::SubscriberInitExt,
 };
 
 #[derive(Debug, Parser)]
@@ -188,19 +185,33 @@ fn is_piped() -> bool {
     atty::isnt(atty::Stream::Stdout)
 }
 
-fn main() {
-    // Prepare stdout logger
-    let stdout = tracing_subscriber::fmt::layer()
+fn init_tracing() {
+    let stdout_layer = tracing_subscriber::fmt::layer()
         .pretty()
-        .with_filter(LevelFilter::TRACE)
-        .with_filter(filter_fn(move |metadata| {
+        .with_filter(EnvFilter::from_default_env())
+        .with_filter(filter_fn(|metadata| {
             !metadata.target().contains("rustls")
                 && !metadata.target().contains("reqwest")
                 && !metadata.target().contains("h2")
                 && !metadata.target().contains("hyper_util")
         }));
 
-    tracing_subscriber::registry().with(stdout).init();
+    let registry = tracing_subscriber::registry().with(stdout_layer);
+
+    #[cfg(feature = "tracy")]
+    let registry = registry.with(
+        tracing_tracy::TracyLayer::default()
+            .with_filter(LevelFilter::DEBUG)
+            .with_filter(filter_fn(move |metadata| {
+                !metadata.target().contains("h2") && !metadata.target().contains("hyper_util")
+            })),
+    );
+
+    registry.init()
+}
+
+fn main() {
+    init_tracing();
 
     let cli_args = Cli::parse();
     let edition = GameEdition::from_str(&cli_args.edition).unwrap();
@@ -269,6 +280,14 @@ fn download(
     let downloads_info = get_game_download_sophon_info(&client, package_info, &edition)
         .expect("Failed to get download info");
 
+    if !dialoguer::Confirm::new()
+        .with_prompt("Proceed with download?")
+        .interact()
+        .unwrap()
+    {
+        std::process::exit(1)
+    }
+
     for download_info in downloads_info
         .manifests
         .iter()
@@ -288,10 +307,17 @@ fn download(
             sophon_lib::installer::SophonInstaller::new(client.clone(), download_info, &temp_dir)
                 .expect("Failed to construct downloader")
                 .with_free_space_check(false);
-        if let Err(why) = downloader.install(&game_dir, 4, move |msg| match msg {
+        if let Err(why) = downloader.install(&game_dir, 1, move |msg| match msg {
             sophon_lib::installer::Update::DownloadingProgressBytes {
                 downloaded_bytes, ..
-            } => progress_bar_clone.set_position(downloaded_bytes),
+            } => {
+                progress_bar_clone.set_position(downloaded_bytes);
+                #[cfg(feature = "tracy")]
+                {
+                    let rate = progress_bar_clone.per_sec();
+                    tracing_tracy::client::plot!("Downloading speed", rate);
+                }
+            }
             sophon_lib::installer::Update::DownloadingFinished => progress_bar_clone
                 .finish_with_message(format!("Finished downloadign component {}", matching_field)),
             _ => {}
