@@ -348,7 +348,7 @@ impl SophonInstaller {
         let download_size = self.download_info.stats.compressed_size.parse().unwrap();
         let installed_size = self.download_info.stats.uncompressed_size.parse().unwrap();
 
-        tracing::trace!("Checking free space availability");
+        tracing::info!("Checking free space availability");
 
         if self.check_free_space {
             (updater)(Update::CheckingFreeSpace(self.temp_folder.clone()));
@@ -373,7 +373,7 @@ impl SophonInstaller {
             Self::free_space_check(updater.clone(), output_folder, output_size_to_check)?;
         }
 
-        tracing::trace!("Downloading files");
+        tracing::info!("Downloading files");
 
         (updater)(Update::DownloadingStarted(self.temp_folder.clone()));
 
@@ -613,7 +613,7 @@ impl SophonInstaller {
 
     // instrumenting to maybe try and see how much time it takes to download and
     // save
-    #[tracing::instrument(level = "trace", err, skip_all, fields(chunk = task.chunk_manifest.ChunkName, download_size = task.chunk_file_info().0))]
+    #[tracing::instrument(level = "debug", err, skip_all, fields(chunk = task.chunk_manifest.ChunkName, download_size = task.chunk_file_info().0))]
     fn download_artifact(&self, task: &ChunkInfo) -> Result<(), SophonError> {
         let download_url = task.download_url();
         let out_file_path = self.tmp_artifact_file_path(task);
@@ -726,7 +726,7 @@ impl SophonInstaller {
         let _ = std::fs::remove_file(self.tmp_downloading_file_path(task));
     }
 
-    #[tracing::instrument(level = "trace", err, skip_all, fields(asset_name = task.file_manifest.AssetName, asset_hash = task.file_manifest.AssetHashMd5, asset_size = task.file_manifest.AssetSize))]
+    #[tracing::instrument(level = "debug", err, skip_all, fields(asset_name = task.file_manifest.AssetName, asset_hash = task.file_manifest.AssetHashMd5, asset_size = task.file_manifest.AssetSize))]
     fn file_assembly(
         &self,
         tmp_file: &Path,
