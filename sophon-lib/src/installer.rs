@@ -433,7 +433,7 @@ impl SophonInstaller {
                 retries_queue: &retries_queue,
             };
             scope.spawn(|| {
-                let _span = tracing::trace_span!("Download thread").entered();
+                let _span = tracing::debug_span!("Download thread").entered();
                 (updater_clone)(Update::DownloadingStarted(self.temp_folder.clone()));
                 self.artifact_download_loop(
                     download_queue,
