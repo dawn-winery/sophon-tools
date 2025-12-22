@@ -418,6 +418,9 @@ impl SophonPatcher {
         updater: impl Fn(Update) + Clone + Send + 'static,
     ) -> Result<(), SophonError> {
         if self.check_free_space {
+            tracing::info!("Checking free space availability");
+            (updater)(Update::CheckingFreeSpace(self.temp_folder.clone()));
+
             let download_bytes = self
                 .diff_info
                 .stats
@@ -554,6 +557,9 @@ impl SophonPatcher {
         updater: impl Fn(Update) + Clone + Send + 'static,
     ) -> Result<(), SophonError> {
         if self.check_free_space {
+            tracing::info!("Checking free space availability");
+            (updater)(Update::CheckingFreeSpace(self.temp_folder.clone()));
+
             let download_bytes = self
                 .diff_info
                 .stats

@@ -345,13 +345,12 @@ impl SophonInstaller {
         thread_count: usize,
         updater: impl Fn(Update) + Clone + Send + 'static,
     ) -> Result<(), SophonError> {
-        let download_size = self.download_info.stats.compressed_size.parse().unwrap();
-        let installed_size = self.download_info.stats.uncompressed_size.parse().unwrap();
-
-        tracing::info!("Checking free space availability");
-
         if self.check_free_space {
+            tracing::info!("Checking free space availability");
             (updater)(Update::CheckingFreeSpace(self.temp_folder.clone()));
+
+            let download_size = self.download_info.stats.compressed_size.parse().unwrap();
+            let installed_size = self.download_info.stats.uncompressed_size.parse().unwrap();
 
             Self::free_space_check(updater.clone(), &self.temp_folder, download_size)?;
 
@@ -467,6 +466,7 @@ impl SophonInstaller {
         updater: impl Fn(Update) + Clone + Send + 'static,
     ) -> Result<(), SophonError> {
         if self.check_free_space {
+            tracing::info!("Checking free space availability");
             (updater)(Update::CheckingFreeSpace(self.temp_folder.clone()));
 
             let download_size = self.download_info.stats.compressed_size.parse().unwrap();
