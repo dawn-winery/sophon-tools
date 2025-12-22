@@ -10,7 +10,6 @@ use std::{
 
 use crossbeam_deque::{Injector, Worker};
 use reqwest::{blocking::Client, header::RANGE};
-use serde::{Deserialize, Serialize};
 
 use super::{
     ArtifactDownloadState, DEFAULT_CHUNK_RETRIES, DownloadQueue, SophonError, ThreadQueue,
@@ -25,7 +24,7 @@ use super::{
     utils::version::Version,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug)]
 pub enum Update {
     CheckingFreeSpace(PathBuf),
 
@@ -748,10 +747,11 @@ impl SophonPatcher {
         #[allow(clippy::collapsible_if, reason = "only collapsible in Rust >= 1.88.0")]
         if let Some(length) = resp.content_length() {
             if length != task.patch_chunk.PatchLength {
-                return Err(SophonError::IoError(format!(
-                    "Content length mismatch: expected {}, got {length}",
-                    task.patch_chunk.PatchLength
-                )));
+                return Err(SophonError::DownloadSizeMismatch {
+                    name: "Content Length",
+                    expected: task.patch_chunk.PatchLength,
+                    got: length,
+                });
             }
         }
 
@@ -762,10 +762,11 @@ impl SophonPatcher {
         out_file.flush()?;
 
         if written != task.patch_chunk.PatchLength {
-            return Err(SophonError::IoError(format!(
-                "Written data length mistamch, expected {}, got {written}",
-                task.patch_chunk.PatchLength
-            )));
+            return Err(SophonError::DownloadSizeMismatch {
+                name: "Written data",
+                expected: task.patch_chunk.PatchLength,
+                got: written,
+            });
         }
 
         Ok(())
@@ -1024,8 +1025,6 @@ impl SophonPatcher {
                     available: space,
                 };
 
-                (updater)(Update::DownloadingError(err.clone()));
-
                 Err(err)
             }
 
@@ -1033,10 +1032,8 @@ impl SophonPatcher {
                 let err = if ioerr.kind() == std::io::ErrorKind::NotFound {
                     SophonError::PathNotMounted(path.as_ref().to_owned())
                 } else {
-                    SophonError::IoError(ioerr.to_string())
+                    ioerr.into()
                 };
-
-                (updater)(Update::DownloadingError(err.clone()));
 
                 Err(err)
             }

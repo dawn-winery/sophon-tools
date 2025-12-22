@@ -1,4 +1,6 @@
 use std::{
+    error::Error,
+    fmt::Write,
     fs::File,
     io::{Read, Seek, SeekFrom},
     iter::Peekable,
@@ -10,7 +12,6 @@ use std::{
 use crossbeam_deque::{Injector, Steal, Stealer, Worker};
 use md5::{Digest, Md5};
 pub use reqwest;
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 pub mod api;
@@ -295,7 +296,7 @@ fn file_region_hash_md5(file: &mut File, offset: u64, length: u64) -> std::io::R
 //   idea but simpler, especially useful for I/O errors.
 // - Cull unused installer/update messages
 
-#[derive(Error, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Error, Debug)]
 pub enum SophonError {
     /// Specified downloading path is not available in system
     ///
@@ -312,12 +313,20 @@ pub enum SophonError {
     },
 
     /// Failed to create or open output file
-    #[error("Failed to create output file {path:?}: {message}")]
-    OutputFileError { path: PathBuf, message: String },
+    #[error("Failed to create output file {path:?} caused by {source}", source = OptionDisplay {value: self.source(), default: "<source not specified>"})]
+    OutputFileError {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
 
     /// Failed to create or open temporary output file
-    #[error("Failed to create temporary output file {path:?}: {message}")]
-    TempFileError { path: PathBuf, message: String },
+    #[error("Failed to create temporary output file {path:?} caused by {source}", source = OptionDisplay {value: self.source(), default: "<source not specified>"})]
+    TempFileError {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
 
     /// Couldn't get metadata of existing output file
     ///
@@ -326,8 +335,8 @@ pub enum SophonError {
     OutputFileMetadataError { path: PathBuf, message: String },
 
     /// reqwest error
-    #[error("reqwest error: {0}")]
-    Reqwest(String),
+    #[error("Reqwest error: {0} caused by {source}", source = OptionDisplay {value: self.source(), default: "<source not specified>"})]
+    Reqwest(#[from] reqwest::Error),
 
     #[error("Chunk hash mismatch: expected `{expected}`, got `{got}`")]
     ChunkHashMismatch { expected: String, got: String },
@@ -340,25 +349,38 @@ pub enum SophonError {
     },
 
     #[error("IO error: {0}")]
-    IoError(String),
+    IoError(#[from] std::io::Error),
 
     #[error("Failed to download chunk {0}, out of retries")]
     ChunkDownloadFailed(String),
 
     #[error("Failed to apply hdiff patch: {0}")]
     PatchingError(String),
+
+    #[error(
+        "Failed to download chunk/patch, {name} size mismatch. Expected {expected}, got {got}."
+    )]
+    DownloadSizeMismatch {
+        name: &'static str,
+        expected: u64,
+        got: u64,
+    },
 }
 
-impl From<reqwest::Error> for SophonError {
-    #[inline(always)]
-    fn from(error: reqwest::Error) -> Self {
-        Self::Reqwest(error.to_string())
-    }
+struct OptionDisplay<T, D> {
+    value: Option<T>,
+    default: D,
 }
 
-impl From<std::io::Error> for SophonError {
-    #[inline(always)]
-    fn from(value: std::io::Error) -> Self {
-        Self::IoError(value.to_string())
+impl<T, D> std::fmt::Display for OptionDisplay<T, D>
+where
+    T: std::fmt::Display,
+    D: std::fmt::Display,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.value {
+            Some(v) => std::fmt::Display::fmt(v, f),
+            None => std::fmt::Display::fmt(&self.default, f),
+        }
     }
 }

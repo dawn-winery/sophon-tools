@@ -7,7 +7,6 @@ use std::{
 };
 
 use reqwest::blocking::Client;
-use serde::{Deserialize, Serialize};
 
 use super::{
     SophonError,
@@ -22,7 +21,7 @@ use super::{
     },
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug)]
 pub enum Update {
     VerifyingStarted,
 
@@ -344,21 +343,21 @@ impl SophonRepairer {
             file_info.AssetSize,
             &file_info.AssetHashMd5,
         )? {
-            ensure_parent(&out_file_path).map_err(|e| SophonError::TempFileError {
+            ensure_parent(&out_file_path).map_err(|err| SophonError::TempFileError {
                 path: temp_file_path.clone(),
-                message: e.to_string(),
+                source: err,
             })?;
 
             std::fs::copy(&temp_file_path, &out_file_path).map_err(|err| {
                 SophonError::OutputFileError {
                     path: temp_file_path.clone(),
-                    message: err.to_string(),
+                    source: err,
                 }
             })?;
 
             std::fs::remove_file(&temp_file_path).map_err(|err| SophonError::OutputFileError {
                 path: temp_file_path.clone(),
-                message: err.to_string(),
+                source: err,
             })?;
 
             Ok(())

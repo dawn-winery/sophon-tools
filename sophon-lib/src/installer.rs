@@ -9,7 +9,6 @@ use std::{
 
 use crossbeam_deque::{Injector, Worker};
 use reqwest::blocking::Client;
-use serde::{Deserialize, Serialize};
 
 use super::{
     ArtifactDownloadState, DownloadQueue, SophonError, ThreadQueue,
@@ -23,7 +22,7 @@ use super::{
     },
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug)]
 pub enum Update {
     CheckingFreeSpace(PathBuf),
 
@@ -626,9 +625,11 @@ impl SophonInstaller {
         #[allow(clippy::collapsible_if, reason = "only collapsible in Rust >= 1.88.0")]
         if let Some(length) = resp.content_length() {
             if length != chunk_size {
-                return Err(SophonError::IoError(format!(
-                    "Content length mismatch: expected {chunk_size}, got {length}"
-                )));
+                return Err(SophonError::DownloadSizeMismatch {
+                    name: "Content Length",
+                    expected: chunk_size,
+                    got: length,
+                });
             }
         }
 
@@ -636,9 +637,11 @@ impl SophonInstaller {
 
         let recvd = bytes.len() as u64;
         if recvd != chunk_size {
-            return Err(SophonError::IoError(format!(
-                "Request data length mismatch, expected {chunk_size}, got {recvd}"
-            )));
+            return Err(SophonError::DownloadSizeMismatch {
+                name: "Request Data",
+                expected: chunk_size,
+                got: recvd,
+            });
         }
 
         std::fs::write(&out_file_path, bytes)?;
@@ -757,7 +760,7 @@ impl SophonInstaller {
                 );
                 return Err(SophonError::OutputFileError {
                     path: tmp_file.to_owned(),
-                    message: "Chunk written size mismatch".to_owned(),
+                    source: std::io::Error::other("Chunk written size mismatch"),
                 });
             }
         }
@@ -835,8 +838,6 @@ impl SophonInstaller {
                     available: space,
                 };
 
-                (updater)(Update::DownloadingError(err.clone()));
-
                 Err(err)
             }
 
@@ -844,10 +845,8 @@ impl SophonInstaller {
                 let err = if ioerr.kind() == std::io::ErrorKind::NotFound {
                     SophonError::PathNotMounted(path.as_ref().to_owned())
                 } else {
-                    SophonError::IoError(ioerr.to_string())
+                    ioerr.into()
                 };
-
-                (updater)(Update::DownloadingError(err.clone()));
 
                 Err(err)
             }
