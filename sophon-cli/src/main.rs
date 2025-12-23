@@ -207,7 +207,7 @@ fn init_tracing() {
     #[cfg(feature = "tracy")]
     let registry = registry.with(
         tracing_tracy::TracyLayer::default()
-            .with_filter(LevelFilter::DEBUG)
+            .with_filter(tracing_subscriber::filter::LevelFilter::DEBUG)
             .with_filter(filter_fn(move |metadata| {
                 !metadata.target().contains("h2") && !metadata.target().contains("hyper_util")
             })),
