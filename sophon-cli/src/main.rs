@@ -56,6 +56,9 @@ enum Action {
         /// Whether to use the preload
         #[arg(short, long)]
         preload: bool,
+        /// Skip checking for free space
+        #[arg(long)]
+        skip_free_space_check: bool,
     },
 
     /// Update the game from one version to anotehr
@@ -65,14 +68,17 @@ enum Action {
         /// Path to game directory
         game_dir: PathBuf,
         /// Currently installed version to update from
-        #[arg(short, long)]
-        from_version: String,
+        #[arg(long)]
+        from: String,
         /// Omit to use latest
-        #[arg(short, long)]
-        to_version: Option<String>,
+        #[arg(long)]
+        to: Option<String>,
         /// Game component(s) to update, defaults to `game` if unset
         #[arg(short, long)]
         component: Option<Vec<String>>,
+        /// Skip checking for free space
+        #[arg(long)]
+        skip_free_space_check: bool,
     },
 
     /// Check and repair game files
@@ -235,6 +241,7 @@ fn main() {
             version,
             component: components,
             preload,
+            skip_free_space_check,
         } => {
             let matching_fields = components.unwrap_or_else(|| vec!["game".to_owned()]);
             download(
@@ -245,6 +252,7 @@ fn main() {
                 matching_fields,
                 version,
                 preload,
+                skip_free_space_check,
             )
         }
         _ => todo!(),
@@ -264,6 +272,7 @@ fn download(
     components: Vec<String>,
     version: Option<String>,
     preload: bool,
+    skip_free_space_check: bool,
 ) -> Result<(), String> {
     let client = reqwest::blocking::Client::new();
     let branches = get_game_branches_info(&client, &edition).expect("Failed to get game branches");
@@ -306,15 +315,15 @@ fn download(
         let downloader =
             sophon_lib::installer::SophonInstaller::new(client.clone(), download_info, &temp_dir)
                 .expect("Failed to construct downloader")
-                .with_free_space_check(false);
-        if let Err(why) = downloader.install(&game_dir, 1, move |msg| match msg {
+                .with_free_space_check(!skip_free_space_check);
+        if let Err(why) = downloader.install(&game_dir, 1, |msg| match msg {
             sophon_lib::installer::Update::DownloadingProgressBytes {
                 downloaded_bytes, ..
             } => {
-                progress_bar_clone.set_position(downloaded_bytes);
+                progress_bar.set_position(downloaded_bytes);
                 #[cfg(feature = "tracy")]
                 {
-                    let rate = progress_bar_clone.per_sec();
+                    let rate = progress_bar.per_sec();
                     tracing_tracy::client::plot!("Downloading speed", rate);
                 }
             }
