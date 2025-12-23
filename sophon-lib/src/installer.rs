@@ -342,7 +342,7 @@ impl SophonInstaller {
         &self,
         output_folder: &Path,
         thread_count: usize,
-        updater: impl Fn(Update) + Clone + Send + 'static,
+        updater: impl Fn(Update) + Clone + Send,
     ) -> Result<(), SophonError> {
         if self.check_free_space {
             tracing::info!("Checking free space availability");
@@ -386,7 +386,7 @@ impl SophonInstaller {
         &self,
         thread_count: usize,
         output_folder: impl AsRef<Path>,
-        updater: impl Fn(Update) + Clone + Send + 'static,
+        updater: impl Fn(Update) + Clone + Send,
     ) {
         tracing::debug!("Starting mutlithreaded download and install");
 
@@ -822,7 +822,7 @@ impl SophonInstaller {
     }
 
     fn free_space_check(
-        updater: impl Fn(Update) + Clone + Send + 'static,
+        updater: impl Fn(Update) + Clone + Send,
         path: impl AsRef<Path>,
         required: u64,
     ) -> Result<(), SophonError> {
