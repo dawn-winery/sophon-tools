@@ -274,7 +274,14 @@ fn download(
     preload: bool,
     skip_free_space_check: bool,
 ) -> Result<(), String> {
-    let client = reqwest::blocking::Client::new();
+    // doing this conversion because the blocking client doesn't have these options
+    let client = Into::<reqwest::blocking::ClientBuilder>::into(
+        reqwest::ClientBuilder::new()
+            .http2_adaptive_window(true)
+            .http2_keep_alive_while_idle(true),
+    )
+    .build()
+    .unwrap();
     let branches = get_game_branches_info(&client, &edition).expect("Failed to get game branches");
     let package_info = if version.is_some() {
         branches
