@@ -667,6 +667,8 @@ impl SophonInstaller {
         Ok(())
     }
 
+    // TODO: adjust chunk location and downlaod logic to respect chunks being on disk for
+    // predownload
     fn predownload_multithreaded(
         &self,
         thread_count: usize,
