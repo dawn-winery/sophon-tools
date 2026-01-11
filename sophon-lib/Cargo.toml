@@ -19,6 +19,8 @@ md-5 = "0.10.6"
 tracing = "0.1.41"
 fs2 = "0.4.3"
 crossbeam-channel = "0.5.15"
+bytes = "1.11.0"
+fs_extra = "1.3.0"
 
 [build-dependencies]
 protobuf-codegen = { version = "3.7.2" }

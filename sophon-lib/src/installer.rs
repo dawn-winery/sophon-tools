@@ -1,17 +1,20 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     fs::{File, OpenOptions},
     io::{Seek, Write},
+    num::NonZeroUsize,
+    os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
-    sync::{Condvar, Mutex, MutexGuard, atomic::AtomicU64},
+    sync::{Mutex, atomic::AtomicU64},
     time::Duration,
 };
 
-use crossbeam_deque::{Injector, Worker};
+use bytes::Bytes;
+use crossbeam_channel::{Receiver, SendTimeoutError, Sender};
 use reqwest::blocking::Client;
 
 use super::{
-    ArtifactDownloadState, DownloadQueue, SophonError, ThreadQueue,
+    SophonError,
     api::{
         get_download_manifest,
         schemas::sophon_manifests::{DownloadInfo, SophonDownloadInfo},
@@ -21,13 +24,26 @@ use super::{
         SophonManifestAssetChunk, SophonManifestAssetProperty, SophonManifestProto,
     },
 };
+use crate::{DEFAULT_CHUNK_RETRIES, divide_threads, ensure_parent, file_region_hash_md5};
 
 #[derive(Debug)]
 pub enum Update {
     CheckingFreeSpace(PathBuf),
 
+    CheckingFiles {
+        total_files: u64,
+    },
+    CheckingFilesProgress {
+        passed: u64,
+        total: u64,
+    },
+
     /// `(temp path)`
-    DownloadingStarted(PathBuf),
+    DownloadingStarted {
+        location: PathBuf,
+        total_bytes: u64,
+        total_files: u64,
+    },
 
     DownloadingProgressBytes {
         downloaded_bytes: u64,
@@ -40,6 +56,7 @@ pub enum Update {
     },
 
     DownloadingFinished,
+
     DownloadingError(SophonError),
 
     FileHashCheckFailed(PathBuf),
@@ -49,6 +66,7 @@ pub enum Update {
 struct ChunkInfo<'a> {
     chunk_manifest: &'a SophonManifestAssetChunk,
     download_info: &'a DownloadInfo,
+    retries_left: u8,
 }
 
 impl ChunkInfo<'_> {
@@ -94,24 +112,6 @@ struct FileInfo<'a> {
 }
 
 impl<'a> FileInfo<'a> {
-    fn is_file_ready(&self, states: &Mutex<HashMap<&String, ArtifactDownloadState>>) -> bool {
-        let states_lock = states.lock().unwrap();
-        for SophonManifestAssetChunk {
-            ChunkName: chunk_id,
-            ..
-        } in &self.file_manifest.AssetChunks
-        {
-            match states_lock.get(chunk_id) {
-                Some(ArtifactDownloadState::Failed)
-                | Some(ArtifactDownloadState::Downloading(_)) => {
-                    return false;
-                }
-                None | Some(ArtifactDownloadState::Downloaded) => {}
-            }
-        }
-        true
-    }
-
     /// Path to a target file on filesystem
     fn target_file_path(&self, game_dir: impl AsRef<Path>) -> PathBuf {
         game_dir.as_ref().join(&self.file_manifest.AssetName)
@@ -133,6 +133,7 @@ impl<'a> FileInfo<'a> {
             .map(|chunk_manifest| ChunkInfo {
                 chunk_manifest,
                 download_info: self.download_info,
+                retries_left: DEFAULT_CHUNK_RETRIES,
             })
     }
 }
@@ -144,8 +145,6 @@ struct DownloadIndex<'a> {
     total_bytes: u64,
     downloaded_bytes: AtomicU64,
     downloaded_files: AtomicU64,
-    download_states: Mutex<HashMap<&'a String, ArtifactDownloadState>>,
-    download_states_notifier: Condvar,
 }
 
 impl<'a> DownloadIndex<'a> {
@@ -171,12 +170,6 @@ impl<'a> DownloadIndex<'a> {
         }
 
         Self {
-            download_states: Mutex::new(HashMap::from_iter(
-                chunks_info
-                    .keys()
-                    .map(|id| (*id, ArtifactDownloadState::default())),
-            )),
-            download_states_notifier: Condvar::new(),
             total_bytes: chunks_info.iter().map(|(_, (_, size))| size).sum(),
             chunks_used_in: chunks_info
                 .into_iter()
@@ -193,6 +186,27 @@ impl<'a> DownloadIndex<'a> {
         self.files.len() as u64
     }
 
+    fn add_msg_files(&self, amount: u64) -> Update {
+        Update::DownloadingProgressFiles {
+            downloaded_files: self
+                .downloaded_files
+                .fetch_add(amount, std::sync::atomic::Ordering::Relaxed)
+                + amount,
+            total_files: self.total_files(),
+        }
+    }
+
+    fn add_msg_bytes(&self, amount: u64) -> Update {
+        Update::DownloadingProgressBytes {
+            downloaded_bytes: self
+                .downloaded_bytes
+                .fetch_add(amount, std::sync::atomic::Ordering::Relaxed)
+                + amount,
+            total_bytes: self.total_bytes,
+        }
+    }
+
+    #[deprecated]
     fn msg_files(&self) -> Update {
         Update::DownloadingProgressFiles {
             downloaded_files: self
@@ -202,6 +216,7 @@ impl<'a> DownloadIndex<'a> {
         }
     }
 
+    #[deprecated]
     fn msg_bytes(&self) -> Update {
         Update::DownloadingProgressBytes {
             downloaded_bytes: self
@@ -211,11 +226,13 @@ impl<'a> DownloadIndex<'a> {
         }
     }
 
+    #[deprecated]
     fn add_files(&self, amount: u64) {
         self.downloaded_files
             .fetch_add(amount, std::sync::atomic::Ordering::SeqCst);
     }
 
+    #[deprecated]
     fn add_bytes(&self, amount: u64) {
         self.downloaded_bytes
             .fetch_add(amount, std::sync::atomic::Ordering::SeqCst);
@@ -226,99 +243,154 @@ impl<'a> DownloadIndex<'a> {
     /// updater. Refer to [Self::count_chunk_fail] for more info.
     fn process_download_fail<'b>(
         &self,
-        chunk: ChunkInfo<'a>,
-        retries_queue: &'b Injector<ChunkInfo<'a>>,
+        mut chunk: ChunkInfo<'a>,
+        retries_queue: &'b Mutex<VecDeque<ChunkInfo<'a>>>,
         updater: impl Fn(Update) + 'b,
     ) {
-        match self.count_download_fail(&chunk.chunk_manifest.ChunkName) {
-            Ok(()) => retries_queue.push(chunk),
-            Err(msg) => (updater)(msg),
-        }
-    }
-
-    /// A download attempt or check failed, decrement the retry count or report
-    /// the chunk as completely failed.
-    /// The error type is a message to emit in case of a completely faield chunk
-    /// download. If this returns Ok, push the chunk on the retries queue.
-    /// If this returns Err, emit the fail message for this chunk and stop
-    /// retrying.
-    fn count_download_fail(&self, artifact_name: &'a String) -> Result<(), Update> {
-        let mut states_lock = self
-            .download_states
-            .lock()
-            .expect("Something poisoned the lock");
-        let chunk_state = states_lock
-            .get_mut(artifact_name)
-            .expect("Attempt to count fail of an artifact that was not in the states map");
-        match chunk_state {
-            ArtifactDownloadState::Downloading(0) => {
-                *chunk_state = ArtifactDownloadState::Failed;
-                Err(Update::DownloadingError(SophonError::ChunkDownloadFailed(
-                    artifact_name.clone(),
-                )))
-            }
-            ArtifactDownloadState::Downloading(n) => {
-                *n -= 1;
-                Ok(())
-            }
-            _ => {
-                unreachable!(
-                    "The artifact download can't fail after the artifact is already downloaded or failed"
-                )
-            }
-        }
-    }
-
-    fn artifact_success(&self, artifact_name: &'a String) {
-        let mut guard = self
-            .download_states
-            .lock()
-            .expect("Something poisoned the lock");
-        *guard
-            .get_mut(artifact_name)
-            .expect("All artifacts must be added to the state tracker") =
-            ArtifactDownloadState::Downloaded;
-    }
-
-    /// Returns true to continue downloading, false to exit the loop.
-    /// if anything is still downloading, uses the [`Condvar`] to wait until the
-    /// states are updated by patching/checking threads and checks again.
-    fn wait_downloading(&self) -> bool {
-        let mut guard = self
-            .download_states
-            .lock()
-            .expect("Something poisoned the mutex");
-        if Self::any_downloading(&guard) {
-            // unlocks the mutex during wait, see [`Condvar::wait_timeout`]
-            // timeout 10s
-            guard = self
-                .download_states_notifier
-                .wait_timeout(guard, Duration::from_secs(10))
-                .expect("Something poisoned the mutex")
-                .0;
-            Self::any_downloading(&guard)
+        if chunk.retries_left == 0 {
+            (updater)(Update::DownloadingError(SophonError::ChunkDownloadFailed(
+                chunk.chunk_manifest.ChunkName.clone(),
+            )))
         } else {
-            tracing::debug!("All artifacts marked as downloaded or failed, breaking the loop");
-            false
+            chunk.retries_left -= 1;
+            let Ok(mut queue_lock) = retries_queue.lock() else {
+                tracing::error!("The queue lock has been poisoned");
+                return;
+            };
+            queue_lock.push_back(chunk);
         }
-    }
-
-    fn any_downloading(guard: &MutexGuard<HashMap<&'a String, ArtifactDownloadState>>) -> bool {
-        guard
-            .values()
-            .any(|state| matches!(state, ArtifactDownloadState::Downloading(_)))
     }
 }
 
-type DownloadChunkQueue<'a, 'b, I> = DownloadQueue<'b, ChunkInfo<'a>, I>;
+#[derive(Debug)]
+enum ChunkLocation {
+    Memory(Bytes),
+    Filesystem(PathBuf),
+}
+
+impl ChunkLocation {
+    fn check(&self, exp_size: u64, exp_hash: &str) -> std::io::Result<bool> {
+        #[allow(clippy::collapsible_if, reason = "only collapsible in Rust >= 1.88.0")]
+        if let Self::Filesystem(path) = self {
+            if !path.exists() {
+                return Ok(false);
+            }
+        }
+        if self.size()? != exp_size {
+            return Ok(false);
+        }
+        if self.hash()? != exp_hash {
+            return Ok(false);
+        }
+        Ok(true)
+    }
+
+    fn size(&self) -> std::io::Result<u64> {
+        match self {
+            Self::Filesystem(path) => Ok(std::fs::metadata(path)?.size()),
+            Self::Memory(buf) => Ok(buf.len() as u64),
+        }
+    }
+
+    fn hash(&self) -> std::io::Result<String> {
+        match self {
+            Self::Filesystem(path) => file_md5_hash_str(path),
+            Self::Memory(buf) => Ok(md5_hash_str(buf)),
+        }
+    }
+
+    fn cleanup(&self) {
+        if let Self::Filesystem(path) = self {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+}
+
+/// Custom [Sender] wrapper that tracks how big the total size of enqueued chunks is
+#[derive(Debug, Clone)]
+struct ChunkQueueSender<'a, 'b> {
+    sender: Sender<(ChunkLocation, ChunkInfo<'a>)>,
+    memory_limit: Option<(u64, &'b AtomicU64)>,
+}
+
+impl<'a> ChunkQueueSender<'a, '_> {
+    /// The timeout is only used for the [Sender::send_timeout] call, ignored while waiting for
+    /// "space" in queue
+    fn send_timeout(
+        &self,
+        chunk: (ChunkLocation, ChunkInfo<'a>),
+        timeout: Duration,
+    ) -> Result<(), SendTimeoutError<(ChunkLocation, ChunkInfo<'a>)>> {
+        let chunk_size = if self.memory_limit.is_some() {
+            Some(chunk.0.size().unwrap_or_else(|_| {
+                // fails only in case of filesystem-backed chunk. Just try to read from chunk
+                // info.
+                chunk.1.chunk_file_info().0
+            }))
+        } else {
+            None
+        };
+        while !self.has_space(&chunk.0, &chunk.1) {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        self.sender.send_timeout(chunk, timeout)?;
+        if let Some((_, counter)) = self.memory_limit {
+            counter.fetch_add(
+                chunk_size.expect("self.memory_limit is Some, as checked earlier"),
+                std::sync::atomic::Ordering::Release,
+            );
+        }
+        Ok(())
+    }
+
+    fn has_space(&self, loc: &ChunkLocation, chunk_info: &ChunkInfo<'a>) -> bool {
+        let Some((limit, counter)) = self.memory_limit else {
+            return true;
+        };
+        let chunk_size = loc.size().unwrap_or_else(|_| {
+            // fails only in case of filesystem-backed chunk. Just try to read from chunk
+            // info.
+            chunk_info.chunk_file_info().0
+        });
+        let queue_size = counter.load(std::sync::atomic::Ordering::Acquire);
+        queue_size + chunk_size <= limit
+    }
+}
+
+/// Custom [Receiver] wrapper that tracks how big the total size of enqueued chunks is
+#[derive(Debug, Clone)]
+struct ChunkQueueReceiver<'a, 'b> {
+    receiver: Receiver<(ChunkLocation, ChunkInfo<'a>)>,
+    memory_limit: Option<(u64, &'b AtomicU64)>,
+}
+
+impl<'a> ChunkQueueReceiver<'a, '_> {
+    fn recv(&self) -> Result<(ChunkLocation, ChunkInfo<'a>), crossbeam_channel::RecvError> {
+        self.receiver.recv().map(|(loc, chunk_info)| {
+            if let Some((_, counter)) = self.memory_limit {
+                let chunk_size = loc.size().unwrap_or_else(|_| {
+                    // fails only in case of filesystem-backed chunk. Just try to read from chunk
+                    // info.
+                    chunk_info.chunk_file_info().0
+                });
+                counter.fetch_sub(chunk_size, std::sync::atomic::Ordering::Release);
+            }
+            (loc, chunk_info)
+        })
+    }
+}
 
 #[derive(Debug)]
 pub struct SophonInstaller {
-    pub client: reqwest::blocking::Client,
     pub manifest: SophonManifestProto,
     pub download_info: SophonDownloadInfo,
-    pub check_free_space: bool,
+    pub client: reqwest::blocking::Client,
     pub temp_folder: PathBuf,
+    pub chunks_queue_data_limit: Option<u64>,
+    pub check_free_space: bool,
+    pub inplace: bool,
+    pub chunks_in_mem: bool,
+    pub skip_download_repair: bool,
 }
 
 impl SophonInstaller {
@@ -333,8 +405,12 @@ impl SophonInstaller {
             client,
             manifest,
             download_info: download_info.clone(),
-            check_free_space: true,
             temp_folder: temp_dir.as_ref().to_owned(),
+            check_free_space: true,
+            inplace: true,
+            chunks_in_mem: true,
+            chunks_queue_data_limit: Some(512 * 1024 * 1024),
+            skip_download_repair: false,
         })
     }
 
@@ -346,45 +422,77 @@ impl SophonInstaller {
     ) -> Result<(), SophonError> {
         if self.check_free_space {
             tracing::info!("Checking free space availability");
+
+            let installed_size: u64 = self.download_info.stats.uncompressed_size.parse().unwrap();
+
             (updater)(Update::CheckingFreeSpace(self.temp_folder.clone()));
 
-            let download_size = self.download_info.stats.compressed_size.parse().unwrap();
-            let installed_size = self.download_info.stats.uncompressed_size.parse().unwrap();
-
-            Self::free_space_check(updater.clone(), &self.temp_folder, download_size)?;
+            #[allow(clippy::collapsible_if, reason = "only collapsible in Rust >= 1.88.0")]
+            if !self.chunks_in_mem {
+                if let Some(queue_limit) = self.chunks_queue_data_limit {
+                    Self::free_space_check(&updater, &self.temp_folder, queue_limit)?;
+                }
+            }
 
             (updater)(Update::CheckingFreeSpace(output_folder.to_owned()));
 
-            // TODO: completely remove after changing the caching logic.
-            // Retain temporary files only for as long as they need to be used.
-            /*
-            let output_size_to_check = if free_space::is_same_disk(&self.temp_folder, output_folder)
-            {
-                download_size + installed_size
-            } else {
-                installed_size
-            };
-            */
+            let already_installed_size = fs_extra::dir::get_size(output_folder)?;
 
-            let output_size_to_check = installed_size;
+            let size_to_check = installed_size - already_installed_size;
 
-            Self::free_space_check(updater.clone(), output_folder, output_size_to_check)?;
+            Self::free_space_check(&updater, output_folder, size_to_check)?;
         }
 
         tracing::info!("Downloading files");
 
-        (updater)(Update::DownloadingStarted(self.temp_folder.clone()));
-
         self.create_temp_dirs()?;
 
-        self.install_multithreaded(thread_count, output_folder, updater.clone());
+        let (download_threads, assembly_threads) = divide_threads(thread_count)?;
+
+        self.install_multithreaded(
+            download_threads,
+            assembly_threads,
+            output_folder,
+            updater.clone(),
+        );
 
         Ok(())
     }
 
+    fn check_file_region(
+        &self,
+        game_folder: &Path,
+        chunk_info: &ChunkInfo<'_>,
+        file_info: &FileInfo<'_>,
+    ) -> std::io::Result<bool> {
+        tracing::debug!("entered region checking for some reason");
+        let file_path = file_info.target_file_path(game_folder);
+
+        let Ok(fs_metadata) = std::fs::metadata(&file_path) else {
+            return Ok(false);
+        };
+
+        let file_size = fs_metadata.len();
+
+        if file_size != file_info.file_manifest.AssetSize {
+            return Ok(false);
+        }
+
+        let mut file = File::open(&file_path)?;
+
+        let region_md5 = file_region_hash_md5(
+            &mut file,
+            chunk_info.chunk_manifest.ChunkOnFileOffset,
+            chunk_info.chunk_manifest.ChunkSizeDecompressed,
+        )?;
+
+        Ok(region_md5 == chunk_info.chunk_manifest.ChunkDecompressedHashMd5)
+    }
+
     fn install_multithreaded(
         &self,
-        thread_count: usize,
+        download_threads: NonZeroUsize,
+        assembly_threads: NonZeroUsize,
         output_folder: impl AsRef<Path>,
         updater: impl Fn(Update) + Clone + Send,
     ) {
@@ -398,63 +506,139 @@ impl SophonInstaller {
             prettify_bytes(download_index.total_bytes)
         );
 
-        (updater)(download_index.msg_files());
-        (updater)(download_index.msg_bytes());
-
-        let retries_queue = Injector::<ChunkInfo>::new();
-        let file_assembly_queue = Injector::<&FileInfo>::new();
-
         let game_folder = output_folder.as_ref();
 
-        let worker_threads = std::iter::repeat_with(Worker::new_fifo)
-            .take(thread_count)
-            .collect::<Vec<_>>();
-        let stealers = worker_threads
-            .iter()
-            .map(Worker::stealer)
-            .collect::<Vec<_>>();
+        let queue_size = AtomicU64::default();
+        let (chunk_sender, chunk_receiver) = crossbeam_channel::unbounded();
+        let chunk_sender = ChunkQueueSender {
+            sender: chunk_sender,
+            memory_limit: self.chunks_queue_data_limit.map(|lim| (lim, &queue_size)),
+        };
+        let chunk_receiver = ChunkQueueReceiver {
+            receiver: chunk_receiver,
+            memory_limit: self.chunks_queue_data_limit.map(|lim| (lim, &queue_size)),
+        };
 
-        tracing::debug!("Spawning worker threads");
-        std::thread::scope(|scope| {
-            let updater_clone = updater.clone();
-            let mut chunk_dedupe_set = HashSet::with_capacity(download_index.chunks_used_in.len());
-            let download_queue = DownloadChunkQueue {
-                // tasks_iter: download_index.chunks.values().peekable(),
-                tasks_iter: download_index
+        let mut redownload_set = HashSet::with_capacity(download_index.chunks_used_in.len());
+        let mut chunk_dedupe_set = HashSet::with_capacity(download_index.chunks_used_in.len());
+
+        let total_files = download_index.total_files();
+        (updater)(Update::CheckingFiles { total_files });
+
+        let mut passed_files = 0_u64;
+
+        let download_queue = tracing::info_span!("Building chunk queue").in_scope(|| {
+            VecDeque::from_iter(
+                download_index
                     .files
                     .values()
-                    .flat_map(|file_info| file_info.chunks_iter())
+                    .filter(|file_info| {
+                        let check_res = check_file(
+                            file_info.target_file_path(game_folder),
+                            file_info.file_manifest.AssetSize,
+                            &file_info.file_manifest.AssetHashMd5,
+                        )
+                        .unwrap_or(false);
+                        if check_res {
+                            passed_files += 1;
+                            (updater)(Update::CheckingFilesProgress {
+                                passed: passed_files,
+                                total: total_files,
+                            });
+                        }
+                        !check_res
+                    })
+                    .flat_map(|file_info| {
+                        file_info
+                            .chunks_iter()
+                            .map(move |chinfo| (file_info, chinfo))
+                    })
+                    .filter_map(move |(file_info, chunk_info)| {
+                        if redownload_set.contains(&chunk_info.chunk_manifest.ChunkName) {
+                            // This chunk was already checked, and included in the queue. No need
+                            // for duplicates, as they will be filtered
+                            // in the next filter call
+                            return None;
+                        }
+                        if !self
+                            .check_file_region(game_folder, &chunk_info, file_info)
+                            .unwrap_or(false)
+                        {
+                            redownload_set.insert(&chunk_info.chunk_manifest.ChunkName);
+                            Some(chunk_info)
+                        } else {
+                            None
+                        }
+                    })
                     .filter(move |chunk_info| {
                         chunk_dedupe_set.insert(&chunk_info.chunk_manifest.ChunkName)
-                    })
-                    .peekable(),
-                retries_queue: &retries_queue,
-            };
-            scope.spawn(|| {
-                let _span = tracing::debug_span!("Download thread").entered();
-                (updater_clone)(Update::DownloadingStarted(self.temp_folder.clone()));
-                self.artifact_download_loop(
-                    download_queue,
-                    Some(&file_assembly_queue),
-                    &download_index,
-                    updater_clone,
-                );
-            });
+                    }),
+            )
+        });
 
-            for (i, worker_queue) in worker_threads.into_iter().enumerate() {
+        // Early exit if all files are already downloaded
+        if self.skip_download_repair || download_queue.is_empty() {
+            return;
+        }
+
+        let actual_download = download_queue
+            .iter()
+            .map(|chunk_info| chunk_info.chunk_manifest.ChunkSize)
+            .sum::<u64>();
+        let download_queue = Mutex::new(download_queue);
+
+        (updater)(Update::DownloadingStarted {
+            location: game_folder.to_owned(),
+            total_bytes: download_index.total_bytes,
+            total_files,
+        });
+
+        (updater)(download_index.add_msg_files(0));
+
+        // add all the skipped chunks to the download progress so that the displayed total is more
+        // accurate
+        (updater)(download_index.add_msg_bytes(download_index.total_bytes - actual_download));
+
+        tracing::debug!("Spawning threads");
+        std::thread::scope(|scope| {
+            // References to some variables because the spawned threads capture variables
+            let index_ref = &download_index;
+            let download_queue_ref = &download_queue;
+
+            // Downloading threads
+            for i in 0..download_threads.get() {
+                let sender_clone = chunk_sender.clone();
                 let updater_clone = updater.clone();
-                let thread_queue = ThreadQueue {
-                    global: &file_assembly_queue,
-                    local: worker_queue,
-                    stealers: &stealers,
-                };
-                let index_ref = &download_index;
+
                 scope.spawn(move || {
-                    let _span = tracing::debug_span!("Patching thread", thread_num = i).entered();
-                    self.file_assembly_loop(game_folder, updater_clone, index_ref, thread_queue);
+                    let _span = tracing::debug_span!("Download thread", thread_num = i).entered();
+                    self.artifact_download_loop(
+                        download_queue_ref,
+                        Some(sender_clone),
+                        index_ref,
+                        updater_clone,
+                    );
                 });
             }
+
+            // Assembly threads
+            for i in 0..assembly_threads.get() {
+                let updater_clone = updater.clone();
+                let index_ref = &download_index;
+                let receiver_clone = chunk_receiver.clone();
+
+                scope.spawn(move || {
+                    let _span = tracing::debug_span!("Patching thread", thread_num = i).entered();
+                    self.file_assembly_loop(game_folder, updater_clone, index_ref, receiver_clone);
+                });
+            }
+
+            // drop the original sender and receiver so teh rest is in the spawned threads
+            drop(chunk_sender);
+            drop(chunk_receiver);
         });
+
+        self.last_file_handle(game_folder, &updater, &download_index);
 
         (updater)(Update::DownloadingFinished);
     }
@@ -485,7 +669,7 @@ impl SophonInstaller {
 
     fn predownload_multithreaded(
         &self,
-        _thread_count: usize,
+        thread_count: usize,
         updater: impl Fn(Update) + Clone + Send + 'static,
     ) {
         tracing::debug!("Starting multithreaded predownload");
@@ -497,26 +681,34 @@ impl SophonInstaller {
             prettify_bytes(download_index.total_bytes)
         );
 
-        (updater)(download_index.msg_files());
-        (updater)(download_index.msg_bytes());
-
-        let retries_queue = Injector::<ChunkInfo>::new();
+        (updater)(download_index.add_msg_files(0));
+        (updater)(download_index.add_msg_bytes(0));
 
         let mut chunk_dedupe_set = HashSet::with_capacity(download_index.chunks_used_in.len());
-        let download_queue = DownloadChunkQueue {
-            tasks_iter: download_index
+        let download_queue = Mutex::new(VecDeque::from_iter(
+            download_index
                 .files
                 .values()
                 .flat_map(|file_info| file_info.chunks_iter())
                 .filter(move |chunk_info| {
                     chunk_dedupe_set.insert(&chunk_info.chunk_manifest.ChunkName)
-                })
-                .peekable(),
-            retries_queue: &retries_queue,
-        };
+                }),
+        ));
 
         tracing::debug!("Starting download");
-        self.artifact_download_loop(download_queue, None, &download_index, &updater);
+        std::thread::scope(|scope| {
+            for _ in 0..thread_count {
+                let updater_clone = updater.clone();
+                scope.spawn(|| {
+                    self.artifact_download_loop(
+                        &download_queue,
+                        None,
+                        &download_index,
+                        updater_clone,
+                    );
+                });
+            }
+        });
 
         (updater)(Update::DownloadingFinished);
     }
@@ -527,93 +719,93 @@ impl SophonInstaller {
     /// anything, checks if they are empty and then checks if there are any
     /// unfinished chunks and waits for either all chunks to finish applying
     /// or a new retry being pushed onto the queue.
-    fn artifact_download_loop<'a, 'b, I: Iterator<Item = ChunkInfo<'a>> + 'b>(
+    fn artifact_download_loop<'a, 'b>(
         &self,
-        mut task_queue: DownloadChunkQueue<'a, 'b, I>,
-        assembly_queue: Option<&'b Injector<&'a FileInfo<'a>>>,
+        task_queue: &Mutex<VecDeque<ChunkInfo<'a>>>,
+        assembly_queue: Option<ChunkQueueSender<'a, 'b>>,
         download_index: &'a DownloadIndex<'a>,
         updater: impl Fn(Update) + 'b,
     ) {
-        let mut files_dispatched = HashSet::new();
-        loop {
-            if let Some(task) = task_queue.next() {
-                // Check if the file already exists on disk and if it does, skip re-downloading
-                // it
-                let artifact_path = self.tmp_artifact_file_path(&task);
+        while let Some(task) = {
+            let Ok(mut queue_lock) = task_queue.lock() else {
+                tracing::error!("The queue lock has been poisoned");
+                return;
+            };
+            let val = queue_lock.pop_front();
+            drop(queue_lock);
+            val
+        } {
+            // Check if the file already exists on disk and if it does, skip re-downloading
+            let artifact_path = self.tmp_artifact_file_path(&task);
 
-                let res = if artifact_path.exists() {
-                    tracing::debug!(artifact = ?artifact_path, "Artifact already exists, skipping download");
-                    Ok(())
+            let res = if artifact_path.exists() {
+                tracing::debug!(artifact = ?artifact_path, "Artifact already exists, skipping download");
+                Ok(ChunkLocation::Filesystem(artifact_path))
+            } else {
+                self.download_artifact(&task)
+            };
+
+            let (chunk_size, chunk_hash) = task.chunk_file_info();
+
+            let res = res.and_then(|loc| {
+                if !{ loc.check(chunk_size, chunk_hash)? } {
+                    Err(SophonError::ChunkHashMismatch {
+                        expected: chunk_hash.to_owned(),
+                        got: loc.hash()?,
+                    })
                 } else {
-                    self.download_artifact(&task)
-                };
+                    Ok(loc)
+                }
+            });
 
-                let (chunk_size, chunk_hash) = task.chunk_file_info();
-
-                let res = res.and_then(|_| {
-                    if !check_file(&artifact_path, chunk_size, chunk_hash)? {
-                        Err(SophonError::ChunkHashMismatch {
-                            expected: chunk_hash.to_owned(),
-                            got: file_md5_hash_str(&artifact_path)?,
-                        })
-                    } else {
-                        Ok(())
-                    }
-                });
-
-                match res {
-                    Ok(()) => {
-                        download_index.artifact_success(&task.chunk_manifest.ChunkName);
-                        download_index.add_bytes(chunk_size);
-                        (updater)(download_index.msg_bytes());
-                        if let Some(file_queue) = assembly_queue {
-                            for file_id in download_index
-                                .chunks_used_in
-                                .get(&task.chunk_manifest.ChunkName)
-                                .expect("All chunks must be indexed")
-                            {
-                                if !files_dispatched.contains(file_id) {
-                                    let file_info = download_index
-                                        .files
-                                        .get(file_id)
-                                        .expect("Missing files in index!");
-                                    if file_info.is_file_ready(&download_index.download_states) {
-                                        file_queue.push(file_info);
-                                        files_dispatched.insert(file_id);
-                                    }
+            match res {
+                Ok(loc) => {
+                    (updater)(download_index.add_msg_bytes(chunk_size));
+                    if let Some(file_queue) = &assembly_queue {
+                        // Send downlaoded chunk to the assembly threads, the body is error
+                        // handling.
+                        if let Err(err) =
+                            file_queue.send_timeout((loc, task), Duration::from_secs(10))
+                        {
+                            match err {
+                                crossbeam_channel::SendTimeoutError::Disconnected(_) => {
+                                    tracing::error!(
+                                        "Patching threads disconnected before downloading is done"
+                                    );
+                                    return;
+                                }
+                                crossbeam_channel::SendTimeoutError::Timeout(val) => {
+                                    tracing::error!(
+                                        "Downloaded task send timeout, pushing the task back onto download queue"
+                                    );
+                                    let Ok(mut queue_lock) = task_queue.lock() else {
+                                        tracing::error!("The queue lock has been poisoned");
+                                        return;
+                                    };
+                                    queue_lock.push_back(val.1);
                                 }
                             }
-                        }
-                        download_index.download_states_notifier.notify_all();
-                    }
-                    Err(err) => {
-                        tracing::error!(
-                            chunk_name = task.chunk_manifest.ChunkName,
-                            ?err,
-                            "Failed to download chunk",
-                        );
-                        let _ = std::fs::remove_file(&artifact_path);
-                        (updater)(Update::DownloadingError(err));
-                        download_index.process_download_fail(
-                            task,
-                            task_queue.retries_queue,
-                            &updater,
-                        );
+                        };
                     }
                 }
-                download_index.download_states_notifier.notify_all();
-            } else if task_queue.is_empty() && !download_index.wait_downloading() {
-                break;
+                Err(err) => {
+                    tracing::error!(
+                        chunk_name = task.chunk_manifest.ChunkName,
+                        ?err,
+                        "Failed to download chunk",
+                    );
+                    let _ = std::fs::remove_file(self.tmp_artifact_file_path(&task));
+                    (updater)(Update::DownloadingError(err));
+                    download_index.process_download_fail(task, task_queue, &updater);
+                }
             }
         }
-        // Wake up any threads that might still be waiting
-        download_index.download_states_notifier.notify_all();
     }
 
     // instrumenting to maybe try and see how much time it takes to download and
     // save
     #[tracing::instrument(level = "debug", err, skip_all, fields(chunk = task.chunk_manifest.ChunkName, download_size = task.chunk_file_info().0))]
-    fn download_artifact(&self, task: &ChunkInfo) -> Result<(), SophonError> {
+    fn download_artifact(&self, task: &ChunkInfo) -> Result<ChunkLocation, SophonError> {
         let download_url = task.download_url();
         let out_file_path = self.tmp_artifact_file_path(task);
 
@@ -644,83 +836,182 @@ impl SophonInstaller {
             });
         }
 
-        std::fs::write(&out_file_path, bytes)?;
+        if self.chunks_queue_data_limit.is_some() {
+            Ok(ChunkLocation::Memory(bytes))
+        } else {
+            std::fs::write(&out_file_path, bytes)?;
 
-        Ok(())
+            Ok(ChunkLocation::Filesystem(out_file_path))
+        }
     }
 
-    fn file_assembly_loop<'a, 'b>(
+    fn last_file_handle<'a>(
         &self,
-        game_folder: &'b Path,
-        updater: impl Fn(Update) + 'b,
-        download_index: &'b DownloadIndex<'a>,
-        queue: ThreadQueue<'b, &'a FileInfo<'a>>,
+        game_folder: &Path,
+        updater: impl Fn(Update),
+        download_index: &DownloadIndex<'a>,
     ) {
-        let mut do_this_task_last = None;
-        loop {
-            if let Some(task) = queue.next_job() {
-                if task.file_manifest.AssetName.ends_with("globalgamemanagers") {
-                    do_this_task_last = Some(task);
-                }
-                self.file_assembly_handler(task, download_index, game_folder, &updater);
-            } else if !download_index.wait_downloading() {
-                break;
-            }
-        }
-        if let Some(last_task) = do_this_task_last {
-            let target_path = last_task.target_file_path(game_folder);
+        let last_file_path = self.downloading_temp().join("globalgamemanagers.tmp");
+        if last_file_path.exists() {
+            // todo: global OnceLock/Mutex<Vec<FileInfo>> for last file(s) rather than this mess
+            let last_file_task = download_index
+                .files
+                .values()
+                .find(|task| task.file_manifest.AssetName.ends_with("globalgamemanagers"))
+                .expect("The file was encountered during download, it must exist in the index");
+            let target_path = last_file_task.target_file_path(game_folder);
             let tmp_file_path = self.downloading_temp().join("globalgamemanagers.tmp");
             if let Err(err) = finalize_file(
                 &tmp_file_path,
                 &target_path,
-                last_task.file_manifest.AssetSize,
-                &last_task.file_manifest.AssetHashMd5,
+                last_file_task.file_manifest.AssetSize,
+                &last_file_task.file_manifest.AssetHashMd5,
             ) {
                 tracing::error!(?err, "Failed to install globalgamemanagers");
+                (updater)(Update::DownloadingError(err))
             }
+
+            let _ = std::fs::remove_file(&last_file_path);
         }
     }
 
-    fn file_assembly_handler<'a>(
+    fn file_assembly_loop<'a>(
         &self,
-        task: &'a FileInfo<'a>,
+        game_folder: &Path,
+        updater: impl Fn(Update),
+        download_index: &DownloadIndex<'a>,
+        queue: ChunkQueueReceiver<'a, '_>,
+    ) {
+        while let Ok((loc, downloaded_chunk)) = queue.recv() {
+            let files_with_chunk = download_index
+                .chunks_used_in
+                .get(&downloaded_chunk.chunk_manifest.ChunkName)
+                .expect("All chunks must be indexed");
+            for file_id in files_with_chunk {
+                self.file_assembly_partial_handler(
+                    &downloaded_chunk,
+                    &loc,
+                    file_id,
+                    download_index,
+                    game_folder,
+                    &updater,
+                );
+            }
+            //self.file_assembly_handler(downloaded_chunk, download_index, game_folder, &updater);
+
+            loc.cleanup();
+        }
+    }
+
+    fn file_assembly_partial_handler<'a>(
+        &self,
+        downloaded_chunk: &ChunkInfo<'a>,
+        chunk_location: &ChunkLocation,
+        file_id: &String,
         downloading_index: &DownloadIndex<'a>,
         game_folder: &Path,
         updater: impl Fn(Update),
     ) {
-        let target_path = if task.file_manifest.AssetName.ends_with("globalgamemanagers") {
+        let file_info = downloading_index
+            .files
+            .get(file_id)
+            .expect("All files must be indexed");
+        let target_file_path = if file_info
+            .file_manifest
+            .AssetName
+            .ends_with("globalgamemanagers")
+        {
             self.downloading_temp().join("globalgamemanagers.tmp")
         } else {
-            task.target_file_path(game_folder)
+            file_info.target_file_path(game_folder)
         };
-        let tmp_file = self.tmp_downloading_file_path(task);
+        let working_file = if !self.inplace {
+            self.tmp_downloading_file_path(file_info)
+        } else {
+            let _ = ensure_parent(&target_file_path);
+            target_file_path.clone()
+        };
+        // in case a chunk is repeated multiple times in a file
+        // iterator instead of a singular find
+        let mut chunk_infos_for_file = file_info
+            .file_manifest
+            .AssetChunks
+            .iter()
+            .filter(|chinfo| chinfo.ChunkName == downloaded_chunk.chunk_manifest.ChunkName);
 
         let res = if let Ok(true) = check_file(
-            &target_path,
-            task.file_manifest.AssetSize,
-            &task.file_manifest.AssetHashMd5,
+            &target_file_path,
+            file_info.file_manifest.AssetSize,
+            &file_info.file_manifest.AssetHashMd5,
         ) {
-            tracing::debug!(file = ?target_path, "File appears to be already downloaded");
-            Ok(())
+            tracing::debug!(file = ?target_file_path, "File appears to be already downloaded");
+            Ok(true)
         } else {
-            self.file_assembly(&tmp_file, &target_path, task)
+            chunk_infos_for_file
+                .try_for_each(|chunk_info| {
+                    self.file_assembly_partial(
+                        &working_file,
+                        chunk_location,
+                        &ChunkInfo {
+                            chunk_manifest: chunk_info,
+                            download_info: downloaded_chunk.download_info,
+                            retries_left: downloaded_chunk.retries_left,
+                        },
+                        file_info,
+                    )
+                })
+                // Check if the temporary file is completed
+                .and_then(|_| {
+                    check_file(
+                        &working_file,
+                        file_info.file_manifest.AssetSize,
+                        &file_info.file_manifest.AssetHashMd5,
+                    )
+                    .map_err(SophonError::IoError)
+                })
+                // If it is, finalize and remove temporary file
+                // I know it basically checks twice
+                .and_then(|file_valid| {
+                    if !self.inplace && file_valid {
+                        finalize_file(
+                            &working_file,
+                            &target_file_path,
+                            file_info.file_manifest.AssetSize,
+                            &file_info.file_manifest.AssetHashMd5,
+                        )
+                        .inspect_err(|err| {
+                            tracing::error!(?err, "Error during file finalization")
+                        })?;
+
+                        let _ = std::fs::remove_file(&working_file);
+                    }
+                    Ok(file_valid)
+                })
         };
 
         match res {
-            Ok(()) => {
-                tracing::debug!("Successfully downloaded `{}`", task.file_manifest.AssetName);
-                downloading_index.add_files(1);
-                downloading_index.download_states_notifier.notify_all();
-                (updater)(downloading_index.msg_files());
+            Ok(true) => {
+                tracing::debug!(
+                    "Successfully downloaded `{}`",
+                    file_info.file_manifest.AssetName
+                );
+                (updater)(downloading_index.add_msg_files(1))
+            }
+            Ok(false) => {
+                tracing::debug!(
+                    chunk = downloaded_chunk.chunk_manifest.ChunkName,
+                    file = file_info.file_manifest.AssetName,
+                    "Applied chunk to the file"
+                );
             }
             Err(e) => {
                 tracing::error!(
                     error = ?e,
-                    file = task.file_manifest.AssetName,
-                    "File assembly failed"
+                    file = file_info.file_manifest.AssetName,
+                    "Error during file assembly"
                 );
                 (updater)(Update::DownloadingError(e));
-                self.cleanup_on_fail(task);
+                self.cleanup_on_fail(file_info);
             }
         }
     }
@@ -729,78 +1020,73 @@ impl SophonInstaller {
         let _ = std::fs::remove_file(self.tmp_downloading_file_path(task));
     }
 
-    #[tracing::instrument(level = "debug", err, skip_all, fields(asset_name = task.file_manifest.AssetName, asset_hash = task.file_manifest.AssetHashMd5, asset_size = task.file_manifest.AssetSize))]
-    fn file_assembly(
+    #[tracing::instrument(level = "debug", err, skip_all, fields(
+            asset_name = task.file_manifest.AssetName,
+            asset_hash = task.file_manifest.AssetHashMd5,
+            asset_size = task.file_manifest.AssetSize,
+            chunk_name = chunk_info.chunk_manifest.ChunkName
+        )
+    )]
+    fn file_assembly_partial(
         &self,
-        tmp_file: &Path,
-        target_path: &Path,
+        working_file: &Path,
+        chunk_location: &ChunkLocation,
+        chunk_info: &ChunkInfo<'_>,
         task: &FileInfo,
     ) -> Result<(), SophonError> {
         #[allow(
             clippy::suspicious_open_options,
-            reason = "File length is set right after opening, which truncates or extendis it"
+            reason = "File length is set right after opening, which truncates or extends it"
         )]
         let mut output_file = OpenOptions::new()
             .create(true)
             //.truncate(true)
             .write(true)
-            .open(tmp_file)?;
+            .open(working_file)?;
         output_file.set_len(task.file_manifest.AssetSize)?;
 
-        let mut total_written = 0;
-
-        for chunk_info in task.chunks_iter() {
-            let chunk_written = self.write_chunk_to_file(&chunk_info, &mut output_file)?;
-            total_written += chunk_written;
-            if chunk_written != chunk_info.chunk_manifest.ChunkSizeDecompressed {
-                tracing::error!(
-                    got = chunk_written,
-                    expected = chunk_info.chunk_manifest.ChunkSizeDecompressed,
-                    "Chunk written size mismatch"
-                );
-                return Err(SophonError::OutputFileError {
-                    path: tmp_file.to_owned(),
-                    source: std::io::Error::other("Chunk written size mismatch"),
-                });
+        // not checking written data. might be useful in debugging. not doing it though.
+        match chunk_location {
+            ChunkLocation::Filesystem(chunk_path) => {
+                self.write_chunk_fs_to_file(chunk_path, chunk_info, &mut output_file)?;
+            }
+            ChunkLocation::Memory(chunk_buf) => {
+                self.write_chunk_mem_to_file(chunk_buf, chunk_info, &mut output_file)?;
             }
         }
-
-        if total_written != task.file_manifest.AssetSize {
-            tracing::error!(
-                got = total_written,
-                expected = task.file_manifest.AssetSize,
-                "Total written size mismatch",
-            );
-        }
-
-        output_file
-            .flush()
-            .inspect_err(|err| tracing::error!(?err, "flush failed"))?;
-
-        drop(output_file);
-
-        finalize_file(
-            tmp_file,
-            target_path,
-            task.file_manifest.AssetSize,
-            &task.file_manifest.AssetHashMd5,
-        )?;
-
-        let _ = std::fs::remove_file(tmp_file);
 
         Ok(())
     }
 
-    fn write_chunk_to_file<W: Write + Seek>(
+    fn write_chunk_fs_to_file<W: Write + Seek>(
         &self,
+        chunk_path: &Path,
         chunk_info: &ChunkInfo,
         dest_file: &mut W,
     ) -> std::io::Result<u64> {
-        let chunk_path = self.tmp_artifact_file_path(chunk_info);
+        dest_file.seek(std::io::SeekFrom::Start(
+            chunk_info.chunk_manifest.ChunkOnFileOffset,
+        ))?;
         if chunk_info.is_compressed() {
-            Self::write_artifact_to_file_zstd(dest_file, &chunk_path)
+            Self::write_artifact_to_file_zstd(dest_file, chunk_path)
         } else {
-            Self::write_artifact_to_file(dest_file, &chunk_path)
+            Self::write_artifact_to_file(dest_file, chunk_path)
+        }
+    }
+
+    fn write_chunk_mem_to_file<W: Write + Seek>(
+        &self,
+        chunk_buf: &[u8],
+        chunk_info: &ChunkInfo,
+        dest_file: &mut W,
+    ) -> std::io::Result<u64> {
+        dest_file.seek(std::io::SeekFrom::Start(
+            chunk_info.chunk_manifest.ChunkOnFileOffset,
+        ))?;
+        if chunk_info.is_compressed() {
+            Self::write_artifact_to_file_zstd_mem(dest_file, chunk_buf)
+        } else {
+            Self::write_artifact_to_file_mem(dest_file, chunk_buf)
         }
     }
 
@@ -821,8 +1107,25 @@ impl SophonInstaller {
         std::io::copy(&mut zstd_decoder, dest_file)
     }
 
+    fn write_artifact_to_file_mem<W: Write>(
+        dest_file: &mut W,
+        chunk_buf: &[u8],
+    ) -> std::io::Result<u64> {
+        dest_file
+            .write_all(chunk_buf)
+            .map(|_| chunk_buf.len() as u64)
+    }
+
+    fn write_artifact_to_file_zstd_mem<W: Write>(
+        dest_file: &mut W,
+        chunk_buf: &[u8],
+    ) -> std::io::Result<u64> {
+        let mut zstd_decoder = zstd::Decoder::new(chunk_buf)?;
+        std::io::copy(&mut zstd_decoder, dest_file)
+    }
+
     fn free_space_check(
-        updater: impl Fn(Update) + Clone + Send,
+        updater: impl Fn(Update),
         path: impl AsRef<Path>,
         required: u64,
     ) -> Result<(), SophonError> {
@@ -875,13 +1178,18 @@ impl SophonInstaller {
     }
 
     fn tmp_downloading_file_path(&self, file_info: &FileInfo) -> PathBuf {
-        self.downloading_temp().join(file_info.tmp_filename())
+        self.tmp_downloading_folder().join(file_info.tmp_filename())
     }
 
     /// Folder to temporarily store chunks
     #[inline]
     fn chunk_temp_folder(&self) -> PathBuf {
         self.downloading_temp().join("chunks")
+    }
+
+    #[inline]
+    fn tmp_downloading_folder(&self) -> PathBuf {
+        self.downloading_temp().join("files-in-progress")
     }
 
     fn tmp_artifact_file_path(&self, chunk_info: &ChunkInfo) -> PathBuf {
@@ -892,6 +1200,7 @@ impl SophonInstaller {
     fn create_temp_dirs(&self) -> std::io::Result<()> {
         std::fs::create_dir_all(self.downloading_temp())?;
         std::fs::create_dir_all(self.chunk_temp_folder())?;
+        std::fs::create_dir_all(self.tmp_downloading_folder())?;
 
         Ok(())
     }

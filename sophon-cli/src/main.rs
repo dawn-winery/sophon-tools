@@ -2,9 +2,10 @@ use std::{
     io::{Write, stdout},
     path::PathBuf,
     str::FromStr,
+    time::Duration,
 };
 
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{Args, Parser, Subcommand, ValueEnum, ValueHint};
 use indicatif::{ProgressBar, ProgressStyle};
 use protobuf::MessageDyn;
 use protobuf_json_mapping::PrintOptions;
@@ -32,8 +33,12 @@ struct Cli {
     edition: String,
 
     /// Cache directory
-    #[arg(short, long, default_value_os_t = std::env::home_dir().unwrap().join(".cache/sophon-tools"))]
+    #[arg(short, long, default_value_os_t = std::env::home_dir().unwrap().join(".cache/sophon-tools"), value_hint = ValueHint::DirPath)]
     cache_dir: PathBuf,
+
+    /// Thread limit for the commands that use multiple threads
+    #[arg(short, long, default_value_t = 2)]
+    threads: usize,
 
     #[command(subcommand)]
     action: Action,
@@ -43,56 +48,46 @@ struct Cli {
 enum Action {
     /// Download the game
     Download {
-        /// Game codename (biz) or id
-        game: String,
-        /// Path to game directory
-        game_dir: PathBuf,
+        #[command(flatten)]
+        game: GameCommon,
         /// Omit to use latest
         #[arg(short, long)]
         version: Option<String>,
-        /// Game component(s) to download, defaults to `game` if unset
-        #[arg(short, long)]
-        component: Option<Vec<String>>,
         /// Whether to use the preload
         #[arg(short, long)]
         preload: bool,
-        /// Skip checking for free space
+
+        /// Assemble files in-place in the game folder, without making temporary files in cache dir
+        /// TODO: not implemented
         #[arg(long)]
-        skip_free_space_check: bool,
+        inplace: bool,
+
+        #[command(flatten)]
+        extra: DownloadParameters,
     },
 
     /// Update the game from one version to anotehr
     Update {
-        /// Game codename (biz) or id
-        game: String,
-        /// Path to game directory
-        game_dir: PathBuf,
+        #[command(flatten)]
+        game: GameCommon,
         /// Currently installed version to update from
         #[arg(long)]
         from: String,
         /// Omit to use latest
         #[arg(long)]
         to: Option<String>,
-        /// Game component(s) to update, defaults to `game` if unset
-        #[arg(short, long)]
-        component: Option<Vec<String>>,
-        /// Skip checking for free space
-        #[arg(long)]
-        skip_free_space_check: bool,
+
+        #[command(flatten)]
+        extra: DownloadParameters,
     },
 
     /// Check and repair game files
     Repair {
-        /// Game codename (biz) or id
-        game: String,
-        /// Path to game directory
-        game_dir: PathBuf,
+        #[command(flatten)]
+        game: GameCommon,
         /// Omit to use latest
         #[arg(short, long)]
         version: Option<String>,
-        /// Game component(s) to check and repair, defaults to `game` if unset
-        #[arg(short, long)]
-        component: Option<Vec<String>>,
 
         /// Don't actually repair, only check and report broken files
         #[arg(short, long)]
@@ -110,49 +105,39 @@ enum Action {
     },
 }
 
+#[derive(Debug, Args)]
+struct GameCommon {
+    /// Game codename (biz) or id
+    game: String,
+    /// Path to game directory
+    #[arg(value_hint = ValueHint::DirPath)]
+    game_dir: PathBuf,
+    /// Game component(s) to check and repair, defaults to `game` if unset. Set multiple times to
+    /// target multiple components.
+    #[arg(short, long)]
+    component: Option<Vec<String>>,
+}
+
+#[derive(Debug, Args)]
+struct DownloadParameters {
+    /// Skip checking for free space
+    #[arg(long)]
+    skip_free_space_check: bool,
+    /// Set limit of how much chunk data can be buffered in the queue. Download will be
+    /// throttled if the queue reaches this size.
+    #[arg(long)]
+    memory_buffer_limit: Option<u64>,
+    /// Enable memory buffering: don't store chunk files on disk, but only pass through memory.
+    #[arg(long)]
+    chunk_buffer_memory: bool,
+}
+
 #[derive(Debug, Subcommand)]
 enum DumpTarget {
-    GameScanInfo {
-        /// Game id
-        game: Option<String>,
-        /// Game version, will print all if omitted
-        version: Option<String>,
-        /// Only dump latest version
-        #[arg(short, long)]
-        latest: bool,
-    },
-    GameBranches {
-        /// Game codename (biz) or id
-        game: Option<String>,
-        /// Game version, will print all if not specified
-        version: Option<String>,
-        /// Only use latest version,
-        #[arg(short, long)]
-        latest: bool,
-    },
-    PackageInfo {
-        /// Game codename (biz) or id
-        game: String,
-        /// Game version, will pick latest if not specified
-        version: Option<String>,
-        /// Whether to search for preload
-        #[arg(short, long)]
-        preload: bool,
-        /// Only use latest version,
-        #[arg(short, long)]
-        latest: bool,
-    },
-    DownloadInfo {
-        /// Game codename (biz) or id
-        ///
-        /// Only one will be dumped, specify id if multiple branches have the same codename
-        game: String,
-        /// Game version, will pick latest if not specified
-        version: Option<String>,
-        /// Whether to search for preload
-        #[arg(short, long)]
-        preload: bool,
-    },
+    GameScanInfo(GameScanInfoDumpArgs),
+    GameBranches(GameScanInfoDumpArgs),
+    PackageInfo(DownloadInfoDumpArgs),
+    DownloadInfo(DownloadInfoDumpArgs),
     DownloadManifest {
         /// Game codename (biz) or id
         game: String,
@@ -167,6 +152,33 @@ enum DumpTarget {
     },
     PatchInfo,
     PatchManifest,
+}
+
+#[derive(Debug, Args)]
+struct GameScanInfoDumpArgs {
+    /// Game id
+    game: Option<String>,
+    /// Game version, will print all if omitted
+    version: Option<String>,
+    /// Only dump latest version
+    #[arg(short, long)]
+    latest: bool,
+}
+
+#[derive(Debug, Args)]
+struct DownloadInfoDumpArgs {
+    /// Game codename (biz) or id
+    ///
+    /// Only one will be dumped, specify id if multiple branches have the same codename
+    game: String,
+    /// Game version, will pick latest if not specified
+    version: Option<String>,
+    /// Whether to search for preload
+    #[arg(short, long)]
+    preload: bool,
+    /// Only use latest version,
+    #[arg(short, long)]
+    latest: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -237,24 +249,20 @@ fn main() {
         ),
         Action::Download {
             game,
-            game_dir,
             version,
-            component: components,
             preload,
-            skip_free_space_check,
-        } => {
-            let matching_fields = components.unwrap_or_else(|| vec!["game".to_owned()]);
-            download(
-                edition,
-                game,
-                game_dir,
-                cli_args.cache_dir,
-                matching_fields,
-                version,
-                preload,
-                skip_free_space_check,
-            )
-        }
+            inplace,
+            extra,
+        } => download(
+            edition,
+            game,
+            cli_args.cache_dir,
+            version,
+            preload,
+            cli_args.threads,
+            inplace,
+            extra,
+        ),
         _ => todo!(),
     };
 
@@ -266,14 +274,17 @@ fn main() {
 
 fn download(
     edition: GameEdition,
-    game: String,
-    game_dir: PathBuf,
+    mut game_common: GameCommon,
     temp_dir: PathBuf,
-    components: Vec<String>,
     version: Option<String>,
     preload: bool,
-    skip_free_space_check: bool,
+    threads: usize,
+    inplace: bool,
+    extra: DownloadParameters,
 ) -> Result<(), String> {
+    let components = game_common
+        .component
+        .unwrap_or_else(|| vec!["game".to_owned()]);
     // doing this conversion because the blocking client doesn't have these options
     let client = Into::<reqwest::blocking::ClientBuilder>::into(
         reqwest::ClientBuilder::new()
@@ -285,12 +296,12 @@ fn download(
     let branches = get_game_branches_info(&client, &edition).expect("Failed to get game branches");
     let package_info = if version.is_some() {
         branches
-            .get_packages_by_id_or_biz(&game, version.as_deref(), preload)
+            .get_packages_by_id_or_biz(&game_common.game, version.as_deref(), preload)
             .next()
             .expect("Failed to find game branch")
     } else {
         branches
-            .get_package_by_id_or_biz_latest(&game, preload)
+            .get_package_by_id_or_biz_latest(&game_common.game, preload)
             .expect("Failed to find game")
     };
     let downloads_info = get_game_download_sophon_info(&client, package_info, &edition)
@@ -310,22 +321,31 @@ fn download(
         .filter(|download_info| components.contains(&download_info.matching_field))
     {
         let total_download = download_info.stats.compressed_size.parse::<u64>().unwrap();
-
-        let progress_bar = ProgressBar::new(total_download)
-            .with_style(ProgressStyle::default_bar()
+        let download_style = 
+                ProgressStyle::default_bar()
                 .template("{msg}\n{spinner} [{elapsed_precise}] [{wide_bar}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})")
-                .unwrap());
-        let progress_bar_clone = progress_bar.clone();
+                .unwrap();
+        let file_check_style = 
+                ProgressStyle::default_bar()
+                .template("{msg}\n{spinner} [{elapsed_precise}] [{wide_bar}] {pos}/{len} {percent}%")
+                .unwrap();
+
+        let progress_bar = ProgressBar::new(total_download).with_style(download_style.clone());
+        progress_bar.enable_steady_tick(Duration::from_secs_f32(0.25));
 
         let matching_field = download_info.matching_field.clone();
 
-        let downloader =
+        let mut downloader =
             sophon_lib::installer::SophonInstaller::new(client.clone(), download_info, &temp_dir)
                 .expect("Failed to construct downloader")
-                .with_free_space_check(!skip_free_space_check);
-        if let Err(why) = downloader.install(&game_dir, 1, |msg| match msg {
+                .with_free_space_check(!extra.skip_free_space_check);
+        downloader.inplace = inplace;
+        downloader.chunks_in_mem = extra.chunk_buffer_memory;
+        downloader.chunks_queue_data_limit = extra.memory_buffer_limit;
+        if let Err(why) = downloader.install(&game_common.game_dir, threads, |msg| match msg {
             sophon_lib::installer::Update::DownloadingProgressBytes {
-                downloaded_bytes, ..
+                downloaded_bytes,
+                ..
             } => {
                 progress_bar.set_position(downloaded_bytes);
                 #[cfg(feature = "tracy")]
@@ -334,8 +354,30 @@ fn download(
                     tracing_tracy::client::plot!("Downloading speed", rate);
                 }
             }
-            sophon_lib::installer::Update::DownloadingFinished => progress_bar_clone
-                .finish_with_message(format!("Finished downloadign component {}", matching_field)),
+            sophon_lib::installer::Update::CheckingFiles{total_files} => {
+                progress_bar.set_message("Checking existing files");
+                progress_bar.set_style(file_check_style.clone());
+                progress_bar.set_length(total_files);
+                progress_bar.set_position(0);
+            }
+            sophon_lib::installer::Update::CheckingFilesProgress { passed, total } => {
+                progress_bar.set_position(passed);
+                if passed == total {
+                    progress_bar.finish_with_message("All files are already dowloaded");
+                }
+            }
+            sophon_lib::installer::Update::DownloadingStarted{location, total_bytes, ..} => {
+                progress_bar.set_message(format!("Downloading to {}", location.display()));
+                progress_bar.set_style(download_style.clone());
+                progress_bar.set_length(total_bytes);
+                progress_bar.set_position(0);
+                progress_bar.reset_elapsed();
+            }
+            sophon_lib::installer::Update::CheckingFreeSpace(path) => {
+                progress_bar.set_message(format!("Checking free space at {}", path.display()))
+            }
+            sophon_lib::installer::Update::DownloadingFinished => progress_bar
+                .finish_with_message(format!("Finished downloading component {}", matching_field)),
             _ => {}
         }) {
             progress_bar.abandon_with_message(format!(
@@ -355,27 +397,10 @@ fn dump_api_data(
 ) -> Result<(), String> {
     let client = sophon_lib::reqwest::blocking::Client::new();
     match target {
-        DumpTarget::GameScanInfo {
-            game,
-            version,
-            latest,
-        } => dump_game_scan_info(&client, edition, format, game, version, latest),
-        DumpTarget::GameBranches {
-            game,
-            version,
-            latest,
-        } => dump_game_branches(&client, edition, format, game, version, latest),
-        DumpTarget::PackageInfo {
-            game,
-            version,
-            preload,
-            latest,
-        } => dump_package_info(&client, edition, format, game, version, preload, latest),
-        DumpTarget::DownloadInfo {
-            game,
-            version,
-            preload,
-        } => dump_download_info(&client, edition, format, game, version, preload),
+        DumpTarget::GameScanInfo(args) => dump_game_scan_info(&client, edition, format, args),
+        DumpTarget::GameBranches(args) => dump_game_branches(&client, edition, format, args),
+        DumpTarget::PackageInfo(args) => dump_package_info(&client, edition, format, args),
+        DumpTarget::DownloadInfo(args) => dump_download_info(&client, edition, format, args),
 
         DumpTarget::DownloadManifest {
             game,
@@ -400,9 +425,11 @@ fn dump_game_scan_info(
     client: &Client,
     edition: GameEdition,
     format: DumpFormat,
-    game: Option<String>,
-    version: Option<String>,
-    latest: bool,
+    GameScanInfoDumpArgs {
+        game,
+        version,
+        latest,
+    }: GameScanInfoDumpArgs,
 ) -> Result<(), String> {
     if matches!(format, DumpFormat::Raw) {
         println!(
@@ -462,9 +489,11 @@ fn dump_game_branches(
     client: &Client,
     edition: GameEdition,
     format: DumpFormat,
-    game: Option<String>,
-    version: Option<String>,
-    latest: bool,
+    GameScanInfoDumpArgs {
+        game,
+        version,
+        latest,
+    }: GameScanInfoDumpArgs,
 ) -> Result<(), String> {
     if matches!(format, DumpFormat::Raw) {
         println!(
@@ -509,10 +538,12 @@ fn dump_package_info(
     client: &Client,
     edition: GameEdition,
     format: DumpFormat,
-    game_id_or_biz: String,
-    version: Option<String>,
-    preload: bool,
-    latest: bool,
+    DownloadInfoDumpArgs {
+        game: game_id_or_biz,
+        version,
+        preload,
+        latest,
+    }: DownloadInfoDumpArgs,
 ) -> Result<(), String> {
     if matches!(format, DumpFormat::Raw) {
         return Err(
@@ -550,9 +581,13 @@ fn dump_download_info(
     client: &Client,
     edition: GameEdition,
     format: DumpFormat,
-    game: String,
-    version: Option<String>,
-    preload: bool,
+    DownloadInfoDumpArgs {
+        game,
+        version,
+        preload,
+        // TODO
+        latest,
+    }: DownloadInfoDumpArgs,
 ) -> Result<(), String> {
     let game_branches = sophon_lib::api::get_game_branches_info(client, &edition).unwrap();
 

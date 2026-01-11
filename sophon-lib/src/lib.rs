@@ -1,9 +1,9 @@
 use std::{
     error::Error,
-    fmt::Write,
     fs::File,
     io::{Read, Seek, SeekFrom},
     iter::Peekable,
+    num::NonZeroUsize,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     str::FromStr,
@@ -365,6 +365,35 @@ pub enum SophonError {
         expected: u64,
         got: u64,
     },
+
+    #[error("Invalid thread amount: {0}, must be above 0")]
+    InvalidThreadAmount(usize),
+}
+
+impl From<fs_extra::error::Error> for SophonError {
+    fn from(err: fs_extra::error::Error) -> Self {
+        type FsExtraErrorKind = fs_extra::error::ErrorKind;
+        type StdIoErrorKind = std::io::ErrorKind;
+
+        let message = err.to_string();
+
+        let kind = match err.kind {
+            FsExtraErrorKind::NotFound => StdIoErrorKind::NotFound,
+            FsExtraErrorKind::PermissionDenied => StdIoErrorKind::PermissionDenied,
+            FsExtraErrorKind::AlreadyExists => StdIoErrorKind::AlreadyExists,
+            FsExtraErrorKind::Interrupted => StdIoErrorKind::Interrupted,
+            FsExtraErrorKind::InvalidFolder => StdIoErrorKind::NotADirectory,
+            FsExtraErrorKind::InvalidFile => StdIoErrorKind::IsADirectory,
+            FsExtraErrorKind::InvalidFileName => StdIoErrorKind::InvalidFilename,
+            FsExtraErrorKind::InvalidPath => StdIoErrorKind::InvalidInput,
+            FsExtraErrorKind::Io(error) => return Self::IoError(error),
+            FsExtraErrorKind::StripPrefix(_) => StdIoErrorKind::InvalidInput,
+            FsExtraErrorKind::OsString(_) => StdIoErrorKind::InvalidInput,
+            FsExtraErrorKind::Other => StdIoErrorKind::Other,
+        };
+
+        Self::IoError(std::io::Error::new(kind, message))
+    }
 }
 
 struct OptionDisplay<T, D> {
@@ -382,5 +411,29 @@ where
             Some(v) => std::fmt::Display::fmt(v, f),
             None => std::fmt::Display::fmt(&self.default, f),
         }
+    }
+}
+
+/// Divides thread count for the two pools. Element 0 is for downloading, element 1 is for
+/// patching/assembling
+fn divide_threads(thread_count: usize) -> Result<(NonZeroUsize, NonZeroUsize), SophonError> {
+    let thread_count =
+        NonZeroUsize::new(thread_count).ok_or(SophonError::InvalidThreadAmount(thread_count))?;
+    if thread_count.get() == 1 {
+        tracing::warn!("Thread count set to 1, but at least 2 are required, ignoring limit");
+        Ok(unsafe {
+            (
+                NonZeroUsize::new_unchecked(1),
+                NonZeroUsize::new_unchecked(1),
+            )
+        })
+    } else {
+        // division rounds towards zero, leave less threads for patching/assembly
+        let last = thread_count.get() / 2;
+        let first = thread_count.get() - last;
+        Ok((
+            NonZeroUsize::new(first).ok_or(SophonError::InvalidThreadAmount(first))?,
+            NonZeroUsize::new(last).ok_or(SophonError::InvalidThreadAmount(last))?,
+        ))
     }
 }
