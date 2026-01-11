@@ -58,8 +58,6 @@ pub enum Update {
     DownloadingFinished,
 
     DownloadingError(SophonError),
-
-    FileHashCheckFailed(PathBuf),
 }
 
 #[derive(Debug)]
