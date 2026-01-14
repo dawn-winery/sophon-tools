@@ -378,6 +378,8 @@ impl<'a> ChunkQueueReceiver<'a, '_> {
     }
 }
 
+// TODO: setting last file name (so not hardcoded to globalgamemanagers)
+
 #[derive(Debug)]
 pub struct SophonInstaller {
     pub manifest: SophonManifestProto,
