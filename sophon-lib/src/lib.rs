@@ -420,7 +420,10 @@ fn divide_threads(thread_count: usize) -> Result<(NonZeroUsize, NonZeroUsize), S
     let thread_count =
         NonZeroUsize::new(thread_count).ok_or(SophonError::InvalidThreadAmount(thread_count))?;
     if thread_count.get() == 1 {
-        tracing::warn!("Thread count set to 1, but at least 2 are required, ignoring limit");
+        tracing::warn!(
+            "Thread count set to 1, but at least 2 are required, returning 1 for each pool"
+        );
+        // SAFETY: 1 is not zero
         Ok(unsafe {
             (
                 NonZeroUsize::new_unchecked(1),
