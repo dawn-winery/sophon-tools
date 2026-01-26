@@ -15,7 +15,6 @@ use thiserror::Error;
 pub mod api;
 pub mod installer;
 pub mod protos;
-pub mod repairer;
 pub mod updater;
 pub mod utils;
 
