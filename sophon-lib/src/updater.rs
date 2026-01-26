@@ -286,6 +286,8 @@ impl<'a> UpdateIndex<'a> {
 
 type BoxPatchFn = Box<dyn Fn(&Path, &Path, &Path) -> std::io::Result<()> + Sync>;
 
+// TODO: in-memory queue, queue limit
+
 pub struct SophonPatcher {
     pub client: Client,
     pub patch_manifest: SophonPatchProto,
@@ -304,6 +306,7 @@ impl std::fmt::Debug for SophonPatcher {
             .field("diff_info", &self.diff_info)
             .field("check_free_space", &self.check_free_space)
             .field("temp_folder", &self.temp_folder)
+            .field("last_file_suffix", &self.last_file_suffix)
             .finish()
     }
 }
