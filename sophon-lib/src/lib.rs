@@ -2,14 +2,12 @@ use std::{
     error::Error,
     fs::File,
     io::{Read, Seek, SeekFrom},
-    iter::Peekable,
     num::NonZeroUsize,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     str::FromStr,
 };
 
-use crossbeam_deque::{Injector, Steal, Stealer, Worker};
 use md5::{Digest, Md5};
 pub use reqwest;
 use thiserror::Error;
@@ -32,23 +30,6 @@ pub fn prettify_bytes(bytes: u64) -> String {
         format!("{:.2} KB", bytes as f64 / 1024.0)
     } else {
         format!("{:.2} B", bytes)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum ArtifactDownloadState {
-    // Chunk successfully downloaded
-    Downloaded,
-    // Download failed, run out of retries
-    Failed,
-    // Amount of retries left, 0 means last retry is being run
-    Downloading(u8),
-}
-
-impl Default for ArtifactDownloadState {
-    #[inline]
-    fn default() -> Self {
-        Self::Downloading(DEFAULT_CHUNK_RETRIES)
     }
 }
 
@@ -129,63 +110,6 @@ impl FromStr for GameEdition {
             }),
             _ => Err(UnknownValue(lowercased)),
         }
-    }
-}
-
-/// Worker thread queue (patching, assembling files)
-///
-/// Basically the crossbeam-deque example usage of the Injector, allows having a shared queue with
-/// local queues and jobs getting stolen from otehr lcoal queues in case one dries up
-struct ThreadQueue<'a, T> {
-    global: &'a Injector<T>,
-    local: Worker<T>,
-    stealers: &'a [Stealer<T>],
-}
-
-impl<'a, T> ThreadQueue<'a, T> {
-    /// Based on the example from crossbeam deque
-    fn next_job(&self) -> Option<T> {
-        self.local.pop().or_else(|| {
-            std::iter::repeat_with(|| {
-                self.global
-                    .steal_batch_and_pop(&self.local)
-                    .or_else(|| self.stealers.iter().map(|s| s.steal()).collect())
-            })
-            .find(|s| !s.is_retry())
-            .and_then(Steal::success)
-        })
-    }
-}
-
-/// Downloading queue, first iterates over the tasks and then tries to get the tasks from the
-/// global retries queue
-#[derive(Debug)]
-struct DownloadQueue<'b, T, I: Iterator<Item = T> + 'b> {
-    tasks_iter: Peekable<I>,
-    retries_queue: &'b Injector<T>,
-}
-
-impl<'b, I, T> DownloadQueue<'b, T, I>
-where
-    I: Iterator<Item = T> + 'b,
-{
-    fn is_empty(&mut self) -> bool {
-        self.tasks_iter.peek().is_none() && self.retries_queue.is_empty()
-    }
-}
-
-impl<'b, I, T> Iterator for DownloadQueue<'b, T, I>
-where
-    I: Iterator<Item = T> + 'b,
-{
-    type Item = T;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.tasks_iter.next().or_else(|| {
-            std::iter::repeat_with(|| self.retries_queue.steal())
-                .find(|s| !s.is_retry())
-                .and_then(Steal::success)
-        })
     }
 }
 
