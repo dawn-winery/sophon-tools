@@ -204,38 +204,6 @@ impl<'a> DownloadIndex<'a> {
         }
     }
 
-    #[deprecated]
-    fn msg_files(&self) -> Update {
-        Update::DownloadingProgressFiles {
-            downloaded_files: self
-                .downloaded_files
-                .load(std::sync::atomic::Ordering::Acquire),
-            total_files: self.total_files(),
-        }
-    }
-
-    #[deprecated]
-    fn msg_bytes(&self) -> Update {
-        Update::DownloadingProgressBytes {
-            downloaded_bytes: self
-                .downloaded_bytes
-                .load(std::sync::atomic::Ordering::Acquire),
-            total_bytes: self.total_bytes,
-        }
-    }
-
-    #[deprecated]
-    fn add_files(&self, amount: u64) {
-        self.downloaded_files
-            .fetch_add(amount, std::sync::atomic::Ordering::SeqCst);
-    }
-
-    #[deprecated]
-    fn add_bytes(&self, amount: u64) {
-        self.downloaded_bytes
-            .fetch_add(amount, std::sync::atomic::Ordering::SeqCst);
-    }
-
     /// Process chunk download failure. Either pushes the chunk onto the retries
     /// queue or sends the chunk download fail update message using the
     /// updater. Refer to [Self::count_chunk_fail] for more info.
