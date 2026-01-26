@@ -11,7 +11,7 @@ use crossbeam_channel::{Receiver, Sender};
 use reqwest::{blocking::Client, header::RANGE};
 
 use super::{
-    DEFAULT_CHUNK_RETRIES, DownloadQueue, SophonError,
+    DEFAULT_CHUNK_RETRIES, SophonError,
     api::{
         get_patch_manifest,
         schemas::{sophon_diff::SophonDiff, sophon_manifests::DownloadInfo},
@@ -232,21 +232,6 @@ impl<'a> UpdateIndex<'a> {
         }
     }
 
-    fn count_downloaded(&self, amount: u64) {
-        self.downloaded_bytes
-            .fetch_add(amount, std::sync::atomic::Ordering::SeqCst);
-    }
-
-    fn count_patched(&self, amount: u64) {
-        self.files_patched
-            .fetch_add(amount, std::sync::atomic::Ordering::SeqCst);
-    }
-
-    fn count_deleted(&self, amount: u64) {
-        self.unused_deleted
-            .fetch_add(amount, std::sync::atomic::Ordering::SeqCst);
-    }
-
     fn add_msg_bytes(&self, amount: u64) -> Update {
         Update::DownloadingProgressBytes {
             downloaded_bytes: self
@@ -298,8 +283,6 @@ impl<'a> UpdateIndex<'a> {
         }
     }
 }
-
-type DownloadPatchQueue<'a, 'b, I> = DownloadQueue<'b, &'a FilePatchInfo<'a>, I>;
 
 type BoxPatchFn = Box<dyn Fn(&Path, &Path, &Path) -> std::io::Result<()> + Sync>;
 
@@ -702,7 +685,7 @@ impl SophonPatcher {
 
                     (updater)(Update::DownloadingError(err));
 
-                    update_index.process_download_fail(task, &task_queue, &updater);
+                    update_index.process_download_fail(task, task_queue, &updater);
                 }
             }
         }
