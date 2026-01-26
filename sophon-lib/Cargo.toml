@@ -12,7 +12,6 @@ vendored-hpatchz = []
 zstd = { version = "0.13" }
 reqwest = { version = "0.12", features = ["blocking", "h2", "http2", "json", "rustls-tls", "rustls-tls-webpki-roots", "socks"], default-features = false }
 protobuf = { version = "3.7" }
-crossbeam-deque = { version = "0.8.6" }
 serde = { version = "1.0.219", features = ["derive"] }
 thiserror = "2.0.16"
 md-5 = "0.10.6"
