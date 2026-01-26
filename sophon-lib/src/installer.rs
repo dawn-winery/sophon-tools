@@ -378,8 +378,6 @@ impl<'a> ChunkQueueReceiver<'a, '_> {
     }
 }
 
-// TODO: setting last file name (so not hardcoded to globalgamemanagers)
-
 #[derive(Debug)]
 pub struct SophonInstaller {
     pub manifest: SophonManifestProto,
@@ -387,6 +385,7 @@ pub struct SophonInstaller {
     pub client: reqwest::blocking::Client,
     pub temp_folder: PathBuf,
     pub chunks_queue_data_limit: Option<u64>,
+    pub last_file_suffix: Option<String>,
     pub check_free_space: bool,
     pub inplace: bool,
     pub chunks_in_mem: bool,
@@ -411,6 +410,7 @@ impl SophonInstaller {
             chunks_in_mem: true,
             chunks_queue_data_limit: Some(512 * 1024 * 1024),
             skip_download_repair: false,
+            last_file_suffix: Some("globalgamemanagers".to_owned()),
         })
     }
 
@@ -638,7 +638,9 @@ impl SophonInstaller {
             drop(chunk_receiver);
         });
 
-        self.last_file_handle(game_folder, &updater, &download_index);
+        if let Some(last_file_suffix) = &self.last_file_suffix {
+            self.last_file_handle(game_folder, &updater, &download_index, last_file_suffix);
+        }
 
         (updater)(Update::DownloadingFinished);
     }
@@ -852,24 +854,24 @@ impl SophonInstaller {
         game_folder: &Path,
         updater: impl Fn(Update),
         download_index: &DownloadIndex<'a>,
+        last_file_suffix: &str,
     ) {
-        let last_file_path = self.downloading_temp().join("globalgamemanagers.tmp");
+        let last_file_path = self.downloading_temp().join("last_file.tmp");
         if last_file_path.exists() {
             // todo: global OnceLock/Mutex<Vec<FileInfo>> for last file(s) rather than this mess
             let last_file_task = download_index
                 .files
                 .values()
-                .find(|task| task.file_manifest.AssetName.ends_with("globalgamemanagers"))
+                .find(|task| task.file_manifest.AssetName.ends_with(last_file_suffix))
                 .expect("The file was encountered during download, it must exist in the index");
             let target_path = last_file_task.target_file_path(game_folder);
-            let tmp_file_path = self.downloading_temp().join("globalgamemanagers.tmp");
             if let Err(err) = finalize_file(
-                &tmp_file_path,
+                &last_file_path,
                 &target_path,
                 last_file_task.file_manifest.AssetSize,
                 &last_file_task.file_manifest.AssetHashMd5,
             ) {
-                tracing::error!(?err, "Failed to install globalgamemanagers");
+                tracing::error!(?err, "Failed to install last file");
                 (updater)(Update::DownloadingError(err))
             }
 
@@ -918,12 +920,16 @@ impl SophonInstaller {
             .files
             .get(file_id)
             .expect("All files must be indexed");
-        let target_file_path = if file_info
-            .file_manifest
-            .AssetName
-            .ends_with("globalgamemanagers")
-        {
-            self.downloading_temp().join("globalgamemanagers.tmp")
+        let target_file_path = if let Some(last_file_suffix) = &self.last_file_suffix {
+            if file_info
+                .file_manifest
+                .AssetName
+                .ends_with(last_file_suffix)
+            {
+                self.downloading_temp().join("last_file.tmp")
+            } else {
+                file_info.target_file_path(game_folder)
+            }
         } else {
             file_info.target_file_path(game_folder)
         };
