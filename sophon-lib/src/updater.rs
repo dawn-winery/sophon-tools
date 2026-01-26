@@ -292,10 +292,10 @@ pub struct SophonPatcher {
     pub client: Client,
     pub patch_manifest: SophonPatchProto,
     pub diff_info: SophonDiff,
-    pub check_free_space: bool,
     pub temp_folder: PathBuf,
     pub patch_function: Option<BoxPatchFn>,
     pub last_file_suffix: Option<String>,
+    pub check_free_space: bool,
 }
 
 impl std::fmt::Debug for SophonPatcher {
