@@ -1,3 +1,4 @@
+use bytes::Bytes;
 use protobuf::Message;
 use reqwest::blocking::Client;
 use serde::de::DeserializeOwned;
@@ -112,15 +113,15 @@ pub fn get_protobuf_from_url_raw(
     client: &Client,
     url: impl AsRef<str>,
     compression: bool,
-) -> Result<Vec<u8>, SophonError> {
+) -> Result<Bytes, SophonError> {
     let response = client.get(url.as_ref()).send()?.error_for_status()?;
 
     let compressed_manifest = response.bytes()?;
 
     let protobuf_bytes = if compression {
-        zstd::decode_all(&*compressed_manifest).unwrap()
+        zstd::decode_all(&*compressed_manifest).unwrap().into()
     } else {
-        compressed_manifest.into()
+        compressed_manifest
     };
 
     Ok(protobuf_bytes)
@@ -194,7 +195,7 @@ pub fn get_download_manifest(
 pub fn get_download_manifest_raw(
     client: &Client,
     download_info: &SophonDownloadInfo,
-) -> Result<Vec<u8>, SophonError> {
+) -> Result<Bytes, SophonError> {
     let url_prefix = &download_info.manifest_download.url_prefix;
     let url_suffix = &download_info.manifest_download.url_suffix;
     let manifest_id = &download_info.manifest.id;
@@ -216,6 +217,16 @@ pub fn get_game_diffs_sophon_info(
     api_post_request(client, &url)
 }
 
+pub fn get_game_diffs_sophon_info_raw(
+    client: &Client,
+    package_info: &PackageInfo,
+    edition: &GameEdition,
+) -> Result<String, SophonError> {
+    let url = sophon_patch_info_url(package_info, edition);
+
+    api_post_request_raw(client, &url)
+}
+
 pub fn get_patch_manifest(
     client: &Client,
     diff_info: &SophonDiff,
@@ -225,6 +236,21 @@ pub fn get_patch_manifest(
     let manifest_id = &diff_info.manifest.id;
 
     get_protobuf_from_url(
+        client,
+        format!("{url_prefix}{url_suffix}/{manifest_id}"),
+        diff_info.manifest_download.compression == 1,
+    )
+}
+
+pub fn get_patch_manifest_raw(
+    client: &Client,
+    diff_info: &SophonDiff,
+) -> Result<Bytes, SophonError> {
+    let url_prefix = &diff_info.manifest_download.url_prefix;
+    let url_suffix = &diff_info.manifest_download.url_suffix;
+    let manifest_id = &diff_info.manifest.id;
+
+    get_protobuf_from_url_raw(
         client,
         format!("{url_prefix}{url_suffix}/{manifest_id}"),
         diff_info.manifest_download.compression == 1,
