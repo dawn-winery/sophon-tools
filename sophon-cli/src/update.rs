@@ -1,4 +1,7 @@
+use std::path::PathBuf;
+
 use clap::Args;
+use sophon_lib::GameEdition;
 
 use super::{DownloadParameters, GameCommon};
 
@@ -20,4 +23,15 @@ pub struct UpdateArgs {
 
     #[command(flatten)]
     extra: DownloadParameters,
+}
+
+impl UpdateArgs {
+    pub fn update(
+        &self,
+        game_edition: GameEdition,
+        cache_dir: PathBuf,
+        thread_count: usize,
+    ) -> Result<(), String> {
+        todo!()
+    }
 }

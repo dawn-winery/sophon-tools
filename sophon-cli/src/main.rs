@@ -125,8 +125,7 @@ fn main() {
             target.dump_api_data(edition, api_data::decide_format(format))
         }
         Action::Download(args) => args.download(edition, cli_args.cache_dir, cli_args.threads),
-        //Action::Update(UpdateArgs { game, from, to, extra }) => update(edition, game,
-        // cli_args.cache_dir, from, to, extra)
+        Action::Update(args) => args.update(edition, cli_args.cache_dir, cli_args.threads),
         _ => todo!(),
     };
 
