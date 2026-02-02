@@ -154,7 +154,7 @@ fn bytes_check_md5(data: &[u8], expected_hash: &str) -> bool {
 }
 
 // MD5 hash calculation without reading the whole file contents into RAM
-fn file_md5_hash_str(file_path: impl AsRef<Path>) -> std::io::Result<String> {
+pub fn file_md5_hash_str(file_path: impl AsRef<Path>) -> std::io::Result<String> {
     let mut file = File::open(&file_path)?;
     let mut md5 = Md5::new();
 
@@ -163,7 +163,7 @@ fn file_md5_hash_str(file_path: impl AsRef<Path>) -> std::io::Result<String> {
     Ok(format!("{:x}", md5.finalize()))
 }
 
-fn check_file(
+pub fn check_file(
     file_path: impl AsRef<Path>,
     expected_size: u64,
     expected_md5: &str,

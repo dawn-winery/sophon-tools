@@ -82,7 +82,7 @@ impl DownloadArgs {
     }
 
     pub fn download(
-        &self,
+        self,
         edition: GameEdition,
         temp_dir: PathBuf,
         threads: usize,
@@ -90,7 +90,6 @@ impl DownloadArgs {
         let components = self
             .game
             .component
-            .clone()
             .unwrap_or_else(|| vec!["game".to_owned()]);
         // doing this conversion because the blocking client doesn't have these options
         let client = reqwest::blocking::ClientBuilder::from(

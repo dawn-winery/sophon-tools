@@ -8,6 +8,7 @@ use crate::{
     api::schemas::{
         ApiResponse,
         game_branches::{GameBranches, PackageInfo},
+        game_configs::GameConfigs,
         game_scan_info::GameScanInfo,
         sophon_diff::{SophonDiff, SophonDiffs},
         sophon_manifests::{SophonDownloadInfo, SophonDownloads},
@@ -30,6 +31,14 @@ fn get_game_branches_url(edition: &GameEdition) -> String {
 fn get_game_scan_info_url(edition: &GameEdition) -> String {
     format!(
         "{}/hyp/hyp-connect/api/getGameScanInfo?launcher_id={}",
+        edition.branches_host(),
+        edition.launcher_id()
+    )
+}
+
+fn get_game_configs_url(edition: &GameEdition) -> String {
+    format!(
+        "{}/hyp/hyp-connect/api/getGameConfigs?launcher_id={}",
         edition.branches_host(),
         edition.launcher_id()
     )
@@ -155,6 +164,17 @@ pub fn get_game_scan_info_raw(
     edition: &GameEdition,
 ) -> Result<String, SophonError> {
     api_get_request_raw(client, get_game_scan_info_url(edition))
+}
+
+pub fn get_game_configs(
+    client: &Client,
+    edition: &GameEdition,
+) -> Result<GameConfigs, SophonError> {
+    api_get_request(client, get_game_configs_url(edition))
+}
+
+pub fn get_game_configs_raw(client: &Client, edition: &GameEdition) -> Result<String, SophonError> {
+    api_get_request_raw(client, get_game_configs_url(edition))
 }
 
 pub fn get_game_download_sophon_info(

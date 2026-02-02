@@ -3,6 +3,7 @@ use sophon_diff::SophonDiff;
 use sophon_manifests::SophonDownloadInfo;
 
 pub mod game_branches;
+pub mod game_configs;
 pub mod game_scan_info;
 pub mod sophon_diff;
 pub mod sophon_manifests;
