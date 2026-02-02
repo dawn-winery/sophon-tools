@@ -2,6 +2,7 @@ use indicatif::HumanBytes;
 use sophon_lib::{
     api::schemas::{
         game_branches::{GameBranchInfo, GameBranches, PackageInfo},
+        game_configs::{GameConfigs, GameLaunchConfig},
         game_scan_info::{GameExeHash, GameScanInfo, ScanInfo},
         sophon_diff::{SophonDiff, SophonDiffs},
         sophon_manifests::{
@@ -378,5 +379,23 @@ impl PrettyPrint for SophonUnusedAssetFile {
             "    File {FileName}; size {}; hash {FileMd5}",
             HumanBytes(*FileSize)
         );
+    }
+}
+
+impl PrettyPrint for GameConfigs {
+    fn pretty_print(&self) {
+        println!("Game Launch Configs:");
+        for launch_config in &self.launch_configs {
+            println!();
+            launch_config.pretty_print()
+        }
+    }
+}
+
+impl PrettyPrint for GameLaunchConfig {
+    fn pretty_print(&self) {
+        println!("Game biz: `{}`; id: `{}`", self.game.biz, self.game.id);
+        println!("  Executable file name: {}", self.exe_file_name);
+        println!("  Default download mode: {}", self.default_download_mode);
     }
 }

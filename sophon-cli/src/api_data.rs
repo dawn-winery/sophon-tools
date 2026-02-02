@@ -19,6 +19,8 @@ use crate::pretty_print::PrettyPrint;
 pub enum DumpTarget {
     /// Game scan information
     GameScanInfo(MultipleVersionFilter),
+    /// Game Configs. Only has latest version.
+    GameConfigs(MultipleVersionFilter),
 
     /// Game branches
     GameBranches(MultipleVersionFilter),
@@ -122,6 +124,9 @@ impl DumpTarget {
         let client = sophon_lib::reqwest::blocking::Client::new();
         match self {
             DumpTarget::GameScanInfo(args) => args.dump_game_scan_info(&client, edition, format),
+            DumpTarget::GameConfigs(args) => {
+                args.dump_game_launch_configs(&client, edition, format)
+            }
 
             DumpTarget::GameBranches(args) => args.dump_game_branches(&client, edition, format),
             DumpTarget::PackageInfo(args) => args.dump_package_info(&client, edition, format),
@@ -252,6 +257,41 @@ impl MultipleVersionFilter {
         }
 
         Err("Unable to find game branches with specified query".to_string())
+    }
+
+    fn dump_game_launch_configs(
+        self,
+        client: &Client,
+        edition: GameEdition,
+        format: DumpFormat,
+    ) -> Result<(), String> {
+        let Self {
+            game,
+            version,
+            latest,
+        } = self;
+        if matches!(format, DumpFormat::Raw) {
+            println!(
+                "{}",
+                sophon_lib::api::get_game_configs_raw(client, &edition).unwrap()
+            );
+            return Ok(());
+        }
+
+        let mut game_configs = sophon_lib::api::get_game_configs(client, &edition).unwrap();
+
+        if let Some(game_id_or_biz) = game {
+            game_configs.launch_configs.retain(|launch_config| {
+                launch_config.game.id == game_id_or_biz || launch_config.game.biz == game_id_or_biz
+            });
+        }
+
+        if !game_configs.launch_configs.is_empty() {
+            dump_value_formatted(&game_configs, format);
+            return Ok(());
+        }
+
+        Err("Unable to find game configs with specified query".to_string())
     }
 }
 
