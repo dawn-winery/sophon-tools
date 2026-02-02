@@ -632,13 +632,7 @@ impl SophonPatcher {
             // skip re-downloading it
             let artifact_path = self.tmp_artifact_file_path(&task);
 
-            let res = if check_file(
-                &artifact_path,
-                task.patch_chunk.PatchLength,
-                &task.patch_chunk.PatchMd5,
-            )
-            .unwrap_or(false)
-            {
+            let res = if artifact_path.exists() {
                 tracing::debug!(
                     artifact = ?artifact_path,
                     "Artifact already exists, skipping download"
@@ -740,12 +734,15 @@ impl SophonPatcher {
             });
         }
 
+        // PatchMd5 is a hash for the combined blob, not the chunk this function downloads
+        /*
         if !bytes_check_md5(&body, &task.patch_chunk.PatchMd5) {
             return Err(SophonError::ChunkHashMismatch {
                 expected: task.patch_chunk.PatchMd5.clone(),
                 got: md5_hash_str(&body),
             });
         }
+        */
 
         std::fs::write(out_filename, body)?;
 
