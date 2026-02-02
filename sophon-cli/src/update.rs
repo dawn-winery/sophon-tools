@@ -85,13 +85,16 @@ impl UpdateArgs {
         cache_dir: PathBuf,
         thread_count: usize,
     ) -> Result<(), String> {
-        if self.from == "auto" {
-            if let Some(auto_ver) =
+        if self.from == "auto"
+            && let Some(auto_ver) =
                 autodetect_game_ver(&self.game.game_dir, &self.game.game, &game_edition)
-                    .map_err(|e| e.to_string())?
-            {
-                self.from = auto_ver;
-            }
+                    .map_err(|e| e.to_string())
+                    .inspect_err(|err| {
+                        eprintln!("Error autodetecting game version: {err}");
+                    })
+                    .unwrap_or(None)
+        {
+            self.from = auto_ver;
         }
 
         todo!()

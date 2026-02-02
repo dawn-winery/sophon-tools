@@ -81,11 +81,23 @@ impl RepairArgs {
     }
 
     pub fn repair(
-        self,
+        mut self,
         edition: GameEdition,
         temp_dir: PathBuf,
         threads: usize,
     ) -> Result<(), String> {
+        if let Some(game_ver) = &mut self.version
+            && game_ver == "auto"
+            && let Some(auto_ver) =
+                super::update::autodetect_game_ver(&self.game.game_dir, &self.game.game, &edition)
+                    .inspect_err(|err| {
+                        eprintln!("Error autodetecting game version: {err}");
+                    })
+                    .unwrap_or(None)
+        {
+            *game_ver = auto_ver
+        }
+
         let components = self
             .game
             .component
