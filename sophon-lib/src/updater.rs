@@ -22,14 +22,13 @@ use super::{
     },
     utils::version::Version,
 };
-use crate::{bytes_check_md5, md5_hash_str};
+//use crate::{bytes_check_md5, md5_hash_str};
 
 #[derive(Debug)]
 pub enum Update {
     CheckingFreeSpace(PathBuf),
 
     CheckingFilesStarted,
-
     DeletingStarted,
 
     DeletingProgress {
@@ -352,7 +351,7 @@ impl SophonPatcher {
         target_dir: impl AsRef<Path>,
         from: Version,
         thread_count: usize,
-        updater: impl Fn(Update) + Clone + Send + 'static,
+        updater: impl Fn(Update) + Clone + Send,
     ) -> Result<(), SophonError> {
         let (download_threads, patch_threads) = super::divide_threads(thread_count)?;
 
@@ -391,7 +390,7 @@ impl SophonPatcher {
         patch_threads: NonZeroUsize,
         game_folder: impl AsRef<Path>,
         from: Version,
-        updater: impl Fn(Update) + Clone + Send + 'static,
+        updater: impl Fn(Update) + Clone + Send,
     ) {
         let update_index =
             UpdateIndex::new(&self.patch_manifest, &self.diff_info.diff_download, from);
@@ -538,7 +537,7 @@ impl SophonPatcher {
         &self,
         from: Version,
         thread_count: usize,
-        updater: impl Fn(Update) + Clone + Send + 'static,
+        updater: impl Fn(Update) + Clone + Send,
     ) -> Result<(), SophonError> {
         if self.check_free_space {
             tracing::info!("Checking free space availability");
@@ -570,7 +569,7 @@ impl SophonPatcher {
         &self,
         _thread_count: usize,
         from: Version,
-        updater: impl Fn(Update) + Clone + Send + 'static,
+        updater: impl Fn(Update) + Clone + Send,
     ) {
         tracing::debug!("Starting multithreaded update predownload process");
 
@@ -981,7 +980,7 @@ impl SophonPatcher {
     }
 
     fn free_space_check(
-        updater: impl Fn(Update) + Clone + Send + 'static,
+        updater: impl Fn(Update) + Clone + Send,
         path: impl AsRef<Path>,
         required: u64,
     ) -> Result<(), SophonError> {
