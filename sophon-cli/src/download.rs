@@ -9,7 +9,7 @@ use sophon_lib::{
 };
 
 use super::GameCommon;
-use crate::DownloadParameters;
+use crate::{DownloadParameters, pretty_print::PrettyPrint};
 
 #[derive(Debug, Args)]
 /// Download the game
@@ -95,10 +95,13 @@ impl DownloadArgs {
         let client = reqwest::blocking::ClientBuilder::from(
             reqwest::ClientBuilder::new()
                 .http2_adaptive_window(true)
-                .http2_keep_alive_while_idle(true),
+                .http2_keep_alive_while_idle(true)
+                .timeout(Duration::from_secs(30)),
         )
         .build()
         .unwrap();
+
+        println!("Fetching download information...");
         let branches =
             get_game_branches_info(&client, &edition).expect("Failed to get game branches");
         let package_info = if self.version.is_some() {
@@ -111,8 +114,15 @@ impl DownloadArgs {
                 .get_package_by_id_or_biz_latest(&self.game.game, self.preload)
                 .expect("Failed to find game")
         };
-        let downloads_info = get_game_download_sophon_info(&client, package_info, &edition)
+        let mut downloads_info = get_game_download_sophon_info(&client, package_info, &edition)
             .expect("Failed to get download info");
+
+        downloads_info
+            .manifests
+            .retain(|download_info| components.contains(&download_info.matching_field));
+
+        downloads_info.pretty_print();
+        println!();
 
         if !dialoguer::Confirm::new()
             .with_prompt("Proceed with download?")
@@ -122,11 +132,7 @@ impl DownloadArgs {
             std::process::exit(1)
         }
 
-        for download_info in downloads_info
-            .manifests
-            .iter()
-            .filter(|download_info| components.contains(&download_info.matching_field))
-        {
+        for download_info in downloads_info.manifests {
             let total_download = download_info.stats.compressed_size.parse::<u64>().unwrap();
             let download_style =
                 ProgressStyle::default_bar()
@@ -145,7 +151,7 @@ impl DownloadArgs {
 
             let mut downloader = sophon_lib::installer::SophonInstaller::new(
                 client.clone(),
-                download_info,
+                &download_info,
                 &temp_dir,
             )
             .expect("Failed to construct downloader")
