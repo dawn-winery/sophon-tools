@@ -293,9 +293,15 @@ impl PrettyPrint for SophonPatchProto {
                 if unused_files.assets.is_empty() {
                     println!("  None from version {ver}")
                 } else {
+                    // todo
+                    let verbose = false;
                     println!("  From version {ver}:");
-                    for unused_file in &unused_files.assets {
-                        unused_file.pretty_print();
+                    if verbose {
+                        for unused_file in &unused_files.assets {
+                            unused_file.pretty_print();
+                        }
+                    } else {
+                        println!("    ({} unused files not shown)", unused_files.assets.len())
                     }
                 }
             }
