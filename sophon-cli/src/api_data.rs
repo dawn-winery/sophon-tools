@@ -1,8 +1,6 @@
 use std::io::{Write, stdout};
 
 use clap::{Args, ValueEnum};
-use protobuf::MessageDyn;
-use protobuf_json_mapping::PrintOptions;
 use serde::Serialize;
 use sophon_lib::{
     GameEdition,
@@ -486,7 +484,7 @@ impl SingleMatchingFieldFilter {
             output.write_all(&data).unwrap();
         } else {
             let download_manifest = get_download_manifest(client, download_info).unwrap();
-            dump_protobuf_formatted(&download_manifest, format);
+            dump_value_formatted(&download_manifest, format);
         }
 
         Ok(())
@@ -533,7 +531,7 @@ impl SingleMatchingFieldFilter {
             output.write_all(&data).unwrap();
         } else {
             let patch_manifest = get_patch_manifest(client, diff_info).unwrap();
-            dump_protobuf_formatted(&patch_manifest, format);
+            dump_value_formatted(&patch_manifest, format);
         }
 
         Ok(())
@@ -570,40 +568,6 @@ where
         // getter types would work. Add filtering/subquerying to that too for extra code
         // deduplication. Although at that point I have a hunch that it blows up into being more
         // complicated to maintain that what is here now.
-        DumpFormat::Raw => unreachable!("Must be handled earlier in code"),
-    }
-}
-
-fn dump_protobuf_formatted<T>(value: &T, format: DumpFormat)
-where
-    T: core::fmt::Debug,
-    T: PrettyPrint,
-    T: MessageDyn,
-{
-    match format {
-        DumpFormat::Debug => println!("{value:?}"),
-        DumpFormat::DebugPretty => println!("{value:#?}"),
-        DumpFormat::JsonPretty | DumpFormat::Json => {
-            let options = PrintOptions {
-                enum_values_int: false,
-                proto_field_name: true,
-                always_output_default_values: true,
-                _future_options: (),
-            };
-            let mut serialized =
-                protobuf_json_mapping::print_to_string_with_options(value, &options)
-                    .expect("Failed to serialize value");
-            if matches!(format, DumpFormat::JsonPretty) {
-                let deserialized: serde_json::Value =
-                    serde_json::from_str(&serialized).expect("Failed to deserialize produced json");
-                serialized = serde_json::to_string_pretty(&deserialized)
-                    .expect("Failed to re-serialize value");
-            }
-            println!("{}", serialized)
-        }
-        DumpFormat::Pretty => {
-            value.pretty_print();
-        }
         DumpFormat::Raw => unreachable!("Must be handled earlier in code"),
     }
 }

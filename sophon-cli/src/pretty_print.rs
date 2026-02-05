@@ -10,13 +10,8 @@ use sophon_lib::{
         },
     },
     protos::{
-        SophonManifest::{
-            SophonManifestAssetChunk, SophonManifestAssetProperty, SophonManifestProto,
-        },
-        SophonPatch::{
-            SophonPatchAssetChunk, SophonPatchAssetProperty, SophonPatchProto,
-            SophonUnusedAssetFile,
-        },
+        SophonManifestAssetChunk, SophonManifestAssetProperty, SophonManifestProto,
+        SophonPatchAssetChunk, SophonPatchAssetProperty, SophonPatchProto, SophonUnusedAssetFile,
     },
 };
 
@@ -197,8 +192,8 @@ impl PrettyPrint for GameExeHash {
 
 impl PrettyPrint for SophonManifestProto {
     fn pretty_print(&self) {
-        println!("Assets:");
-        for asset in &self.Assets {
+        println!("assets:");
+        for asset in &self.assets {
             println!();
             asset.pretty_print()
         }
@@ -207,18 +202,18 @@ impl PrettyPrint for SophonManifestProto {
 
 impl PrettyPrint for SophonManifestAssetProperty {
     fn pretty_print(&self) {
-        println!("Filename: \"{}\"", self.AssetName);
-        print!("  Type number: {}", self.AssetType);
-        if self.AssetType == 0 {
+        println!("Filename: \"{}\"", self.asset_name);
+        print!("  Type number: {}", self.asset_type);
+        if self.asset_type == 0 {
             println!(" (file)");
         } else {
             println!();
         }
-        println!("  Size: {}", HumanBytes(self.AssetSize));
-        println!("  MD5 hash: `{}`", self.AssetHashMd5);
-        if !self.AssetChunks.is_empty() {
+        println!("  Size: {}", HumanBytes(self.asset_size));
+        println!("  MD5 hash: `{}`", self.asset_hash_md5);
+        if !self.asset_chunks.is_empty() {
             println!("  Chunks:");
-            for chunk_info in &self.AssetChunks {
+            for chunk_info in &self.asset_chunks {
                 println!();
                 chunk_info.pretty_print()
             }
@@ -230,19 +225,19 @@ impl PrettyPrint for SophonManifestAssetProperty {
 
 impl PrettyPrint for SophonManifestAssetChunk {
     fn pretty_print(&self) {
-        println!("    Name: `{}`", self.ChunkName);
+        println!("    Name: `{}`", self.chunk_name);
         println!(
             "    Compressed: size {}, MD5 hash `{}`, unknown field `{:#018x}`",
-            HumanBytes(self.ChunkSize),
-            self.ChunkCompressedHashMd5,
-            self.ChunkCompressedHashXxh
+            HumanBytes(self.chunk_size),
+            self.chunk_compressed_hash_md5,
+            self.chunk_compressed_hash_xxh
         );
         println!(
             "    Decompressed: size {}, MD5 hash `{}`",
-            HumanBytes(self.ChunkSizeDecompressed),
-            self.ChunkDecompressedHashMd5
+            HumanBytes(self.chunk_size_decompressed),
+            self.chunk_decompressed_hash_md5
         );
-        println!("    On-file offset: {:#x}", self.ChunkOnFileOffset);
+        println!("    On-file offset: {:#x}", self.chunk_on_file_offset);
     }
 }
 
@@ -285,21 +280,21 @@ impl PrettyPrint for SophonDiff {
 impl PrettyPrint for SophonPatchProto {
     fn pretty_print(&self) {
         println!("Patched assets:");
-        for asset in &self.PatchAssets {
+        for asset in &self.patch_assets {
             asset.pretty_print();
         }
         println!();
         println!();
-        if self.UnusedAssets.is_empty() {
+        if self.unused_assets.is_empty() {
             println!("No unused assets that need deletion")
         } else {
             println!("Unused assets:");
-            for (ver, unused_files) in &self.UnusedAssets {
-                if unused_files.Assets.is_empty() {
+            for (ver, unused_files) in &self.unused_assets {
+                if unused_files.assets.is_empty() {
                     println!("  None from version {ver}")
                 } else {
                     println!("  From version {ver}:");
-                    for unused_file in &unused_files.Assets {
+                    for unused_file in &unused_files.assets {
                         unused_file.pretty_print();
                     }
                 }
@@ -310,18 +305,18 @@ impl PrettyPrint for SophonPatchProto {
 
 impl PrettyPrint for SophonPatchAssetProperty {
     fn pretty_print(&self) {
-        if !self.AssetPatchChunks.is_empty() {
+        if !self.asset_patch_chunks.is_empty() {
             println!();
-            println!("  File {}", self.AssetName);
+            println!("  File {}", self.asset_name);
             println!(
                 "  Size: {}; Hash: {}",
-                HumanBytes(self.AssetSize),
-                self.AssetHashMd5
+                HumanBytes(self.asset_size),
+                self.asset_hash_md5
             );
-            if self.AssetPatchChunks.is_empty() {
+            if self.asset_patch_chunks.is_empty() {
                 println!("  NO PATCHES (???)");
             } else {
-                for (ver, chunk) in &self.AssetPatchChunks {
+                for (ver, chunk) in &self.asset_patch_chunks {
                     println!("  Patch from version {ver}:");
                     chunk.pretty_print()
                 }
@@ -330,9 +325,9 @@ impl PrettyPrint for SophonPatchAssetProperty {
         } else {
             println!(
                 "  File {}; Size {}; Hash {}; no chunks",
-                self.AssetName,
-                HumanBytes(self.AssetSize),
-                self.AssetHashMd5
+                self.asset_name,
+                HumanBytes(self.asset_size),
+                self.asset_hash_md5
             );
         }
     }
@@ -342,26 +337,26 @@ impl PrettyPrint for SophonPatchAssetChunk {
     fn pretty_print(&self) {
         println!(
             "    Chunk name: {}; size: {}; hash: {}",
-            self.PatchName,
-            HumanBytes(self.PatchSize),
-            self.PatchMd5
+            self.patch_name,
+            HumanBytes(self.patch_size),
+            self.patch_md5
         );
-        println!("    Build id: {}", self.BuildId);
-        println!("    Version tag: {}", self.VersionTag);
-        println!("    Patch size: {}", HumanBytes(self.PatchLength));
+        println!("    Build id: {}", self.build_id);
+        println!("    Version tag: {}", self.version_tag);
+        println!("    Patch size: {}", HumanBytes(self.patch_length));
         println!(
             "    Patch location in chunk (hex): 0x{:x}-0x{:x}",
-            self.PatchOffset,
-            self.PatchOffset + self.PatchLength - 1
+            self.patch_offset,
+            self.patch_offset + self.patch_length - 1
         );
-        if self.OriginalFileName.is_empty() {
+        if self.original_file_name.is_empty() {
             println!("    Original file does not exist, the file is new");
         } else {
-            println!("    Original file name: {}", self.OriginalFileName);
+            println!("    Original file name: {}", self.original_file_name);
             println!(
                 "    Original file size: {}; hash: {}",
-                HumanBytes(self.OriginalFileLength),
-                self.OriginalFileMd5
+                HumanBytes(self.original_file_length),
+                self.original_file_md5
             );
         }
     }
@@ -370,14 +365,14 @@ impl PrettyPrint for SophonPatchAssetChunk {
 impl PrettyPrint for SophonUnusedAssetFile {
     fn pretty_print(&self) {
         let Self {
-            FileName,
-            FileSize,
-            FileMd5,
+            file_name,
+            file_size,
+            file_md5,
             ..
         } = self;
         println!(
-            "    File {FileName}; size {}; hash {FileMd5}",
-            HumanBytes(*FileSize)
+            "    File {file_name}; size {}; hash {file_md5}",
+            HumanBytes(*file_size)
         );
     }
 }

@@ -1,5 +1,5 @@
 use bytes::Bytes;
-use protobuf::Message;
+use prost::Message;
 use reqwest::blocking::Client;
 use serde::de::DeserializeOwned;
 
@@ -13,7 +13,7 @@ use crate::{
         sophon_diff::{SophonDiff, SophonDiffs},
         sophon_manifests::{SophonDownloadInfo, SophonDownloads},
     },
-    protos::{SophonManifest::SophonManifestProto, SophonPatch::SophonPatchProto},
+    protos::{SophonManifestProto, SophonPatchProto},
 };
 
 pub mod schemas;
@@ -98,11 +98,15 @@ fn api_post_request_raw(client: &Client, url: impl AsRef<str>) -> Result<String,
 
 // Protobuf helpers
 
-pub fn get_protobuf_from_url<T: Message>(
+pub fn get_protobuf_from_url<T>(
     client: &Client,
     url: impl AsRef<str>,
     compression: bool,
-) -> Result<T, SophonError> {
+) -> Result<T, SophonError>
+where
+    T: Message,
+    T: Default,
+{
     let response = client.get(url.as_ref()).send()?.error_for_status()?;
 
     let compressed_manifest = response.bytes()?;
@@ -113,7 +117,7 @@ pub fn get_protobuf_from_url<T: Message>(
         compressed_manifest.into()
     };
 
-    let parsed_manifest = T::parse_from_bytes(&protobuf_bytes).unwrap();
+    let parsed_manifest = T::decode(protobuf_bytes.as_slice()).unwrap();
 
     Ok(parsed_manifest)
 }

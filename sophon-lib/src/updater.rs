@@ -17,7 +17,7 @@ use super::{
         schemas::{sophon_diff::SophonDiff, sophon_manifests::DownloadInfo},
     },
     check_file, file_md5_hash_str, finalize_file, prettify_bytes,
-    protos::SophonPatch::{
+    protos::{
         SophonPatchAssetChunk, SophonPatchAssetProperty, SophonPatchProto, SophonUnusedAssetInfo,
     },
     utils::version::Version,
@@ -74,26 +74,26 @@ struct FilePatchInfo<'a> {
 impl FilePatchInfo<'_> {
     /// Path to a target file on filesystem
     fn target_file_path(&self, game_dir: impl AsRef<Path>) -> PathBuf {
-        game_dir.as_ref().join(&self.file_manifest.AssetName)
+        game_dir.as_ref().join(&self.file_manifest.asset_name)
     }
 
     fn orig_file_path(&self, game_dir: impl AsRef<Path>) -> Option<PathBuf> {
         if !self.is_patch() {
             None
         } else {
-            Some(game_dir.as_ref().join(&self.patch_chunk.OriginalFileName))
+            Some(game_dir.as_ref().join(&self.patch_chunk.original_file_name))
         }
     }
 
     /// Path to temporary file to store before patching or as a result of a copy
     /// from patch chunk
     fn tmp_src_filename(&self) -> String {
-        format!("{}.tmp", &self.file_manifest.AssetHashMd5)
+        format!("{}.tmp", &self.file_manifest.asset_hash_md5)
     }
 
     /// Path to a temporary file to store patching output to
     fn tmp_out_filename(&self) -> String {
-        format!("{}.tmp.out", &self.file_manifest.AssetHashMd5)
+        format!("{}.tmp.out", &self.file_manifest.asset_hash_md5)
     }
 
     /// Get filename for whatever artifact is needed to patch this file.
@@ -103,31 +103,31 @@ impl FilePatchInfo<'_> {
         if self.is_patch() {
             format!(
                 "{}-{}.hdiff",
-                self.patch_chunk.PatchName, self.file_manifest.AssetHashMd5
+                self.patch_chunk.patch_name, self.file_manifest.asset_hash_md5
             )
         } else {
-            format!("{}.bin", self.file_manifest.AssetHashMd5)
+            format!("{}.bin", self.file_manifest.asset_hash_md5)
         }
     }
 
     /// Returns true if the file is updated by patching.
     /// Returns false if the file is simply copied from the chunk.
     fn is_patch(&self) -> bool {
-        !self.patch_chunk.OriginalFileName.is_empty()
+        !self.patch_chunk.original_file_name.is_empty()
     }
 
     /// Value for a Range header for downloading the file
     fn download_range(&self) -> String {
         format!(
             "bytes={}-{}",
-            self.patch_chunk.PatchOffset,
-            self.patch_chunk.PatchOffset + self.patch_chunk.PatchLength - 1
+            self.patch_chunk.patch_offset,
+            self.patch_chunk.patch_offset + self.patch_chunk.patch_length - 1
         )
     }
 
     fn download_url(&self) -> String {
         self.patch_chunk_download_info
-            .download_url(&self.patch_chunk.PatchName)
+            .download_url(&self.patch_chunk.patch_name)
     }
 }
 
@@ -148,16 +148,16 @@ impl<'a> UpdateIndex<'a> {
         from: Version,
     ) -> Self {
         let files_to_patch = update_manifest
-            .PatchAssets
+            .patch_assets
             .iter()
             .filter_map(|spap| {
                 Some((
-                    &spap.AssetName,
+                    &spap.asset_name,
                     FilePatchInfo {
                         file_manifest: spap,
                         patch_chunk_download_info,
                         patch_chunk: spap
-                            .AssetPatchChunks
+                            .asset_patch_chunks
                             .iter()
                             .find_map(|(fromver, pchunk)| (*fromver == from).then_some(pchunk))?,
                         retries_left: DEFAULT_CHUNK_RETRIES,
@@ -169,10 +169,10 @@ impl<'a> UpdateIndex<'a> {
         // use hashmap to deduplicate the chunks
         let mut patch_chunks_map = HashMap::new();
         for file_info in files_to_patch.values() {
-            if !patch_chunks_map.contains_key(&file_info.patch_chunk.PatchName) {
+            if !patch_chunks_map.contains_key(&file_info.patch_chunk.patch_name) {
                 patch_chunks_map.insert(
-                    &file_info.patch_chunk.PatchName,
-                    file_info.patch_chunk.PatchSize,
+                    &file_info.patch_chunk.patch_name,
+                    file_info.patch_chunk.patch_size,
                 );
             }
         }
@@ -180,7 +180,7 @@ impl<'a> UpdateIndex<'a> {
 
         Self {
             unused: update_manifest
-                .UnusedAssets
+                .unused_assets
                 .iter()
                 .find_map(|(fromver, unused)| (*fromver == from).then_some(unused)),
             unused_deleted: AtomicU64::new(0),
@@ -198,7 +198,7 @@ impl<'a> UpdateIndex<'a> {
 
     #[inline]
     fn total_unused(&self) -> u64 {
-        self.unused.map(|una| una.Assets.len()).unwrap_or(0) as u64
+        self.unused.map(|una| una.assets.len()).unwrap_or(0) as u64
     }
 
     #[inline]
@@ -270,7 +270,7 @@ impl<'a> UpdateIndex<'a> {
     ) {
         if file.retries_left == 0 {
             (updater)(Update::DownloadingError(SophonError::ChunkDownloadFailed(
-                file.patch_chunk.PatchName.clone(),
+                file.patch_chunk.patch_name.clone(),
             )))
         } else {
             file.retries_left -= 1;
@@ -422,35 +422,35 @@ impl SophonPatcher {
                 .filter(|patch_info| {
                     if check_file(
                         patch_info.target_file_path(game_folder),
-                        patch_info.file_manifest.AssetSize,
-                        &patch_info.file_manifest.AssetHashMd5,
+                        patch_info.file_manifest.asset_size,
+                        &patch_info.file_manifest.asset_hash_md5,
                     )
                     .unwrap_or(false)
                     {
                         tracing::debug!(
                             "File {} is already patched, skipping",
-                            patch_info.file_manifest.AssetName
+                            patch_info.file_manifest.asset_name
                         );
-                        (updater)(update_index.add_msg_bytes(patch_info.patch_chunk.PatchLength));
+                        (updater)(update_index.add_msg_bytes(patch_info.patch_chunk.patch_length));
                         (updater)(update_index.add_msg_patched(1));
                         return false;
                     } else if let Some(orig_file_path) = patch_info.orig_file_path(game_folder) {
                         #[allow(clippy::collapsible_if)]
                         if !check_file(
                             &orig_file_path,
-                            patch_info.patch_chunk.OriginalFileLength,
-                            &patch_info.patch_chunk.OriginalFileMd5,
+                            patch_info.patch_chunk.original_file_length,
+                            &patch_info.patch_chunk.original_file_md5,
                         )
                         .unwrap_or(false)
                         {
                             tracing::warn!(
                                 "The source file is invalid or does not exist, skipping: {}",
-                                patch_info.patch_chunk.OriginalFileName
+                                patch_info.patch_chunk.original_file_name
                             );
 
                             let err = SophonError::FileHashMismatch {
                                 path: orig_file_path.clone(),
-                                expected: patch_info.patch_chunk.OriginalFileMd5.clone(),
+                                expected: patch_info.patch_chunk.original_file_md5.clone(),
                                 got: file_md5_hash_str(orig_file_path)
                                     .unwrap_or_else(|_| "<could not generate hash>".to_owned()),
                             };
@@ -508,12 +508,12 @@ impl SophonPatcher {
                 (updater)(Update::DeletingStarted);
 
                 let _deleting_unused_span =
-                    tracing::trace_span!("Deleting unused", amount = unused.Assets.len()).entered();
+                    tracing::trace_span!("Deleting unused", amount = unused.assets.len()).entered();
 
                 // Deleting unused files
-                for unused_asset in &unused.Assets {
+                for unused_asset in &unused.assets {
                     // Ignore any I/O errors (e.g. missing files, etc)
-                    let _ = std::fs::remove_file(game_folder.join(&unused_asset.FileName));
+                    let _ = std::fs::remove_file(game_folder.join(&unused_asset.file_name));
 
                     (updater)(update_index.add_msg_deleted(1));
                 }
@@ -644,7 +644,7 @@ impl SophonPatcher {
 
             match res {
                 Ok(()) => {
-                    (updater)(update_index.add_msg_bytes(task.patch_chunk.PatchLength));
+                    (updater)(update_index.add_msg_bytes(task.patch_chunk.patch_length));
                     #[allow(clippy::collapsible_if)]
                     if let Some(patch_queue) = &patch_queue {
                         if let Err(err) = patch_queue.send_timeout(task, Duration::from_secs(10)) {
@@ -672,7 +672,7 @@ impl SophonPatcher {
 
                 Err(err) => {
                     tracing::error!(
-                        patch_name = task.patch_chunk.PatchName,
+                        patch_name = task.patch_chunk.patch_name,
                         ?err,
                         "Failed to download patch",
                     );
@@ -692,8 +692,8 @@ impl SophonPatcher {
     #[tracing::instrument(
         level = "trace", ret, skip(self, task),
         fields(
-            file = task.file_manifest.AssetName,
-            patch_chunk = task.patch_chunk.PatchName
+            file = task.file_manifest.asset_name,
+            patch_chunk = task.patch_chunk.patch_name
         )
     )]
     fn download_artifact(&self, task: &FilePatchInfo) -> Result<(), SophonError> {
@@ -714,10 +714,10 @@ impl SophonPatcher {
         // produce wrong file)
         #[allow(clippy::collapsible_if, reason = "only collapsible in Rust >= 1.88.0")]
         if let Some(length) = resp.content_length() {
-            if length != task.patch_chunk.PatchLength {
+            if length != task.patch_chunk.patch_length {
                 return Err(SophonError::DownloadSizeMismatch {
                     name: "Content Length",
-                    expected: task.patch_chunk.PatchLength,
+                    expected: task.patch_chunk.patch_length,
                     got: length,
                 });
             }
@@ -725,10 +725,10 @@ impl SophonPatcher {
 
         let body = resp.bytes()?;
 
-        if body.len() as u64 != task.patch_chunk.PatchLength {
+        if body.len() as u64 != task.patch_chunk.patch_length {
             return Err(SophonError::DownloadSizeMismatch {
                 name: "Response body",
-                expected: task.patch_chunk.PatchLength,
+                expected: task.patch_chunk.patch_length,
                 got: body.len() as u64,
             });
         }
@@ -773,14 +773,14 @@ impl SophonPatcher {
             let last_file_task = update_index
                 .files_to_patch
                 .values()
-                .find(|task| task.file_manifest.AssetName.ends_with(last_file_suffix))
+                .find(|task| task.file_manifest.asset_name.ends_with(last_file_suffix))
                 .expect("The file was encountered during download, it must exist in the index");
             let target_path = last_file_task.target_file_path(game_folder);
             if let Err(err) = finalize_file(
                 &last_file_path,
                 &target_path,
-                last_file_task.file_manifest.AssetSize,
-                &last_file_task.file_manifest.AssetHashMd5,
+                last_file_task.file_manifest.asset_size,
+                &last_file_task.file_manifest.asset_hash_md5,
             ) {
                 tracing::error!(?err, "Failed to install last file");
                 (updater)(Update::DownloadingError(err))
@@ -802,8 +802,8 @@ impl SophonPatcher {
 
             if let Ok(true) = check_file(
                 &target_path,
-                file_patch_task.file_manifest.AssetSize,
-                &file_patch_task.file_manifest.AssetHashMd5,
+                file_patch_task.file_manifest.asset_size,
+                &file_patch_task.file_manifest.asset_hash_md5,
             ) {
                 // shouldn't be encountered sicne the download queue is filtered, but keeping the
                 // check and message just in case
@@ -823,7 +823,7 @@ impl SophonPatcher {
         match res {
             Ok(()) => {
                 tracing::debug!(
-                    name = ?file_patch_task.file_manifest.AssetName,
+                    name = ?file_patch_task.file_manifest.asset_name,
                     "Successfully patched"
                 );
 
@@ -833,7 +833,7 @@ impl SophonPatcher {
             Err(e) => {
                 tracing::error!(
                     error = ?e,
-                    file = file_patch_task.file_manifest.AssetName,
+                    file = file_patch_task.file_manifest.asset_name,
                     "Patching failed"
                 );
 
@@ -853,8 +853,8 @@ impl SophonPatcher {
 
         if let Ok(true) = check_file(
             &target_path,
-            file_patch_task.file_manifest.AssetSize,
-            &file_patch_task.file_manifest.AssetHashMd5,
+            file_patch_task.file_manifest.asset_size,
+            &file_patch_task.file_manifest.asset_hash_md5,
         ) {
             tracing::debug!(file = ?target_path, "File appears to be already patched, marking as success");
 
@@ -866,8 +866,8 @@ impl SophonPatcher {
         finalize_file(
             &artifact_path,
             &target_path,
-            file_patch_task.file_manifest.AssetSize,
-            &file_patch_task.file_manifest.AssetHashMd5,
+            file_patch_task.file_manifest.asset_size,
+            &file_patch_task.file_manifest.asset_hash_md5,
         )
     }
 
@@ -879,8 +879,8 @@ impl SophonPatcher {
     ) -> Result<(), SophonError> {
         if !check_file(
             orig_file_path,
-            file_patch_task.patch_chunk.OriginalFileLength,
-            &file_patch_task.patch_chunk.OriginalFileMd5,
+            file_patch_task.patch_chunk.original_file_length,
+            &file_patch_task.patch_chunk.original_file_md5,
         )? {
             // A better way would be to mark the download as failed right away
             // instead of having this repeat all the retries. But it's easier to
@@ -889,7 +889,7 @@ impl SophonPatcher {
 
             return Err(SophonError::FileHashMismatch {
                 path: orig_file_path.to_owned(),
-                expected: file_patch_task.patch_chunk.OriginalFileMd5.clone(),
+                expected: file_patch_task.patch_chunk.original_file_md5.clone(),
                 got: file_md5_hash_str(orig_file_path)?,
             });
         }
@@ -904,7 +904,7 @@ impl SophonPatcher {
 
         let target = if file_patch_task
             .file_manifest
-            .AssetName
+            .asset_name
             .ends_with("globalgamemanagers")
         {
             self.files_temp().join("globalgamemanagers.tmp")
@@ -915,8 +915,8 @@ impl SophonPatcher {
         finalize_file(
             &tmp_out_path,
             &target,
-            file_patch_task.file_manifest.AssetSize,
-            &file_patch_task.file_manifest.AssetHashMd5,
+            file_patch_task.file_manifest.asset_size,
+            &file_patch_task.file_manifest.asset_hash_md5,
         )?;
 
         // Clean up a bit after patching

@@ -9,10 +9,17 @@ fn main() {
         let hpatchz_md5 = Md5::digest(&hpatchz_data);
         println!("cargo::rustc-env=HPATCHZ_MD5={hpatchz_md5:x}");
     }
-    protobuf_codegen::Codegen::new()
-        .cargo_out_dir("protos")
-        .include("src")
-        .input("src/protos/SophonManifest.proto")
-        .input("src/protos/SophonPatch.proto")
-        .run_from_script();
+    prost_build::Config::new()
+        .message_attribute(
+            ".",
+            "#[derive(serde::Serialize)] #[serde(rename_all=\"snake_case\")]",
+        )
+        .compile_protos(
+            &[
+                "src/protos/SophonManifest.proto",
+                "src/protos/SophonPatch.proto",
+            ],
+            &["src/protos"],
+        )
+        .unwrap();
 }
