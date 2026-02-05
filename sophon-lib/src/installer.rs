@@ -310,6 +310,10 @@ impl<'a> ChunkQueueSender<'a, '_> {
     }
 
     fn has_space(&self, loc: &ChunkLocation, chunk_info: &ChunkInfo<'a>) -> bool {
+        // Prevent the queue choking on a chunk that is bigger than the limit.
+        if self.sender.is_empty() {
+            return true;
+        }
         let Some((limit, counter)) = self.memory_limit else {
             return true;
         };
