@@ -627,7 +627,7 @@ impl SophonInstaller {
     pub fn pre_download(
         &self,
         thread_count: usize,
-        updater: impl Fn(Update) + Clone + Send + 'static,
+        updater: impl Fn(Update) + Clone + Send,
     ) -> Result<(), SophonError> {
         if self.check_free_space {
             tracing::info!("Checking free space availability");
@@ -653,7 +653,7 @@ impl SophonInstaller {
     fn predownload_multithreaded(
         &self,
         thread_count: usize,
-        updater: impl Fn(Update) + Clone + Send + 'static,
+        updater: impl Fn(Update) + Clone + Send,
     ) {
         tracing::debug!("Starting multithreaded predownload");
 

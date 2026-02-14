@@ -82,6 +82,10 @@ struct DownloadParameters {
     /// possible.
     #[arg(long)]
     chunk_buffer_memory: bool,
+    /// Pretend this is a preload, so don't install/update files, only download and store in cache
+    /// the intermediates
+    #[arg(long)]
+    preload_pretend: bool,
 }
 
 fn is_piped() -> bool {

@@ -226,18 +226,32 @@ impl UpdateArgs {
                 SophonPatcher::new(client.clone(), &update_manifest, &cache_dir, None)
                     .expect("Failed to construct updater")
                     .with_free_space_check(!self.extra.skip_free_space_check);
+            let res = if !self.extra.preload_pretend {
+                updater.update(
+                    &self.game.game_dir,
+                    Version::from_str(&self.from).unwrap(),
+                    thread_count,
+                    Self::new_updater(
+                        &progress_bar,
+                        &download_style,
+                        &file_check_style,
+                        &matching_field,
+                    ),
+                )
+            } else {
+                updater.pre_download(
+                    Version::from_str(&self.from).unwrap(),
+                    thread_count,
+                    Self::new_updater(
+                        &progress_bar,
+                        &download_style,
+                        &file_check_style,
+                        &matching_field,
+                    ),
+                )
+            };
 
-            if let Err(why) = updater.update(
-                &self.game.game_dir,
-                Version::from_str(&self.from).unwrap(),
-                thread_count,
-                Self::new_updater(
-                    &progress_bar,
-                    &download_style,
-                    &file_check_style,
-                    &matching_field,
-                ),
-            ) {
+            if let Err(why) = res {
                 progress_bar.abandon_with_message(format!(
                     "Failed to download component {}: {why:?}",
                     update_manifest.matching_field

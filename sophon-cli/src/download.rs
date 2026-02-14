@@ -159,16 +159,29 @@ impl DownloadArgs {
             downloader.inplace = self.inplace;
             downloader.chunks_in_mem = self.extra.chunk_buffer_memory;
             downloader.chunks_queue_data_limit = self.extra.memory_buffer_limit;
-            if let Err(why) = downloader.install(
-                &self.game.game_dir,
-                threads,
-                Self::new_updater(
-                    &progress_bar,
-                    &download_style,
-                    &file_check_style,
-                    &matching_field,
-                ),
-            ) {
+            let res = if !self.extra.preload_pretend {
+                downloader.install(
+                    &self.game.game_dir,
+                    threads,
+                    Self::new_updater(
+                        &progress_bar,
+                        &download_style,
+                        &file_check_style,
+                        &matching_field,
+                    ),
+                )
+            } else {
+                downloader.pre_download(
+                    threads,
+                    Self::new_updater(
+                        &progress_bar,
+                        &download_style,
+                        &file_check_style,
+                        &matching_field,
+                    ),
+                )
+            };
+            if let Err(why) = res {
                 progress_bar.abandon_with_message(format!(
                     "Failed to download component {}: {why:?}",
                     download_info.matching_field
