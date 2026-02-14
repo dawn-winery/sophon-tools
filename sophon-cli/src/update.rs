@@ -112,7 +112,7 @@ impl UpdateArgs {
                 progress_bar.set_style(file_check_style.clone());
             }
             sophon_lib::updater::Update::DownloadingStarted(location) => {
-                progress_bar.set_message(format!("Downloading to {}", location.display()));
+                progress_bar.set_message(format!("Updating game at {}", location.display()));
                 progress_bar.set_style(download_style.clone());
                 progress_bar.set_position(0);
                 progress_bar.reset_elapsed();
@@ -121,7 +121,7 @@ impl UpdateArgs {
                 progress_bar.set_message(format!("Checking free space at {}", path.display()))
             }
             sophon_lib::updater::Update::DownloadingFinished => progress_bar
-                .finish_with_message(format!("Finished downloading component {}", matching_field)),
+                .finish_with_message(format!("Finished updating component `{}`", matching_field)),
             _ => {}
         }
     }
