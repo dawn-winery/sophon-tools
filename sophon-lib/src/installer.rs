@@ -360,6 +360,8 @@ pub struct SophonInstaller {
     pub inplace: bool,
     pub chunks_in_mem: bool,
     pub skip_download_repair: bool,
+    /// Will report broken files if this is enabled
+    pub mode_repair: bool,
 }
 
 impl SophonInstaller {
@@ -381,6 +383,7 @@ impl SophonInstaller {
             chunks_queue_data_limit: Some(512 * 1024 * 1024),
             skip_download_repair: false,
             last_file_suffix: Some("globalgamemanagers".to_owned()),
+            mode_repair: false,
         })
     }
 
@@ -534,6 +537,12 @@ impl SophonInstaller {
                             .check_file_region(game_folder, &chunk_info, file_info)
                             .unwrap_or(false)
                         {
+                            if self.mode_repair {
+                                tracing::error!(
+                                    "Broken file detected: {}",
+                                    file_info.file_manifest.asset_name
+                                )
+                            }
                             redownload_set.insert(&chunk_info.chunk_manifest.chunk_name);
                             Some(chunk_info)
                         } else {
