@@ -176,6 +176,7 @@ impl RepairArgs {
             downloader.chunks_in_mem = self.extra.chunk_buffer_memory;
             downloader.chunks_queue_data_limit = self.extra.memory_buffer_limit;
             downloader.skip_download_repair = self.dry_run;
+            downloader.mode_repair = true;
             if let Err(why) = downloader.install(
                 &self.game.game_dir,
                 threads,
