@@ -902,12 +902,13 @@ impl SophonPatcher {
 
         self.patch(&tmp_src_path, &artifact, &tmp_out_path)?;
 
-        let target = if file_patch_task
-            .file_manifest
-            .asset_name
-            .ends_with("globalgamemanagers")
+        let target = if self
+            .last_file_suffix
+            .as_ref()
+            .map(|suffix| file_patch_task.file_manifest.asset_name.ends_with(suffix))
+            .unwrap_or(false)
         {
-            self.files_temp().join("globalgamemanagers.tmp")
+            self.files_temp().join("last_file.tmp")
         } else {
             file_patch_task.target_file_path(game_folder)
         };
