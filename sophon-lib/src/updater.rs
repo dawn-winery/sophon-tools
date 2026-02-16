@@ -867,42 +867,18 @@ impl SophonPatcher {
 
         let mut file = File::open(&artifact_path)?;
 
-        if let Ok((is_compressed, size)) = weird_hdiff_parse(&mut file) {
-            tracing::debug!("Using weird hdiff workaround");
-            let file_size = file.metadata().map(|m| m.size())?;
-            file.seek(std::io::SeekFrom::Start(file_size - size))?;
-            let mut artifact_file_name = artifact_path
-                .file_name()
-                .expect("path must point to a file")
-                .to_owned();
-            artifact_file_name.push(".tmp");
-            let tmp_path = artifact_path
-                .parent()
-                .expect("where parent")
-                .join(artifact_file_name);
-            let mut out_tmp_file = File::create(&tmp_path)?;
-            out_tmp_file.set_len(size)?;
-            if is_compressed {
-                let mut decoder = zstd::Decoder::new(&mut file)?;
-                std::io::copy(&mut decoder, &mut out_tmp_file)?;
-            } else {
-                std::io::copy(&mut file, &mut out_tmp_file)?;
-            }
-            drop(out_tmp_file);
-            finalize_file(
-                &tmp_path,
-                &target_path,
-                file_patch_task.file_manifest.asset_size,
-                &file_patch_task.file_manifest.asset_hash_md5,
-            )
+        let blob_path = if let Ok((is_compressed, inner_size)) = weird_hdiff_parse(&mut file) {
+            self.new_file_hdiff(is_compressed, inner_size, &mut file, &artifact_path)?
         } else {
-            finalize_file(
-                &artifact_path,
-                &target_path,
-                file_patch_task.file_manifest.asset_size,
-                &file_patch_task.file_manifest.asset_hash_md5,
-            )
-        }
+            artifact_path
+        };
+
+        finalize_file(
+            &blob_path,
+            &target_path,
+            file_patch_task.file_manifest.asset_size,
+            &file_patch_task.file_manifest.asset_hash_md5,
+        )
         .inspect_err(|err| {
             tracing::error!(
                 ?err,
@@ -911,6 +887,36 @@ impl SophonPatcher {
             );
             tracing::debug!(?file_patch_task, "Errored file task information");
         })
+    }
+
+    fn new_file_hdiff(
+        &self,
+        is_compressed: bool,
+        inner_size: u64,
+        hdiff_file: &mut File,
+        artifact_path: &Path,
+    ) -> Result<PathBuf, SophonError> {
+        tracing::debug!("Using weird hdiff workaround");
+        let file_size = hdiff_file.metadata().map(|m| m.size())?;
+        hdiff_file.seek(std::io::SeekFrom::Start(file_size - inner_size))?;
+        let mut artifact_file_name = artifact_path
+            .file_name()
+            .expect("path must point to a file")
+            .to_owned();
+        artifact_file_name.push(".tmp");
+        let tmp_path = artifact_path
+            .parent()
+            .expect("where parent")
+            .join(artifact_file_name);
+        let mut out_tmp_file = File::create(&tmp_path)?;
+        out_tmp_file.set_len(inner_size)?;
+        if is_compressed {
+            let mut decoder = zstd::Decoder::new(hdiff_file)?;
+            std::io::copy(&mut decoder, &mut out_tmp_file)?;
+        } else {
+            std::io::copy(hdiff_file, &mut out_tmp_file)?;
+        }
+        Ok(tmp_path)
     }
 
     fn file_patch(
