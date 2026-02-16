@@ -867,7 +867,7 @@ impl SophonPatcher {
 
         let mut file = File::open(&artifact_path)?;
 
-        let res = if let Ok((is_compressed, size)) = weird_hdiff_parse(&mut file) {
+        if let Ok((is_compressed, size)) = weird_hdiff_parse(&mut file) {
             tracing::debug!("Using weird hdiff workaround");
             let file_size = file.metadata().map(|m| m.size())?;
             file.seek(std::io::SeekFrom::Start(file_size - size))?;
@@ -902,17 +902,15 @@ impl SophonPatcher {
                 file_patch_task.file_manifest.asset_size,
                 &file_patch_task.file_manifest.asset_hash_md5,
             )
-        };
-
-        if res.is_err() {
-            tracing::error!(
-                "Error for file {}",
-                file_patch_task.file_manifest.asset_name
-            );
-            tracing::debug!("Task information: {file_patch_task:?}");
         }
-
-        res
+        .inspect_err(|err| {
+            tracing::error!(
+                ?err,
+                asset_name = file_patch_task.file_manifest.asset_name,
+                "Error with new file"
+            );
+            tracing::debug!(?file_patch_task, "Errored file task information");
+        })
     }
 
     fn file_patch(
