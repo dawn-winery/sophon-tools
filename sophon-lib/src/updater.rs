@@ -1083,6 +1083,11 @@ fn weird_hdiff_parse<R: Read>(reader: &mut R) -> std::io::Result<(bool, u64)> {
     let mut buf = [0_u8; 128];
     reader.read_exact(&mut buf)?;
     let buf = buf;
+    if !buf.starts_with(b"HDIFF13") {
+        return Err(std::io::Error::other(
+            "Invalid HDIFF, file does not start with HDIFF13",
+        ));
+    }
     let header_start = buf
         .iter()
         .enumerate()
