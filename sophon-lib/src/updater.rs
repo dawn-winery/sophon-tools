@@ -1,7 +1,7 @@
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     fs::File,
-    io::{Cursor, Read, Seek},
+    io::{Cursor, Read, Seek, SeekFrom},
     num::NonZeroUsize,
     os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
@@ -23,6 +23,9 @@ use super::{
         SophonPatchAssetChunk, SophonPatchAssetProperty, SophonPatchProto, SophonUnusedAssetInfo,
     },
     utils::version::Version,
+};
+use crate::{
+    api::schemas::sophon_manifests::SophonDownloadInfo, utils::read_reporter::ReadReporter,
 };
 //use crate::{bytes_check_md5, md5_hash_str};
 
@@ -586,8 +589,14 @@ impl SophonPatcher {
 
         (updater)(update_index.msg_bytes());
 
+        let mut dedupe_set = HashSet::new();
+
         let download_queue = Mutex::new(VecDeque::from_iter(
-            update_index.files_to_patch.values().cloned(),
+            update_index
+                .files_to_patch
+                .values()
+                .filter(|file| dedupe_set.insert(&file.patch_chunk.patch_name))
+                .cloned(),
         ));
 
         tracing::debug!("Starting download");
@@ -632,8 +641,36 @@ impl SophonPatcher {
             // Check if the file already exists on disk and if it does,
             // skip re-downloading it
             let artifact_path = self.tmp_artifact_file_path(&task);
+            let combined_file_path = self.tmp_patch_blob_path(task.patch_chunk);
 
-            let res = if artifact_path.exists() {
+            let download_res = if patch_queue.is_none() {
+                // preload
+                if check_file(
+                    &combined_file_path,
+                    task.patch_chunk.patch_size,
+                    &task.patch_chunk.patch_md5,
+                )
+                .unwrap_or(false)
+                {
+                    (updater)(update_index.add_msg_bytes(task.patch_chunk.patch_length));
+                    Ok(())
+                } else {
+                    self.download_patch_blob(
+                        task.patch_chunk,
+                        task.patch_chunk_download_info,
+                        update_index,
+                        &updater,
+                    )
+                }
+            } else if check_file(
+                &combined_file_path,
+                task.patch_chunk.patch_size,
+                &task.patch_chunk.patch_md5,
+            )
+            .unwrap_or(false)
+            {
+                self.get_patch_from_combined(&task)
+            } else if artifact_path.exists() {
                 tracing::debug!(
                     artifact = ?artifact_path,
                     "Artifact already exists, skipping download"
@@ -641,14 +678,15 @@ impl SophonPatcher {
 
                 Ok(())
             } else {
-                self.download_artifact(&task)
+                self.download_patch_range(&task)
             };
 
-            match res {
+            match download_res {
                 Ok(()) => {
-                    (updater)(update_index.add_msg_bytes(task.patch_chunk.patch_length));
                     #[allow(clippy::collapsible_if)]
                     if let Some(patch_queue) = &patch_queue {
+                        // udpating downlaod counter is handled in combined-file downloader
+                        (updater)(update_index.add_msg_bytes(task.patch_chunk.patch_length));
                         if let Err(err) = patch_queue.send_timeout(task, Duration::from_secs(10)) {
                             match err {
                                 crossbeam_channel::SendTimeoutError::Disconnected(_) => {
@@ -689,16 +727,86 @@ impl SophonPatcher {
         }
     }
 
+    #[tracing::instrument(
+        level = "trace", ret, skip_all,
+        fields(
+            patch_chunk = chunk_info.patch_name,
+            url = download_info.download_url(&chunk_info.patch_name),
+        )
+    )]
+    fn download_patch_blob(
+        &self,
+        chunk_info: &SophonPatchAssetChunk,
+        download_info: &DownloadInfo,
+        update_index: &UpdateIndex<'_>,
+        updater: impl Fn(Update),
+    ) -> Result<(), SophonError> {
+        let download_url = download_info.download_url(&chunk_info.patch_name);
+        let resp = self.client.get(download_url).send()?.error_for_status()?;
+
+        #[allow(clippy::collapsible_if, reason = "only collapsible in Rust >= 1.88.0")]
+        if let Some(length) = resp.content_length() {
+            if length != chunk_info.patch_size {
+                return Err(SophonError::DownloadSizeMismatch {
+                    name: "Content Length",
+                    expected: chunk_info.patch_size,
+                    got: length,
+                });
+            }
+        }
+
+        let mut reader = ReadReporter::new(resp, |added| {
+            (updater)(update_index.add_msg_bytes(added));
+        });
+
+        let out_filename = self
+            .patch_chunk_temp_folder()
+            .join(format!("{}.bin", chunk_info.patch_name));
+        let mut out_file = File::create(&out_filename)?;
+
+        std::io::copy(&mut reader, &mut out_file)?;
+
+        drop(reader);
+        drop(out_file);
+
+        if !check_file(&out_filename, chunk_info.patch_size, &chunk_info.patch_md5).unwrap_or(false)
+        {
+            return Err(SophonError::ChunkHashMismatch {
+                expected: chunk_info.patch_md5.clone(),
+                got: file_md5_hash_str(&out_filename)?,
+            });
+        }
+
+        Ok(())
+    }
+
+    fn get_patch_from_combined(&self, task: &FilePatchInfo) -> Result<(), SophonError> {
+        let artifact_path = self.tmp_artifact_file_path(task);
+        let combined_file_path = self.tmp_patch_blob_path(task.patch_chunk);
+
+        let mut src_file = File::open(&combined_file_path)?;
+        src_file.seek(SeekFrom::Start(task.patch_chunk.patch_offset))?;
+        let mut src_take = src_file.take(task.patch_chunk.patch_length);
+
+        let mut out_file = File::create(&artifact_path)?;
+
+        std::io::copy(&mut src_take, &mut out_file)?;
+
+        Ok(())
+    }
+
     // instrumenting to maybe try and see how much time it takes to download, hash
     // check, and apply
     #[tracing::instrument(
-        level = "trace", ret, skip(self, task),
+        level = "trace", ret, skip_all,
         fields(
             file = task.file_manifest.asset_name,
-            patch_chunk = task.patch_chunk.patch_name
+            patch_chunk = task.patch_chunk.patch_name,
+            url = task.download_url(),
+            range = task.download_range()
         )
     )]
-    fn download_artifact(&self, task: &FilePatchInfo) -> Result<(), SophonError> {
+    fn download_patch_range(&self, task: &FilePatchInfo) -> Result<(), SophonError> {
         let download_url = task.download_url();
         let download_range_val = task.download_range();
         let out_filename = self.tmp_artifact_file_path(task);
@@ -1011,6 +1119,11 @@ impl SophonPatcher {
 
     fn tmp_artifact_file_path(&self, file_info: &FilePatchInfo) -> PathBuf {
         self.patches_temp().join(file_info.artifact_filename())
+    }
+
+    fn tmp_patch_blob_path(&self, patch_info: &SophonPatchAssetChunk) -> PathBuf {
+        self.patch_chunk_temp_folder()
+            .join(format!("{}.bin", patch_info.patch_name))
     }
 
     /// Folder to temporarily store downloaded patch chunks
