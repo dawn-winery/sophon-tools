@@ -1,10 +1,16 @@
 use std::{
-    io::Error,
+    fs::{File, OpenOptions},
+    io::{Error, Read, Seek, Write},
     os::unix::prelude::PermissionsExt,
     path::{Path, PathBuf},
     process::Command,
     sync::Once,
 };
+
+use interprocess::os::unix::fifo_file::create_fifo;
+use rand::{RngExt, distr::Alphanumeric, rng};
+
+use crate::updater::{PatchFnArgs, PatchLocation};
 
 const HPATCHZ_BINARY: &[u8] = include_bytes!("../../external/hpatchz/hpatchz");
 const HPATCHZ_MD5: &str = env!("HPATCHZ_MD5");
@@ -28,17 +34,73 @@ fn save_executable_to(path: &Path) -> std::io::Result<()> {
 
 /// Try to apply hdiff patch
 #[tracing::instrument(level = "debug")]
-pub fn patch(file: &Path, patch: &Path, output: &Path) -> std::io::Result<()> {
+pub fn patch(args: PatchFnArgs) -> std::io::Result<()> {
     tracing::debug!("Applying hdiff patch");
 
     let hpatchz = hpatchz_fs_binary()?;
 
-    let output = Command::new(hpatchz)
+    let (patch_file_path, mut patch_file_handle) = match args.patch {
+        PatchLocation::Filesystem(path) => (path.clone(), None),
+        PatchLocation::Memory(_) | PatchLocation::FilesystemRegion { .. } => {
+            let pipe_path = PathBuf::from(format!(
+                "/tmp/patch-{}.pipe",
+                rng()
+                    .sample_iter(&Alphanumeric)
+                    .map(|c| c as char)
+                    .take(16)
+                    .collect::<String>()
+            ));
+
+            create_fifo(&pipe_path, 0o600)
+                .inspect_err(|err| tracing::error!("Error creating named pipe: {err}"))?;
+
+            let file = OpenOptions::new()
+                .write(true)
+                .open(&pipe_path)
+                .inspect_err(|err| {
+                    tracing::error!("Error opening named pipe for writing: {err}")
+                })?;
+
+            (pipe_path, Some(file))
+        }
+    };
+
+    let child = Command::new(hpatchz)
         .arg("-f")
-        .arg(file.as_os_str())
-        .arg(patch.as_os_str())
-        .arg(output.as_os_str())
-        .output()?;
+        .arg(args.src_file.as_os_str())
+        .arg(patch_file_path.as_os_str())
+        .arg(args.out_file.as_os_str())
+        .spawn()?;
+
+    if let Some(patch_pipe) = &mut patch_file_handle {
+        match args.patch {
+            PatchLocation::Filesystem(_) => {}
+            PatchLocation::Memory(data) => {
+                patch_pipe.write_all(data)?;
+            }
+            PatchLocation::FilesystemRegion {
+                combined_path,
+                offset,
+                length,
+            } => {
+                let mut combined_file = File::open(combined_path)?;
+                combined_file.seek_relative(*offset as i64)?;
+                let mut region = combined_file.take(*length);
+                std::io::copy(&mut region, patch_pipe)?;
+            }
+        }
+    }
+
+    drop(patch_file_handle);
+
+    let output = child.wait_with_output()?;
+
+    if matches!(
+        args.patch,
+        PatchLocation::Memory(_) | PatchLocation::FilesystemRegion { .. }
+    ) {
+        let _ = std::fs::remove_file(&patch_file_path);
+    }
 
     if String::from_utf8_lossy(output.stdout.as_slice()).contains("patch ok!") {
         Ok(())

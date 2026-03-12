@@ -9,6 +9,7 @@ use std::{
     time::Duration,
 };
 
+use bytes::Bytes;
 use crossbeam_channel::{Receiver, Sender};
 use reqwest::{blocking::Client, header::RANGE};
 
@@ -288,9 +289,43 @@ impl<'a> UpdateIndex<'a> {
     }
 }
 
-type BoxPatchFn = Box<dyn Fn(&Path, &Path, &Path) -> std::io::Result<()> + Sync>;
-
 // TODO: in-memory queue, queue limit
+
+#[derive(Debug)]
+pub enum PatchLocation {
+    Memory(Bytes),
+    Filesystem(PathBuf),
+    FilesystemRegion {
+        combined_path: PathBuf,
+        offset: u64,
+        length: u64,
+    },
+}
+
+impl PatchLocation {
+    fn size(&self) -> std::io::Result<u64> {
+        match self {
+            Self::Filesystem(path) => Ok(std::fs::metadata(path)?.size()),
+            Self::Memory(buf) => Ok(buf.len() as u64),
+            Self::FilesystemRegion { length, .. } => Ok(*length),
+        }
+    }
+
+    fn cleanup(&self) {
+        if let Self::Filesystem(path) = self {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct PatchFnArgs<'a> {
+    pub patch: &'a PatchLocation,
+    pub src_file: &'a Path,
+    pub out_file: &'a Path,
+}
+
+type BoxPatchFn = Box<dyn Fn(PatchFnArgs<'_>) -> std::io::Result<()> + Sync>;
 
 pub struct SophonPatcher {
     pub client: Client,
@@ -300,6 +335,8 @@ pub struct SophonPatcher {
     pub patch_function: Option<BoxPatchFn>,
     pub last_file_suffix: Option<String>,
     pub check_free_space: bool,
+    pub patches_in_memory: bool,
+    pub patch_queue_mem_limit: Option<u64>,
 }
 
 impl std::fmt::Debug for SophonPatcher {
@@ -334,6 +371,8 @@ impl SophonPatcher {
             temp_folder: temp_dir.as_ref().to_owned(),
             patch_function,
             last_file_suffix: Some("globalgamemanagers".to_owned()),
+            patches_in_memory: false,
+            patch_queue_mem_limit: None,
         })
     }
 
@@ -625,7 +664,7 @@ impl SophonPatcher {
     fn artifact_download_loop<'a, 'b>(
         &self,
         task_queue: &'b Mutex<VecDeque<FilePatchInfo<'a>>>,
-        patch_queue: Option<Sender<FilePatchInfo<'a>>>,
+        patch_queue: Option<Sender<(PatchLocation, FilePatchInfo<'a>)>>,
         update_index: &'b UpdateIndex<'a>,
         updater: impl Fn(Update) + 'b,
     ) {
@@ -662,6 +701,11 @@ impl SophonPatcher {
                         &updater,
                     )
                 }
+                .map(|_| PatchLocation::FilesystemRegion {
+                    combined_path: combined_file_path,
+                    offset: task.patch_chunk.patch_offset,
+                    length: task.patch_chunk.patch_length,
+                })
             } else if check_file(
                 &combined_file_path,
                 task.patch_chunk.patch_size,
@@ -669,25 +713,32 @@ impl SophonPatcher {
             )
             .unwrap_or(false)
             {
-                self.get_patch_from_combined(&task)
+                //self.get_patch_from_combined(&task)
+                Ok(PatchLocation::FilesystemRegion {
+                    combined_path: combined_file_path,
+                    offset: task.patch_chunk.patch_offset,
+                    length: task.patch_chunk.patch_length,
+                })
             } else if artifact_path.exists() {
                 tracing::debug!(
                     artifact = ?artifact_path,
                     "Artifact already exists, skipping download"
                 );
 
-                Ok(())
+                Ok(PatchLocation::Filesystem(artifact_path.clone()))
             } else {
                 self.download_patch_range(&task)
             };
 
             match download_res {
-                Ok(()) => {
+                Ok(loc) => {
                     #[allow(clippy::collapsible_if)]
                     if let Some(patch_queue) = &patch_queue {
                         // udpating downlaod counter is handled in combined-file downloader
                         (updater)(update_index.add_msg_bytes(task.patch_chunk.patch_length));
-                        if let Err(err) = patch_queue.send_timeout(task, Duration::from_secs(10)) {
+                        if let Err(err) =
+                            patch_queue.send_timeout((loc, task), Duration::from_secs(10))
+                        {
                             match err {
                                 crossbeam_channel::SendTimeoutError::Disconnected(_) => {
                                     tracing::error!(
@@ -703,7 +754,7 @@ impl SophonPatcher {
                                         tracing::error!("The queue lock has been poisoned");
                                         return;
                                     };
-                                    queue_lock.push_back(val);
+                                    queue_lock.push_back(val.1);
                                 }
                             }
                         }
@@ -806,7 +857,7 @@ impl SophonPatcher {
             range = task.download_range()
         )
     )]
-    fn download_patch_range(&self, task: &FilePatchInfo) -> Result<(), SophonError> {
+    fn download_patch_range(&self, task: &FilePatchInfo) -> Result<PatchLocation, SophonError> {
         let download_url = task.download_url();
         let download_range_val = task.download_range();
         let out_filename = self.tmp_artifact_file_path(task);
@@ -853,9 +904,12 @@ impl SophonPatcher {
         }
         */
 
-        std::fs::write(out_filename, body)?;
-
-        Ok(())
+        if self.patches_in_memory {
+            Ok(PatchLocation::Memory(body))
+        } else {
+            std::fs::write(&out_filename, body)?;
+            Ok(PatchLocation::Filesystem(out_filename))
+        }
     }
 
     fn file_patch_loop<'a, 'b>(
@@ -863,10 +917,10 @@ impl SophonPatcher {
         game_folder: &'b Path,
         updater: impl Fn(Update) + 'b,
         update_index: &'b UpdateIndex<'a>,
-        queue: Receiver<FilePatchInfo<'a>>,
+        queue: Receiver<(PatchLocation, FilePatchInfo<'a>)>,
     ) {
-        while let Ok(task) = queue.recv() {
-            self.file_patch_handler(&task, update_index, game_folder, &updater);
+        while let Ok((loc, task)) = queue.recv() {
+            self.file_patch_handler(loc, &task, update_index, game_folder, &updater);
         }
     }
 
@@ -879,7 +933,8 @@ impl SophonPatcher {
     ) {
         let last_file_path = self.files_temp().join("last_file.tmp");
         if last_file_path.exists() {
-            // todo: global OnceLock/Mutex<Vec<FileInfo>> for last file(s) rather than this mess
+            // todo: global OnceLock/Mutex<Vec<FileInfo>> for last file(s) rather than this
+            // single-file mess
             let last_file_task = update_index
                 .files_to_patch
                 .values()
@@ -902,6 +957,7 @@ impl SophonPatcher {
 
     fn file_patch_handler<'a, 'b>(
         &self,
+        patch_loc: PatchLocation,
         file_patch_task: &'a FilePatchInfo<'a>,
         update_index: &'b UpdateIndex<'a>,
         game_folder: &'b Path,
@@ -924,9 +980,9 @@ impl SophonPatcher {
 
                 Ok(())
             } else if let Some(orig_file_path) = file_patch_task.orig_file_path(game_folder) {
-                self.file_patch(&orig_file_path, file_patch_task, game_folder)
+                self.file_patch(&orig_file_path, patch_loc, file_patch_task, game_folder)
             } else {
-                self.file_copy_over(file_patch_task, game_folder)
+                self.file_copy_over(patch_loc, file_patch_task, game_folder)
             }
         };
 
@@ -956,11 +1012,13 @@ impl SophonPatcher {
 
     fn file_copy_over(
         &self,
+        patch_loc: PatchLocation,
         file_patch_task: &FilePatchInfo,
         game_folder: &Path,
     ) -> Result<(), SophonError> {
         let target_path = file_patch_task.target_file_path(game_folder);
 
+        // isn't this double-checking? Checked during queue building iirc.
         if let Ok(true) = check_file(
             &target_path,
             file_patch_task.file_manifest.asset_size,
@@ -971,51 +1029,129 @@ impl SophonPatcher {
             return Ok(());
         }
 
-        let artifact_path = self.tmp_artifact_file_path(file_patch_task);
+        let tmp_file_path = self.tmp_out_file_path(file_patch_task);
 
-        let mut file = File::open(&artifact_path)?;
+        // this is a fucking mess
+        match patch_loc {
+            PatchLocation::Filesystem(patch_path) => {
+                let mut file = File::open(&patch_path)?;
 
-        let blob_path = if let Ok((is_compressed, inner_size)) = weird_hdiff_parse(&mut file) {
-            self.new_file_hdiff(is_compressed, inner_size, &mut file, &artifact_path)?
-        } else {
-            artifact_path
-        };
+                let blob_path =
+                    if let Ok((is_compressed, inner_size)) = weird_hdiff_parse(&mut file) {
+                        self.new_file_hdiff(
+                            is_compressed,
+                            file.metadata().map(|m| m.size())? - inner_size,
+                            inner_size,
+                            &mut file,
+                            &tmp_file_path,
+                        )?
+                    } else {
+                        patch_path
+                    };
 
-        finalize_file(
-            &blob_path,
-            &target_path,
-            file_patch_task.file_manifest.asset_size,
-            &file_patch_task.file_manifest.asset_hash_md5,
-        )
-        .inspect_err(|err| {
-            tracing::error!(
-                ?err,
-                asset_name = file_patch_task.file_manifest.asset_name,
-                "Error with new file"
-            );
-            tracing::debug!(?file_patch_task, "Errored file task information");
-        })
+                finalize_file(
+                    &blob_path,
+                    &target_path,
+                    file_patch_task.file_manifest.asset_size,
+                    &file_patch_task.file_manifest.asset_hash_md5,
+                )
+                .inspect_err(|err| {
+                    tracing::error!(
+                        ?err,
+                        asset_name = file_patch_task.file_manifest.asset_name,
+                        "Error with new file"
+                    );
+                    tracing::debug!(?file_patch_task, "Errored file task information");
+                })
+            }
+            PatchLocation::FilesystemRegion {
+                combined_path,
+                offset,
+                length,
+            } => {
+                let mut file = File::open(&combined_path)?;
+                file.seek_relative(offset as i64)?;
+                let mut region = file.take(length);
+
+                let blob_path =
+                    if let Ok((is_compressed, inner_size)) = weird_hdiff_parse(&mut region) {
+                        let mut file = region.into_inner();
+                        self.new_file_hdiff(
+                            is_compressed,
+                            (offset + length) - inner_size,
+                            inner_size,
+                            &mut file,
+                            &tmp_file_path,
+                        )?
+                    } else {
+                        self.get_patch_from_combined(file_patch_task)
+                            .map(|_| self.tmp_artifact_file_path(file_patch_task))?
+                    };
+
+                finalize_file(
+                    &blob_path,
+                    &target_path,
+                    file_patch_task.file_manifest.asset_size,
+                    &file_patch_task.file_manifest.asset_hash_md5,
+                )
+                .inspect_err(|err| {
+                    tracing::error!(
+                        ?err,
+                        asset_name = file_patch_task.file_manifest.asset_name,
+                        "Error with new file"
+                    );
+                    tracing::debug!(?file_patch_task, "Errored file task information");
+                })
+            }
+            PatchLocation::Memory(data) => {
+                let mut cursor = Cursor::new(data);
+                let blob_path =
+                    if let Ok((is_compressed, inner_size)) = weird_hdiff_parse(&mut cursor) {
+                        self.new_file_hdiff(
+                            is_compressed,
+                            (cursor.get_ref().len() as u64) - inner_size,
+                            inner_size,
+                            &mut cursor,
+                            &tmp_file_path,
+                        )?
+                    } else {
+                        let path = self.tmp_artifact_file_path(file_patch_task);
+                        std::fs::write(&path, &cursor.into_inner())?;
+                        path
+                    };
+
+                finalize_file(
+                    &blob_path,
+                    &target_path,
+                    file_patch_task.file_manifest.asset_size,
+                    &file_patch_task.file_manifest.asset_hash_md5,
+                )
+                .inspect_err(|err| {
+                    tracing::error!(
+                        ?err,
+                        asset_name = file_patch_task.file_manifest.asset_name,
+                        "Error with new file"
+                    );
+                    tracing::debug!(?file_patch_task, "Errored file task information");
+                })
+            }
+        }
     }
 
-    fn new_file_hdiff(
+    fn new_file_hdiff<R>(
         &self,
         is_compressed: bool,
+        offset: u64,
         inner_size: u64,
-        hdiff_file: &mut File,
-        artifact_path: &Path,
-    ) -> Result<PathBuf, SophonError> {
+        hdiff_file: &mut R,
+        tmp_path: &Path,
+    ) -> Result<PathBuf, SophonError>
+    where
+        R: Read,
+        R: Seek,
+    {
         tracing::debug!("Using weird hdiff workaround");
-        let file_size = hdiff_file.metadata().map(|m| m.size())?;
-        hdiff_file.seek(std::io::SeekFrom::Start(file_size - inner_size))?;
-        let mut artifact_file_name = artifact_path
-            .file_name()
-            .expect("path must point to a file")
-            .to_owned();
-        artifact_file_name.push(".tmp");
-        let tmp_path = artifact_path
-            .parent()
-            .expect("where parent")
-            .join(artifact_file_name);
+        hdiff_file.seek(std::io::SeekFrom::Start(offset))?;
         let mut out_tmp_file = File::create(&tmp_path)?;
         out_tmp_file.set_len(inner_size)?;
         if is_compressed {
@@ -1024,12 +1160,13 @@ impl SophonPatcher {
         } else {
             std::io::copy(hdiff_file, &mut out_tmp_file)?;
         }
-        Ok(tmp_path)
+        Ok(tmp_path.to_owned())
     }
 
     fn file_patch(
         &self,
         orig_file_path: &Path,
+        patch_loc: PatchLocation,
         file_patch_task: &FilePatchInfo,
         game_folder: &Path,
     ) -> Result<(), SophonError> {
@@ -1056,7 +1193,13 @@ impl SophonPatcher {
 
         std::fs::copy(orig_file_path, &tmp_src_path)?;
 
-        self.patch(&tmp_src_path, &artifact, &tmp_out_path)?;
+        self.patch(PatchFnArgs {
+            patch: &patch_loc,
+            src_file: &tmp_src_path,
+            out_file: &tmp_out_path,
+        })?;
+
+        patch_loc.cleanup();
 
         let target = if self
             .last_file_suffix
@@ -1174,12 +1317,13 @@ impl SophonPatcher {
     }
 
     #[allow(unreachable_code)]
-    fn patch(&self, file: &Path, patch: &Path, output: &Path) -> std::io::Result<()> {
+    fn patch(&self, patch_args: PatchFnArgs<'_>) -> std::io::Result<()> {
         if let Some(pfunc) = &self.patch_function {
-            return (pfunc)(file, patch, output);
+            return (pfunc)(patch_args);
         }
         #[cfg(feature = "vendored-hpatchz")]
-        return super::utils::hpatchz::patch(file, patch, output);
+        // TODO: handle in-memory and pipe-able chunks
+        return super::utils::hpatchz::patch(patch_args);
         // Unreachable because:
         // 1. `None` with `not(feature = "vendored-hpatchz")` is caught during struct init
         // 2. `feature = "vendored-hpatchz"` provides a default
