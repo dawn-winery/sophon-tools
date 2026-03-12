@@ -226,6 +226,8 @@ impl UpdateArgs {
                 SophonPatcher::new(client.clone(), &update_manifest, &cache_dir, None)
                     .expect("Failed to construct updater")
                     .with_free_space_check(!self.extra.skip_free_space_check);
+            updater.patches_in_memory = self.extra.chunk_buffer_memory;
+            updater.patch_queue_mem_limit = self.extra.memory_buffer_limit;
             let res = if !self.extra.preload_pretend {
                 updater.update(
                     &self.game.game_dir,
