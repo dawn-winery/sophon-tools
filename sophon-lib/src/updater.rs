@@ -26,7 +26,8 @@ use super::{
     utils::version::Version,
 };
 use crate::{
-    api::schemas::sophon_manifests::SophonDownloadInfo, utils::read_reporter::ReadReporter,
+    api::schemas::sophon_manifests::SophonDownloadInfo,
+    utils::{read_reporter::ReadReporter, read_take_region::ReadTakeRegion},
 };
 //use crate::{bytes_check_md5, md5_hash_str};
 
@@ -291,7 +292,7 @@ impl<'a> UpdateIndex<'a> {
 
 // TODO: in-memory queue, queue limit
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum PatchLocation {
     Memory(Bytes),
     Filesystem(PathBuf),
@@ -314,6 +315,29 @@ impl PatchLocation {
     fn cleanup(&self) {
         if let Self::Filesystem(path) = self {
             let _ = std::fs::remove_file(path);
+        }
+    }
+
+    /// Convert [`Self::Memory`] and [`Self::FilesystemRegion`] to [`Self::Filesystem`]
+    /// In case of `self` already being [`Self::Filesystem`], no-op, does not copy or move the file
+    fn as_single_file(&self, save_location: PathBuf) -> std::io::Result<Self> {
+        match self {
+            Self::Filesystem(_) => Ok(self.clone()),
+            Self::Memory(data) => {
+                std::fs::write(&save_location, data)?;
+                Ok(Self::Filesystem(save_location))
+            }
+            Self::FilesystemRegion {
+                combined_path,
+                offset,
+                length,
+            } => {
+                let mut src_region =
+                    File::open(combined_path)?.take_region(SeekFrom::Start(*offset), *length)?;
+                let mut out_file = File::create(&save_location)?;
+                std::io::copy(&mut src_region, &mut out_file)?;
+                Ok(Self::Filesystem(save_location))
+            }
         }
     }
 }
@@ -835,9 +859,11 @@ impl SophonPatcher {
         let artifact_path = self.tmp_artifact_file_path(task);
         let combined_file_path = self.tmp_patch_blob_path(task.patch_chunk);
 
-        let mut src_file = File::open(&combined_file_path)?;
-        src_file.seek(SeekFrom::Start(task.patch_chunk.patch_offset))?;
-        let mut src_take = src_file.take(task.patch_chunk.patch_length);
+        let src_file = File::open(&combined_file_path)?;
+        let mut src_take = (&src_file).take_region(
+            SeekFrom::Start(task.patch_chunk.patch_offset),
+            task.patch_chunk.patch_length,
+        )?;
 
         let mut out_file = File::create(&artifact_path)?;
 
@@ -1069,24 +1095,26 @@ impl SophonPatcher {
                 offset,
                 length,
             } => {
-                let mut file = File::open(&combined_path)?;
-                file.seek_relative(offset as i64)?;
-                let mut region = file.take(length);
+                let file = File::open(&combined_path)?;
+                let mut region = (&file).take_region(SeekFrom::Start(offset), length)?;
 
-                let blob_path =
-                    if let Ok((is_compressed, inner_size)) = weird_hdiff_parse(&mut region) {
-                        let mut file = region.into_inner();
-                        self.new_file_hdiff(
-                            is_compressed,
-                            (offset + length) - inner_size,
-                            inner_size,
-                            &mut file,
-                            &tmp_file_path,
-                        )?
-                    } else {
-                        self.get_patch_from_combined(file_patch_task)
-                            .map(|_| self.tmp_artifact_file_path(file_patch_task))?
-                    };
+                let blob_path = if let Ok((is_compressed, inner_size)) =
+                    weird_hdiff_parse(&mut region)
+                {
+                    tracing::debug!(combo_path=?combined_path, zstd_data_start = (offset + 1 + length) - inner_size, patch_offset=offset+1, zstd_length=inner_size, "debug region");
+
+                    self.new_file_hdiff(
+                        is_compressed,
+                        //(offset + length) - inner_size,
+                        (length - inner_size),
+                        inner_size,
+                        &mut region,
+                        &tmp_file_path,
+                    )?
+                } else {
+                    self.get_patch_from_combined(file_patch_task)
+                        .map(|_| tmp_file_path)?
+                };
 
                 finalize_file(
                     &blob_path,
@@ -1116,7 +1144,7 @@ impl SophonPatcher {
                         )?
                     } else {
                         let path = self.tmp_artifact_file_path(file_patch_task);
-                        std::fs::write(&path, &cursor.into_inner())?;
+                        std::fs::write(&path, cursor.get_ref())?;
                         path
                     };
 
@@ -1322,8 +1350,26 @@ impl SophonPatcher {
             return (pfunc)(patch_args);
         }
         #[cfg(feature = "vendored-hpatchz")]
-        // TODO: handle in-memory and pipe-able chunks
-        return super::utils::hpatchz::patch(patch_args);
+        {
+            use rand::{RngExt, distr::Alphanumeric, rng};
+
+            let loc_cloned = patch_args
+                .patch
+                .as_single_file(self.patches_temp().join(format!(
+                "patch-{}.tmp.patch",
+                rng()
+                    .sample_iter(&Alphanumeric)
+                    .map(|c| c as char)
+                    .take(16)
+                    .collect::<String>()
+            )))?;
+            let res = super::utils::hpatchz::patch(PatchFnArgs {
+                patch: &loc_cloned,
+                ..patch_args
+            });
+            loc_cloned.cleanup();
+            return res;
+        }
         // Unreachable because:
         // 1. `None` with `not(feature = "vendored-hpatchz")` is caught during struct init
         // 2. `feature = "vendored-hpatchz"` provides a default

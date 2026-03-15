@@ -10,7 +10,10 @@ use std::{
 use interprocess::os::unix::fifo_file::create_fifo;
 use rand::{RngExt, distr::Alphanumeric, rng};
 
-use crate::updater::{PatchFnArgs, PatchLocation};
+use crate::{
+    updater::{PatchFnArgs, PatchLocation},
+    utils::read_take_region::ReadTakeRegion,
+};
 
 const HPATCHZ_BINARY: &[u8] = include_bytes!("../../external/hpatchz/hpatchz");
 const HPATCHZ_MD5: &str = env!("HPATCHZ_MD5");
@@ -39,9 +42,12 @@ pub fn patch(args: PatchFnArgs) -> std::io::Result<()> {
 
     let hpatchz = hpatchz_fs_binary()?;
 
-    let (patch_file_path, mut patch_file_handle) = match args.patch {
-        PatchLocation::Filesystem(path) => (path.clone(), None),
+    let patch_file_path = match args.patch {
+        PatchLocation::Filesystem(path) => path.clone(),
         PatchLocation::Memory(_) | PatchLocation::FilesystemRegion { .. } => {
+            return Err(std::io::Error::other(
+                "hpatchz cannot use piped files, convert and save as a file",
+            ));
             let pipe_path = PathBuf::from(format!(
                 "/tmp/patch-{}.pipe",
                 rng()
@@ -54,25 +60,28 @@ pub fn patch(args: PatchFnArgs) -> std::io::Result<()> {
             create_fifo(&pipe_path, 0o600)
                 .inspect_err(|err| tracing::error!("Error creating named pipe: {err}"))?;
 
-            let file = OpenOptions::new()
-                .write(true)
-                .open(&pipe_path)
-                .inspect_err(|err| {
-                    tracing::error!("Error opening named pipe for writing: {err}")
-                })?;
-
-            (pipe_path, Some(file))
+            pipe_path
         }
     };
 
-    let child = Command::new(hpatchz)
+    let mut child = Command::new(hpatchz)
         .arg("-f")
         .arg(args.src_file.as_os_str())
         .arg(patch_file_path.as_os_str())
         .arg(args.out_file.as_os_str())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .stdin(std::process::Stdio::piped())
         .spawn()?;
 
-    if let Some(patch_pipe) = &mut patch_file_handle {
+    if matches!(
+        args.patch,
+        PatchLocation::Memory(_) | PatchLocation::FilesystemRegion { .. }
+    ) {
+        let mut patch_pipe = OpenOptions::new()
+            .write(true)
+            .open(&patch_file_path)
+            .inspect_err(|err| tracing::error!("Error opening named pipe for writing: {err}"))?;
         match args.patch {
             PatchLocation::Filesystem(_) => {}
             PatchLocation::Memory(data) => {
@@ -83,15 +92,13 @@ pub fn patch(args: PatchFnArgs) -> std::io::Result<()> {
                 offset,
                 length,
             } => {
-                let mut combined_file = File::open(combined_path)?;
-                combined_file.seek_relative(*offset as i64)?;
-                let mut region = combined_file.take(*length);
-                std::io::copy(&mut region, patch_pipe)?;
+                let combined_file = File::open(combined_path)?;
+                let mut region =
+                    combined_file.take_region(std::io::SeekFrom::Start(*offset), *length)?;
+                std::io::copy(&mut region, &mut patch_pipe)?;
             }
         }
     }
-
-    drop(patch_file_handle);
 
     let output = child.wait_with_output()?;
 
