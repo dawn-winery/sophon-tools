@@ -18,3 +18,4 @@ tracing-tracy = { version = "0.11.4", optional = true}
 [features]
 default = []
 tracy = ["dep:tracing-tracy"]
+rust-hdiff = ["sophon-lib/paimon"]

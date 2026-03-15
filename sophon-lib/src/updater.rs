@@ -383,9 +383,9 @@ impl SophonPatcher {
         temp_dir: impl AsRef<Path>,
         patch_function: Option<BoxPatchFn>,
     ) -> Result<Self, SophonError> {
-        #[cfg(not(feature = "vendored-hpatchz"))]
+        #[cfg(not(any(feature = "vendored-hpatchz", feature = "paimon")))]
         let patch_function = Some(patch_function.expect(
-            "Hpatchz not included with the crate, custom function required but was not provided",
+            "Hpatchz or rust hdiff parser not included with the crate, custom function required but was not provided",
         ));
         Ok(Self {
             patch_manifest: get_patch_manifest(&client, diff)?,
@@ -1348,6 +1348,56 @@ impl SophonPatcher {
     fn patch(&self, patch_args: PatchFnArgs<'_>) -> std::io::Result<()> {
         if let Some(pfunc) = &self.patch_function {
             return (pfunc)(patch_args);
+        }
+        #[cfg(feature = "paimon")]
+        {
+            use std::io::{BufReader, BufWriter, Write};
+
+            use paimon::diffs::hdiff13::HDiff13;
+
+            match patch_args.patch {
+                PatchLocation::Filesystem(patch_path) => {
+                    let mut patch_file = BufReader::new(File::open(patch_path)?);
+                    let mut hdiff_parsed =
+                        HDiff13::parse(&mut patch_file).map_err(std::io::Error::other)?;
+                    let mut src_file = BufReader::new(File::open(patch_args.src_file)?);
+                    let mut out_file = BufWriter::new(File::create(patch_args.out_file)?);
+                    hdiff_parsed
+                        .apply(&mut src_file, &mut out_file)
+                        .map_err(std::io::Error::other)?;
+                    out_file.flush()?;
+                }
+                PatchLocation::Memory(data) => {
+                    let mut data_cursor = Cursor::new(data);
+                    let mut hdiff_parsed =
+                        HDiff13::parse(&mut data_cursor).map_err(std::io::Error::other)?;
+                    let mut src_file = BufReader::new(File::open(patch_args.src_file)?);
+                    let mut out_file = BufWriter::new(File::create(patch_args.out_file)?);
+                    hdiff_parsed
+                        .apply(&mut src_file, &mut out_file)
+                        .map_err(std::io::Error::other)?;
+                    out_file.flush()?;
+                }
+                PatchLocation::FilesystemRegion {
+                    combined_path,
+                    offset,
+                    length,
+                } => {
+                    let mut patch_file_region = BufReader::new(
+                        File::open(combined_path)?
+                            .take_region(SeekFrom::Start(*offset), *length)?,
+                    );
+                    let mut hdiff_parsed =
+                        HDiff13::parse(&mut patch_file_region).map_err(std::io::Error::other)?;
+                    let mut src_file = BufReader::new(File::open(patch_args.src_file)?);
+                    let mut out_file = BufWriter::new(File::create(patch_args.out_file)?);
+                    hdiff_parsed
+                        .apply(&mut src_file, &mut out_file)
+                        .map_err(std::io::Error::other)?;
+                    out_file.flush()?;
+                }
+            }
+            return Ok(());
         }
         #[cfg(feature = "vendored-hpatchz")]
         {
