@@ -1,6 +1,6 @@
 use std::{
     fs::{File, OpenOptions},
-    io::{Error, Read, Seek, Write},
+    io::{Error, Write},
     os::unix::prelude::PermissionsExt,
     path::{Path, PathBuf},
     process::Command,
@@ -44,6 +44,10 @@ pub fn patch(args: PatchFnArgs) -> std::io::Result<()> {
 
     let patch_file_path = match args.patch {
         PatchLocation::Filesystem(path) => path.clone(),
+        #[allow(
+            unreachable_code,
+            reason = "Intentionally left like this, for potential future implementation when hpatchz can read from named pipes"
+        )]
         PatchLocation::Memory(_) | PatchLocation::FilesystemRegion { .. } => {
             return Err(std::io::Error::other(
                 "hpatchz cannot use piped files, convert and save as a file",
@@ -64,7 +68,7 @@ pub fn patch(args: PatchFnArgs) -> std::io::Result<()> {
         }
     };
 
-    let mut child = Command::new(hpatchz)
+    let child = Command::new(hpatchz)
         .arg("-f")
         .arg(args.src_file.as_os_str())
         .arg(patch_file_path.as_os_str())

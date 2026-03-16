@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, HashSet, VecDeque},
-    fs::{self, File},
+    fs::File,
     io::{Cursor, Read, Seek, SeekFrom},
     num::NonZeroUsize,
     os::unix::fs::MetadataExt,
@@ -25,11 +25,7 @@ use super::{
     },
     utils::version::Version,
 };
-use crate::{
-    api::schemas::sophon_manifests::SophonDownloadInfo,
-    utils::{read_reporter::ReadReporter, read_take_region::ReadTakeRegion},
-};
-//use crate::{bytes_check_md5, md5_hash_str};
+use crate::utils::{read_reporter::ReadReporter, read_take_region::ReadTakeRegion};
 
 #[derive(Debug)]
 pub enum Update {
@@ -1109,8 +1105,7 @@ impl SophonPatcher {
 
                     self.new_file_hdiff(
                         is_compressed,
-                        //(offset + length) - inner_size,
-                        (length - inner_size),
+                        length - inner_size,
                         inner_size,
                         &mut region,
                         &tmp_file_path,
@@ -1192,7 +1187,7 @@ impl SophonPatcher {
     {
         tracing::debug!("Using weird hdiff workaround");
         hdiff_file.seek(std::io::SeekFrom::Start(offset))?;
-        let mut out_tmp_file = File::create(&tmp_path)?;
+        let mut out_tmp_file = File::create(tmp_path)?;
         out_tmp_file.set_len(inner_size)?;
         if is_compressed {
             let mut decoder = zstd::Decoder::new(hdiff_file)?;
@@ -1229,7 +1224,7 @@ impl SophonPatcher {
 
         let tmp_src_path = self.tmp_src_file_path(file_patch_task);
         let tmp_out_path = self.tmp_out_file_path(file_patch_task);
-        let artifact = self.tmp_artifact_file_path(file_patch_task);
+        //let artifact = self.tmp_artifact_file_path(file_patch_task);
 
         std::fs::copy(orig_file_path, &tmp_src_path)?;
 
