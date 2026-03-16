@@ -1053,124 +1053,91 @@ impl SophonPatcher {
 
         let tmp_file_path = self.tmp_out_file_path(file_patch_task);
 
-        // this is a fucking mess
-        match patch_loc {
+        // this is less of a mess but still a bit messy
+        let extracted_file = match patch_loc {
             PatchLocation::Filesystem(patch_path) => {
-                let mut file = File::open(&patch_path)?;
+                let mut patch_file = File::open(&patch_path)?;
 
-                let blob_path =
-                    if let Ok((is_compressed, inner_size)) = weird_hdiff_parse(&mut file) {
-                        self.new_file_hdiff(
-                            is_compressed,
-                            file.metadata().map(|m| m.size())? - inner_size,
-                            inner_size,
-                            &mut file,
-                            &tmp_file_path,
-                        )?
-                    } else {
-                        patch_path
-                    };
-
-                let res = finalize_file(
-                    &blob_path,
-                    &target_path,
-                    file_patch_task.file_manifest.asset_size,
-                    &file_patch_task.file_manifest.asset_hash_md5,
-                )
-                .inspect_err(|err| {
-                    tracing::error!(
-                        ?err,
-                        asset_name = file_patch_task.file_manifest.asset_name,
-                        "Error with new file"
-                    );
-                    tracing::debug!(?file_patch_task, "Errored file task information");
-                });
-
-                let _ = std::fs::remove_file(&blob_path);
-
-                res
+                self.try_new_file_hdiff(
+                    patch_file.metadata().map(|m| m.size())?,
+                    &mut patch_file,
+                    &tmp_file_path,
+                )?
+                .unwrap_or(patch_path)
             }
             PatchLocation::FilesystemRegion {
                 combined_path,
                 offset,
                 length,
             } => {
-                let file = File::open(&combined_path)?;
-                let mut region = (&file).take_region(SeekFrom::Start(offset), length)?;
+                let combo_file = File::open(&combined_path)?;
+                let mut region = (&combo_file).take_region(SeekFrom::Start(offset), length)?;
 
-                let blob_path = if let Ok((is_compressed, inner_size)) =
-                    weird_hdiff_parse(&mut region)
-                {
-                    tracing::debug!(combo_path=?combined_path, zstd_data_start = (offset + 1 + length) - inner_size, patch_offset=offset+1, zstd_length=inner_size, "debug region");
-
-                    self.new_file_hdiff(
-                        is_compressed,
-                        length - inner_size,
-                        inner_size,
-                        &mut region,
-                        &tmp_file_path,
-                    )?
-                } else {
-                    self.get_patch_from_combined(file_patch_task)
-                        .map(|_| tmp_file_path)?
-                };
-
-                let res = finalize_file(
-                    &blob_path,
-                    &target_path,
-                    file_patch_task.file_manifest.asset_size,
-                    &file_patch_task.file_manifest.asset_hash_md5,
-                )
-                .inspect_err(|err| {
-                    tracing::error!(
-                        ?err,
-                        asset_name = file_patch_task.file_manifest.asset_name,
-                        "Error with new file"
-                    );
-                    tracing::debug!(?file_patch_task, "Errored file task information");
-                });
-
-                let _ = std::fs::remove_file(&blob_path);
-
-                res
+                self.try_new_file_hdiff(length, &mut region, &tmp_file_path)?
+                    .map(Result::Ok)
+                    .unwrap_or_else(|| {
+                        self.get_patch_from_combined(file_patch_task)
+                            .map(|_| tmp_file_path)
+                    })?
             }
             PatchLocation::Memory(data) => {
-                let mut cursor = Cursor::new(data);
-                let blob_path =
-                    if let Ok((is_compressed, inner_size)) = weird_hdiff_parse(&mut cursor) {
-                        self.new_file_hdiff(
-                            is_compressed,
-                            (cursor.get_ref().len() as u64) - inner_size,
-                            inner_size,
-                            &mut cursor,
-                            &tmp_file_path,
-                        )?
-                    } else {
-                        let path = self.tmp_artifact_file_path(file_patch_task);
-                        std::fs::write(&path, cursor.get_ref())?;
-                        path
-                    };
+                let mut data_cursor = Cursor::new(data);
 
-                let res = finalize_file(
-                    &blob_path,
-                    &target_path,
-                    file_patch_task.file_manifest.asset_size,
-                    &file_patch_task.file_manifest.asset_hash_md5,
-                )
-                .inspect_err(|err| {
-                    tracing::error!(
-                        ?err,
-                        asset_name = file_patch_task.file_manifest.asset_name,
-                        "Error with new file"
-                    );
-                    tracing::debug!(?file_patch_task, "Errored file task information");
-                });
-
-                let _ = std::fs::remove_file(&blob_path);
-
-                res
+                self.try_new_file_hdiff(
+                    data_cursor.get_ref().len() as u64,
+                    &mut data_cursor,
+                    &tmp_file_path,
+                )?
+                .map(Result::<_, SophonError>::Ok)
+                .unwrap_or_else(|| {
+                    std::fs::write(&tmp_file_path, data_cursor.get_ref())?;
+                    Ok(tmp_file_path)
+                })?
             }
-        }
+        };
+
+        finalize_file(
+            &extracted_file,
+            &target_path,
+            file_patch_task.file_manifest.asset_size,
+            &file_patch_task.file_manifest.asset_hash_md5,
+        )
+        .inspect_err(|err| {
+            tracing::error!(
+                ?err,
+                asset_name = file_patch_task.file_manifest.asset_name,
+                "Error with new file"
+            );
+            tracing::debug!(?file_patch_task, "Errored file task information");
+        })?;
+
+        let _ = std::fs::remove_file(&extracted_file);
+
+        Ok(())
+    }
+
+    fn try_new_file_hdiff<R>(
+        &self,
+        file_length: u64,
+        hdiff_file: &mut R,
+        tmp_path: &Path,
+    ) -> Result<Option<PathBuf>, SophonError>
+    where
+        R: Read,
+        R: Seek,
+    {
+        weird_hdiff_parse(hdiff_file)
+            .ok()
+            .map(|(is_compressed, inner_size)| {
+                self.new_file_hdiff(
+                    is_compressed,
+                    file_length - inner_size,
+                    inner_size,
+                    hdiff_file,
+                    tmp_path,
+                )
+            })
+            .transpose()
     }
 
     fn new_file_hdiff<R>(
