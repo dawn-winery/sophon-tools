@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, HashSet, VecDeque},
-    fs::File,
+    fs::{self, File},
     io::{Cursor, Read, Seek, SeekFrom},
     num::NonZeroUsize,
     os::unix::fs::MetadataExt,
@@ -1075,7 +1075,7 @@ impl SophonPatcher {
                         patch_path
                     };
 
-                finalize_file(
+                let res = finalize_file(
                     &blob_path,
                     &target_path,
                     file_patch_task.file_manifest.asset_size,
@@ -1088,7 +1088,11 @@ impl SophonPatcher {
                         "Error with new file"
                     );
                     tracing::debug!(?file_patch_task, "Errored file task information");
-                })
+                });
+
+                let _ = std::fs::remove_file(&blob_path);
+
+                res
             }
             PatchLocation::FilesystemRegion {
                 combined_path,
@@ -1116,7 +1120,7 @@ impl SophonPatcher {
                         .map(|_| tmp_file_path)?
                 };
 
-                finalize_file(
+                let res = finalize_file(
                     &blob_path,
                     &target_path,
                     file_patch_task.file_manifest.asset_size,
@@ -1129,7 +1133,11 @@ impl SophonPatcher {
                         "Error with new file"
                     );
                     tracing::debug!(?file_patch_task, "Errored file task information");
-                })
+                });
+
+                let _ = std::fs::remove_file(&blob_path);
+
+                res
             }
             PatchLocation::Memory(data) => {
                 let mut cursor = Cursor::new(data);
@@ -1148,7 +1156,7 @@ impl SophonPatcher {
                         path
                     };
 
-                finalize_file(
+                let res = finalize_file(
                     &blob_path,
                     &target_path,
                     file_patch_task.file_manifest.asset_size,
@@ -1161,7 +1169,11 @@ impl SophonPatcher {
                         "Error with new file"
                     );
                     tracing::debug!(?file_patch_task, "Errored file task information");
-                })
+                });
+
+                let _ = std::fs::remove_file(&blob_path);
+
+                res
             }
         }
     }
