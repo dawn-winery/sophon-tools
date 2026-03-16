@@ -104,7 +104,7 @@ impl FromStr for GameEdition {
             _ if lowercased.starts_with("global-beta-") => Ok(Self::GlobalBeta {
                 launcher_id: s[12..].to_owned(),
             }),
-            _ if lowercased.starts_with("china-beta-") => Ok(Self::GlobalBeta {
+            _ if lowercased.starts_with("china-beta-") => Ok(Self::ChinaBeta {
                 launcher_id: s[11..].to_owned(),
             }),
             _ => Err(UnknownValue(lowercased)),
