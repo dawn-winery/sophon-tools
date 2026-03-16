@@ -851,26 +851,6 @@ impl SophonPatcher {
         Ok(())
     }
 
-    fn get_patch_from_combined(
-        &self,
-        task: &FilePatchInfo,
-        out_file_path: &Path,
-    ) -> std::io::Result<()> {
-        let combined_file_path = self.tmp_patch_blob_path(task.patch_chunk);
-
-        let src_file = File::open(&combined_file_path)?;
-        let mut src_take = (&src_file).take_region(
-            SeekFrom::Start(task.patch_chunk.patch_offset),
-            task.patch_chunk.patch_length,
-        )?;
-
-        let mut out_file = File::create(out_file_path)?;
-
-        std::io::copy(&mut src_take, &mut out_file)?;
-
-        Ok(())
-    }
-
     // instrumenting to maybe try and see how much time it takes to download, hash
     // check, and apply
     #[tracing::instrument(
@@ -1082,8 +1062,13 @@ impl SophonPatcher {
                     &mut region,
                     &tmp_file_path,
                 )?
-                .map(Result::Ok)
-                .unwrap_or_else(|| self.get_patch_from_combined(file_patch_task, &tmp_file_path))?;
+                .map(Result::<_, std::io::Error>::Ok)
+                .unwrap_or_else(|| {
+                    region.seek(SeekFrom::Start(0))?;
+                    let mut out_file = File::create(&tmp_file_path)?;
+                    std::io::copy(&mut region, &mut out_file)?;
+                    Ok(())
+                })?;
                 tmp_file_path
             }
             PatchLocation::Memory(data) => {
