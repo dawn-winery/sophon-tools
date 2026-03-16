@@ -1,3 +1,5 @@
+//! Utility wrappers to interact with [`paimon`], the hdiff parser and applier written in rust
+
 use std::{
     fs::File,
     io::{BufReader, BufWriter, Cursor, Read, SeekFrom, Write},
@@ -11,6 +13,7 @@ use crate::{
     utils::read_take_region::ReadTakeRegion,
 };
 
+/// A wrapper around [`paimon_parse_apply`] that just handles the [`PatchLocation`] variants
 pub fn paimon_patch(args: PatchFnArgs<'_>) -> std::io::Result<()> {
     match args.patch {
         PatchLocation::Filesystem(patch_path) => {
@@ -34,6 +37,7 @@ pub fn paimon_patch(args: PatchFnArgs<'_>) -> std::io::Result<()> {
     }
 }
 
+/// Parse the patch from the provided reader and use the file paths to apply the patch
 pub fn paimon_parse_apply<R>(
     patch_reader: &mut R,
     src_file: &Path,

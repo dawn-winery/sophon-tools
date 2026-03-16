@@ -1,3 +1,5 @@
+//! Utility for getting a [`Read`]er of a specific region
+
 use std::io::{Read, Seek, SeekFrom, Take};
 
 /// Utility trait for [`Seek::seek`] + [`Read::take`]

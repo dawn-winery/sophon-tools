@@ -18,6 +18,8 @@ use crate::{
 const HPATCHZ_BINARY: &[u8] = include_bytes!("../../external/hpatchz/hpatchz");
 const HPATCHZ_MD5: &str = env!("HPATCHZ_MD5");
 
+/// Save the hpatchz binary to disk if this is run for the first time. Otherwise, just return the
+/// path
 fn hpatchz_fs_binary() -> std::io::Result<PathBuf> {
     static FLAG: Once = Once::new();
 
@@ -78,6 +80,7 @@ pub fn patch(args: PatchFnArgs) -> std::io::Result<()> {
         .stdin(std::process::Stdio::piped())
         .spawn()?;
 
+    // this is a no-op due to conversion before call in updater and return with error earlier
     if matches!(
         args.patch,
         PatchLocation::Memory(_) | PatchLocation::FilesystemRegion { .. }

@@ -1,3 +1,5 @@
+//! An utility for downloading large files with progress reporting
+
 use std::io::{BufRead, Read};
 
 /// Calls `callback` with the amount of bytes read in each operation. The callback closure is
