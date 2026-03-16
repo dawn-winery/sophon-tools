@@ -1324,7 +1324,7 @@ impl SophonPatcher {
             return (pfunc)(patch_args);
         }
         #[cfg(feature = "paimon")]
-        return self.paimon_patch(patch_args);
+        return super::utils::paimon::paimon_patch(patch_args);
         #[cfg(feature = "vendored-hpatchz")]
         return self.hpatchz_patch(patch_args);
         // Unreachable because:
@@ -1354,56 +1354,6 @@ impl SophonPatcher {
             ..args
         })?;
         loc_cloned.cleanup();
-        Ok(())
-    }
-
-    #[cfg(feature = "paimon")]
-    fn paimon_patch(&self, args: PatchFnArgs<'_>) -> std::io::Result<()> {
-        use std::io::BufReader;
-
-        match args.patch {
-            PatchLocation::Filesystem(patch_path) => {
-                let mut patch_file = BufReader::new(File::open(patch_path)?);
-                self.paimon_parse_apply(&mut patch_file, args.src_file, args.out_file)
-            }
-            PatchLocation::Memory(data) => {
-                let mut data_cursor = Cursor::new(data);
-                self.paimon_parse_apply(&mut data_cursor, args.src_file, args.out_file)
-            }
-            PatchLocation::FilesystemRegion {
-                combined_path,
-                offset,
-                length,
-            } => {
-                let mut patch_file_region = BufReader::new(
-                    File::open(combined_path)?.take_region(SeekFrom::Start(*offset), *length)?,
-                );
-                self.paimon_parse_apply(&mut patch_file_region, args.src_file, args.out_file)
-            }
-        }
-    }
-
-    #[cfg(feature = "paimon")]
-    fn paimon_parse_apply<R>(
-        &self,
-        patch_reader: &mut R,
-        src_file: &Path,
-        out_file: &Path,
-    ) -> std::io::Result<()>
-    where
-        R: Read,
-    {
-        use std::io::{BufReader, BufWriter, Write};
-
-        use paimon::diffs::hdiff13::HDiff13;
-
-        let mut hdiff_parsed = HDiff13::parse(patch_reader).map_err(std::io::Error::other)?;
-        let mut src_file = BufReader::new(File::open(src_file)?);
-        let mut out_file = BufWriter::new(File::create(out_file)?);
-        hdiff_parsed
-            .apply(&mut src_file, &mut out_file)
-            .map_err(std::io::Error::other)?;
-        out_file.flush()?;
         Ok(())
     }
 }
