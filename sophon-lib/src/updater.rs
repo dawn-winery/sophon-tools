@@ -492,8 +492,8 @@ impl SophonPatcher {
                     .unwrap_or(false)
                     {
                         tracing::debug!(
-                            "File {} is already patched, skipping",
-                            patch_info.file_manifest.asset_name
+                            filename = patch_info.file_manifest.asset_name,
+                            "File is already patched, skipping",
                         );
                         (updater)(update_index.add_msg_bytes(patch_info.patch_chunk.patch_length));
                         (updater)(update_index.add_msg_patched(1));
@@ -508,8 +508,10 @@ impl SophonPatcher {
                         .unwrap_or(false)
                         {
                             tracing::warn!(
-                                "The source file is invalid or does not exist, skipping: {}",
-                                patch_info.patch_chunk.original_file_name
+                                filename = patch_info.patch_chunk.original_file_name,
+                                expected_md5 = patch_info.patch_chunk.original_file_md5,
+                                expected_length = patch_info.patch_chunk.original_file_length,
+                                "The source file is invalid or does not exist, skipping",
                             );
 
                             let err = SophonError::FileHashMismatch {
@@ -1024,6 +1026,7 @@ impl SophonPatcher {
         let target_path = file_patch_task.target_file_path(game_folder);
 
         // isn't this double-checking? Checked during queue building iirc.
+        /*
         if let Ok(true) = check_file(
             &target_path,
             file_patch_task.file_manifest.asset_size,
@@ -1033,6 +1036,7 @@ impl SophonPatcher {
 
             return Ok(());
         }
+        */
 
         let tmp_file_path = self.tmp_out_file_path(file_patch_task);
 
@@ -1112,6 +1116,7 @@ impl SophonPatcher {
         file_patch_task: &FilePatchInfo,
         game_folder: &Path,
     ) -> Result<(), SophonError> {
+        /*
         if !check_file(
             orig_file_path,
             file_patch_task.patch_chunk.original_file_length,
@@ -1128,6 +1133,7 @@ impl SophonPatcher {
                 got: file_md5_hash_str(orig_file_path)?,
             });
         }
+        */
 
         let tmp_src_path = self.tmp_src_file_path(file_patch_task);
         let tmp_out_path = self.tmp_out_file_path(file_patch_task);
