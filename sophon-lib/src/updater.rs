@@ -851,8 +851,11 @@ impl SophonPatcher {
         Ok(())
     }
 
-    fn get_patch_from_combined(&self, task: &FilePatchInfo) -> Result<(), SophonError> {
-        let artifact_path = self.tmp_artifact_file_path(task);
+    fn get_patch_from_combined(
+        &self,
+        task: &FilePatchInfo,
+        out_file_path: &Path,
+    ) -> std::io::Result<()> {
         let combined_file_path = self.tmp_patch_blob_path(task.patch_chunk);
 
         let src_file = File::open(&combined_file_path)?;
@@ -861,7 +864,7 @@ impl SophonPatcher {
             task.patch_chunk.patch_length,
         )?;
 
-        let mut out_file = File::create(&artifact_path)?;
+        let mut out_file = File::create(out_file_path)?;
 
         std::io::copy(&mut src_take, &mut out_file)?;
 
@@ -1058,11 +1061,12 @@ impl SophonPatcher {
             PatchLocation::Filesystem(patch_path) => {
                 let mut patch_file = File::open(&patch_path)?;
 
-                self.try_new_file_hdiff(
+                super::utils::hdiff_newfile::try_new_file_hdiff(
                     patch_file.metadata().map(|m| m.size())?,
                     &mut patch_file,
                     &tmp_file_path,
                 )?
+                .map(|_| tmp_file_path)
                 .unwrap_or(patch_path)
             }
             PatchLocation::FilesystemRegion {
@@ -1073,26 +1077,26 @@ impl SophonPatcher {
                 let combo_file = File::open(&combined_path)?;
                 let mut region = (&combo_file).take_region(SeekFrom::Start(offset), length)?;
 
-                self.try_new_file_hdiff(length, &mut region, &tmp_file_path)?
-                    .map(Result::Ok)
-                    .unwrap_or_else(|| {
-                        self.get_patch_from_combined(file_patch_task)
-                            .map(|_| tmp_file_path)
-                    })?
+                super::utils::hdiff_newfile::try_new_file_hdiff(
+                    length,
+                    &mut region,
+                    &tmp_file_path,
+                )?
+                .map(Result::Ok)
+                .unwrap_or_else(|| self.get_patch_from_combined(file_patch_task, &tmp_file_path))?;
+                tmp_file_path
             }
             PatchLocation::Memory(data) => {
                 let mut data_cursor = Cursor::new(data);
 
-                self.try_new_file_hdiff(
+                super::utils::hdiff_newfile::try_new_file_hdiff(
                     data_cursor.get_ref().len() as u64,
                     &mut data_cursor,
                     &tmp_file_path,
                 )?
-                .map(Result::<_, SophonError>::Ok)
-                .unwrap_or_else(|| {
-                    std::fs::write(&tmp_file_path, data_cursor.get_ref())?;
-                    Ok(tmp_file_path)
-                })?
+                .map(Result::Ok)
+                .unwrap_or_else(|| std::fs::write(&tmp_file_path, data_cursor.get_ref()))?;
+                tmp_file_path
             }
         };
 
@@ -1114,55 +1118,6 @@ impl SophonPatcher {
         let _ = std::fs::remove_file(&extracted_file);
 
         Ok(())
-    }
-
-    fn try_new_file_hdiff<R>(
-        &self,
-        file_length: u64,
-        hdiff_file: &mut R,
-        tmp_path: &Path,
-    ) -> Result<Option<PathBuf>, SophonError>
-    where
-        R: Read,
-        R: Seek,
-    {
-        weird_hdiff_parse(hdiff_file)
-            .ok()
-            .map(|(is_compressed, inner_size)| {
-                self.new_file_hdiff(
-                    is_compressed,
-                    file_length - inner_size,
-                    inner_size,
-                    hdiff_file,
-                    tmp_path,
-                )
-            })
-            .transpose()
-    }
-
-    fn new_file_hdiff<R>(
-        &self,
-        is_compressed: bool,
-        offset: u64,
-        inner_size: u64,
-        hdiff_file: &mut R,
-        tmp_path: &Path,
-    ) -> Result<PathBuf, SophonError>
-    where
-        R: Read,
-        R: Seek,
-    {
-        tracing::debug!("Using weird hdiff workaround");
-        hdiff_file.seek(std::io::SeekFrom::Start(offset))?;
-        let mut out_tmp_file = File::create(tmp_path)?;
-        out_tmp_file.set_len(inner_size)?;
-        if is_compressed {
-            let mut decoder = zstd::Decoder::new(hdiff_file)?;
-            std::io::copy(&mut decoder, &mut out_tmp_file)?;
-        } else {
-            std::io::copy(hdiff_file, &mut out_tmp_file)?;
-        }
-        Ok(tmp_path.to_owned())
     }
 
     fn file_patch(
@@ -1356,56 +1311,4 @@ impl SophonPatcher {
         loc_cloned.cleanup();
         Ok(())
     }
-}
-
-/// Returns whether the file is compressed and how many last bytes the file takes
-fn weird_hdiff_parse<R: Read>(reader: &mut R) -> std::io::Result<(bool, u64)> {
-    let mut buf = [0_u8; 128];
-    reader.read_exact(&mut buf)?;
-    let buf = buf;
-    if !buf.starts_with(b"HDIFF13") {
-        return Err(std::io::Error::other(
-            "Invalid HDIFF, file does not start with HDIFF13",
-        ));
-    }
-    let header_start = buf
-        .iter()
-        .enumerate()
-        .find(|(_, b)| **b == 0)
-        .ok_or(std::io::Error::other("Invalid HDIFF, 0x0 not found"))?
-        .0 as u64;
-    let mut operating_buf = Cursor::new(&buf);
-    operating_buf.seek(std::io::SeekFrom::Start(header_start))?;
-    (0..10).for_each(|_| {
-        let _ = read_varint(&mut operating_buf);
-    });
-    //eprintln!("{}", operating_buf.stream_position().unwrap());
-    let new_data_diff_size = read_varint(&mut operating_buf)?;
-    let compressed_new_data_diff_size = read_varint(&mut operating_buf)?;
-    if compressed_new_data_diff_size == 0 {
-        Ok((false, new_data_diff_size))
-    } else {
-        Ok((true, compressed_new_data_diff_size))
-    }
-}
-
-fn read_varint<R: Read>(reader: &mut R) -> std::io::Result<u64> {
-    const CONTINUE_BIT: u8 = 0b10000000;
-    const MASK_BOTTOM: u8 = !CONTINUE_BIT;
-
-    let mut byte = read_u8(reader)?;
-    let mut res = (byte & MASK_BOTTOM) as u64;
-    while byte & CONTINUE_BIT != 0 {
-        byte = read_u8(reader)?;
-        res <<= 7;
-        res |= (byte & MASK_BOTTOM) as u64;
-    }
-
-    Ok(res)
-}
-
-fn read_u8<R: Read>(reader: &mut R) -> std::io::Result<u8> {
-    let mut buf = [0_u8];
-    reader.read_exact(&mut buf)?;
-    Ok(buf[0])
 }

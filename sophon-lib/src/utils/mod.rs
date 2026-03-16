@@ -1,3 +1,4 @@
+pub(crate) mod hdiff_newfile;
 #[cfg(feature = "vendored-hpatchz")]
 pub mod hpatchz;
 #[cfg(feature = "paimon")]
