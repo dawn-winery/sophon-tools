@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     fs::File,
-    io::{Cursor, Read, Seek, SeekFrom},
+    io::{Cursor, Seek, SeekFrom},
     num::NonZeroUsize,
     os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
@@ -25,7 +25,10 @@ use super::{
     },
     utils::version::Version,
 };
-use crate::utils::{read_reporter::ReadReporter, read_take_region::ReadTakeRegion};
+use crate::{
+    FileCheckCache,
+    utils::{read_reporter::ReadReporter, read_take_region::ReadTakeRegion},
+};
 
 #[derive(Debug)]
 pub enum Update {
@@ -141,6 +144,7 @@ struct UpdateIndex<'a> {
     total_bytes: u64,
     downloaded_bytes: AtomicU64,
     files_to_patch: HashMap<&'a String, FilePatchInfo<'a>>,
+    file_check_cache: Mutex<FileCheckCache>,
     files_patched: AtomicU64,
 }
 
@@ -189,6 +193,7 @@ impl<'a> UpdateIndex<'a> {
             unused_deleted: AtomicU64::new(0),
             total_bytes,
             downloaded_bytes: AtomicU64::new(0),
+            file_check_cache: Mutex::new(FileCheckCache::with_capacity(files_to_patch.len())),
             files_to_patch,
             files_patched: AtomicU64::new(0),
         }
@@ -283,6 +288,11 @@ impl<'a> UpdateIndex<'a> {
             };
             queue_lock.push_back(file);
         }
+    }
+
+    fn check_file(&self, file_path: &Path, expected_size: u64, expected_md5: &str) -> bool {
+        let mut cache = self.file_check_cache.lock().expect("thread was poisoned");
+        cache.check_file(file_path, expected_size, expected_md5)
     }
 }
 
@@ -706,13 +716,11 @@ impl SophonPatcher {
 
             let download_res = if patch_queue.is_none() {
                 // preload
-                if check_file(
+                if update_index.check_file(
                     &combined_file_path,
                     task.patch_chunk.patch_size,
                     &task.patch_chunk.patch_md5,
-                )
-                .unwrap_or(false)
-                {
+                ) {
                     (updater)(update_index.add_msg_bytes(task.patch_chunk.patch_length));
                     Ok(())
                 } else {
@@ -728,13 +736,11 @@ impl SophonPatcher {
                     offset: task.patch_chunk.patch_offset,
                     length: task.patch_chunk.patch_length,
                 })
-            } else if check_file(
+            } else if update_index.check_file(
                 &combined_file_path,
                 task.patch_chunk.patch_size,
                 &task.patch_chunk.patch_md5,
-            )
-            .unwrap_or(false)
-            {
+            ) {
                 //self.get_patch_from_combined(&task)
                 Ok(PatchLocation::FilesystemRegion {
                     combined_path: combined_file_path,

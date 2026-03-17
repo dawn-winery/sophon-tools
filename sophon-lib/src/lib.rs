@@ -1,9 +1,10 @@
 use std::{
+    collections::HashMap,
     error::Error,
     fs::File,
     io::{Read, Seek, SeekFrom},
     num::NonZeroUsize,
-    os::unix::fs::PermissionsExt,
+    os::unix::fs::{MetadataExt, PermissionsExt},
     path::{Path, PathBuf},
     str::FromStr,
 };
@@ -161,6 +162,57 @@ pub fn file_md5_hash_str(file_path: impl AsRef<Path>) -> std::io::Result<String>
     std::io::copy(&mut file, &mut md5)?;
 
     Ok(format!("{:x}", md5.finalize()))
+}
+
+#[derive(Debug)]
+struct FileCheckCache {
+    cache: HashMap<(PathBuf, u64, String), (i64, bool)>,
+}
+
+impl FileCheckCache {
+    fn new() -> Self {
+        Self {
+            cache: HashMap::new(),
+        }
+    }
+
+    fn with_capacity(capacity: usize) -> Self {
+        Self {
+            cache: HashMap::with_capacity(capacity),
+        }
+    }
+
+    pub(crate) fn check_file(
+        &mut self,
+        file_path: &Path,
+        expected_size: u64,
+        expected_md5: &str,
+    ) -> bool {
+        if let Some((mtime, check_res)) = self
+            .cache
+            .get(&(file_path.to_owned(), expected_size, expected_md5.to_owned()))
+            .copied()
+        {
+            if std::fs::metadata(file_path)
+                .map(|m| m.mtime() > mtime)
+                .unwrap_or(false)
+            {
+                self.cache
+                    .remove(&(file_path.to_owned(), expected_size, expected_md5.to_owned()));
+            } else {
+                return check_res;
+            }
+        }
+        let check_res = check_file(file_path, expected_size, expected_md5).unwrap_or(false);
+        let mtime = std::fs::metadata(file_path)
+            .map(|m| m.mtime())
+            .unwrap_or(i64::MIN);
+        self.cache.insert(
+            (file_path.to_owned(), expected_size, expected_md5.to_owned()),
+            (mtime, check_res),
+        );
+        check_res
+    }
 }
 
 pub fn check_file(
