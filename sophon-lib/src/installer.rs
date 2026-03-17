@@ -725,7 +725,7 @@ impl SophonInstaller {
                 tracing::debug!(artifact = ?artifact_path, "Artifact already exists, skipping download");
                 Ok(ChunkLocation::Filesystem(artifact_path))
             } else {
-                self.download_artifact(&task)
+                self.download_artifact(&task, assembly_queue.is_none())
             };
 
             let (chunk_size, chunk_hash) = task.chunk_file_info();
@@ -788,7 +788,11 @@ impl SophonInstaller {
     // instrumenting to maybe try and see how much time it takes to download and
     // save
     #[tracing::instrument(level = "debug", err, skip_all, fields(chunk = task.chunk_manifest.chunk_name, download_size = task.chunk_file_info().0))]
-    fn download_artifact(&self, task: &ChunkInfo) -> Result<ChunkLocation, SophonError> {
+    fn download_artifact(
+        &self,
+        task: &ChunkInfo,
+        force_to_disk: bool,
+    ) -> Result<ChunkLocation, SophonError> {
         let download_url = task.download_url();
         let out_file_path = self.tmp_artifact_file_path(task);
 
@@ -819,7 +823,7 @@ impl SophonInstaller {
             });
         }
 
-        if self.chunks_queue_data_limit.is_some() {
+        if self.chunks_in_mem && !force_to_disk {
             Ok(ChunkLocation::Memory(bytes))
         } else {
             std::fs::write(&out_file_path, bytes)?;
