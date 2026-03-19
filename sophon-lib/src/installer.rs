@@ -931,55 +931,45 @@ impl SophonInstaller {
             .iter()
             .filter(|chinfo| chinfo.chunk_name == downloaded_chunk.chunk_manifest.chunk_name);
 
-        let res = if let Ok(true) = check_file(
-            &target_file_path,
-            file_info.file_manifest.asset_size,
-            &file_info.file_manifest.asset_hash_md5,
-        ) {
-            tracing::debug!(file = ?target_file_path, "File appears to be already downloaded");
-            Ok(true)
-        } else {
-            chunk_infos_for_file
-                .try_for_each(|chunk_info| {
-                    self.file_assembly_partial(
+        // do not check teh target file here, as it was already excluded during queue building
+        let res = chunk_infos_for_file
+            .try_for_each(|chunk_info| {
+                self.file_assembly_partial(
+                    &working_file,
+                    chunk_location,
+                    &ChunkInfo {
+                        chunk_manifest: chunk_info,
+                        download_info: downloaded_chunk.download_info,
+                        retries_left: downloaded_chunk.retries_left,
+                    },
+                    file_info,
+                )
+            })
+            // Check if the temporary file is completed
+            .and_then(|_| {
+                check_file(
+                    &working_file,
+                    file_info.file_manifest.asset_size,
+                    &file_info.file_manifest.asset_hash_md5,
+                )
+                .map_err(SophonError::IoError)
+            })
+            // If it is, finalize and remove temporary file
+            // I know it basically checks twice
+            .and_then(|file_valid| {
+                if !self.inplace && file_valid {
+                    finalize_file(
                         &working_file,
-                        chunk_location,
-                        &ChunkInfo {
-                            chunk_manifest: chunk_info,
-                            download_info: downloaded_chunk.download_info,
-                            retries_left: downloaded_chunk.retries_left,
-                        },
-                        file_info,
-                    )
-                })
-                // Check if the temporary file is completed
-                .and_then(|_| {
-                    check_file(
-                        &working_file,
+                        &target_file_path,
                         file_info.file_manifest.asset_size,
                         &file_info.file_manifest.asset_hash_md5,
                     )
-                    .map_err(SophonError::IoError)
-                })
-                // If it is, finalize and remove temporary file
-                // I know it basically checks twice
-                .and_then(|file_valid| {
-                    if !self.inplace && file_valid {
-                        finalize_file(
-                            &working_file,
-                            &target_file_path,
-                            file_info.file_manifest.asset_size,
-                            &file_info.file_manifest.asset_hash_md5,
-                        )
-                        .inspect_err(|err| {
-                            tracing::error!(?err, "Error during file finalization")
-                        })?;
+                    .inspect_err(|err| tracing::error!(?err, "Error during file finalization"))?;
 
-                        let _ = std::fs::remove_file(&working_file);
-                    }
-                    Ok(file_valid)
-                })
-        };
+                    let _ = std::fs::remove_file(&working_file);
+                }
+                Ok(file_valid)
+            });
 
         match res {
             Ok(true) => {
