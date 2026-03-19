@@ -429,11 +429,13 @@ impl SophonPatcher {
     ) -> Result<(), SophonError> {
         let (download_threads, patch_threads) = super::divide_threads(thread_count)?;
 
-        if self.check_free_space {
+        if self.check_free_space && !self.patches_in_memory {
             tracing::info!("Checking free space availability");
             (updater)(Update::CheckingFreeSpace(self.temp_folder.clone()));
 
-            let download_bytes = self
+            // TODO: queue limit check when the queue limit is implemented
+
+            let download_bytes: u64 = self
                 .diff_info
                 .stats
                 .get(&from.to_string())
@@ -442,7 +444,11 @@ impl SophonPatcher {
                 .parse()
                 .unwrap();
 
-            Self::free_space_check(updater.clone(), &self.temp_folder, download_bytes)?;
+            let already_downloaded_size = fs_extra::dir::get_size(&self.temp_folder)?;
+
+            let size_to_check = download_bytes - already_downloaded_size;
+
+            Self::free_space_check(updater.clone(), &self.temp_folder, size_to_check)?;
         }
 
         self.create_temp_dirs()?;
