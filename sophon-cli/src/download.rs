@@ -183,7 +183,12 @@ impl DownloadArgs {
             };
             if let Err(why) = res {
                 progress_bar.abandon_with_message(format!(
-                    "Failed to download component {}: {why:?}",
+                    "Failed to download component `{}`: {why:?}",
+                    download_info.matching_field
+                ));
+            } else {
+                progress_bar.finish_with_message(format!(
+                    "Finished downloading component `{}`",
                     download_info.matching_field
                 ));
             }

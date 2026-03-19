@@ -188,7 +188,12 @@ impl RepairArgs {
                 ),
             ) {
                 progress_bar.abandon_with_message(format!(
-                    "Failed to download component {}: {why:?}",
+                    "Failed to repair component `{}`: {why:?}",
+                    download_info.matching_field
+                ));
+            } else if !progress_bar.is_finished() {
+                progress_bar.abandon_with_message(format!(
+                    "Component `{}`: not all files passed the check",
                     download_info.matching_field
                 ));
             }

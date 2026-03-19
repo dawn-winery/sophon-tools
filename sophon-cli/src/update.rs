@@ -255,8 +255,13 @@ impl UpdateArgs {
 
             if let Err(why) = res {
                 progress_bar.abandon_with_message(format!(
-                    "Failed to download component {}: {why:?}",
+                    "Failed to update component `{}`: {why:?}",
                     update_manifest.matching_field
+                ));
+            } else {
+                progress_bar.finish_with_message(format!(
+                    "Done updating coomponent `{}`",
+                    update_manifest.matching_field,
                 ));
             }
         }
