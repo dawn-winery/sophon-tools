@@ -557,6 +557,7 @@ impl SophonInstaller {
 
         // Early exit if all files are already downloaded
         if self.skip_download_repair || download_queue.is_empty() {
+            (updater)(Update::DownloadingFinished);
             return;
         }
 
