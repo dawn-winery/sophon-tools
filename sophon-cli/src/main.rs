@@ -22,15 +22,15 @@ mod pretty_print;
 #[command(version, about, long_about = None)]
 struct Cli {
     /// Game edition, global or china
-    #[arg(short, long, default_value = "global")]
+    #[arg(short = 'E', long, default_value = "global")]
     edition: String,
 
     /// Cache directory
-    #[arg(short, long, default_value_os_t = std::env::home_dir().unwrap().join(".cache/sophon-tools"), value_hint = ValueHint::DirPath)]
+    #[arg(short = 'C', long, default_value_os_t = std::env::home_dir().unwrap().join(".cache/sophon-tools"), value_hint = ValueHint::DirPath)]
     cache_dir: PathBuf,
 
     /// Thread limit for the commands that use multiple threads
-    #[arg(short, long, default_value_t = 2)]
+    #[arg(short = 'T', long, default_value_t = 2)]
     threads: usize,
 
     #[command(subcommand)]

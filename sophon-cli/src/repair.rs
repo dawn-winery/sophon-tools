@@ -21,7 +21,7 @@ pub struct RepairArgs {
     version: Option<String>,
 
     /// Assemble files in-place in the game folder, without making temporary files in cache dir
-    #[arg(long)]
+    #[arg(short, long)]
     inplace: bool,
     /// Don't actually repair, only check and report broken files
     #[arg(short, long)]

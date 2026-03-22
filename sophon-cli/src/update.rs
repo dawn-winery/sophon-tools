@@ -75,10 +75,10 @@ pub struct UpdateArgs {
     game: GameCommon,
     /// Currently installed version to update from. Use value of `auto` to autodetect the installed
     /// game version
-    #[arg(long)]
+    #[arg(short, long)]
     from: String,
     /// Omit to use latest
-    #[arg(long)]
+    #[arg(short, long)]
     to: Option<String>,
 
     /// Whether to use the preload (just downloads all patches and blobs into the cache dir)

@@ -24,7 +24,7 @@ pub struct DownloadArgs {
     preload: bool,
 
     /// Assemble files in-place in the game folder, without making temporary files in cache dir
-    #[arg(long)]
+    #[arg(short, long)]
     inplace: bool,
 
     #[command(flatten)]
