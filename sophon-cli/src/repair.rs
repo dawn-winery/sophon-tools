@@ -75,8 +75,14 @@ impl RepairArgs {
             sophon_lib::installer::Update::CheckingFreeSpace(path) => {
                 progress_bar.set_message(format!("Checking free space at {}", path.display()))
             }
-            sophon_lib::installer::Update::DownloadingFinished => progress_bar
-                .finish_with_message(format!("Finished repairing component {}", matching_field)),
+            sophon_lib::installer::Update::DownloadingFinished => {
+                if !progress_bar.is_finished() {
+                    progress_bar.finish_with_message(format!(
+                        "Finished repairing component {}",
+                        matching_field
+                    ))
+                }
+            }
             _ => {}
         }
     }
