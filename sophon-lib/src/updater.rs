@@ -446,9 +446,11 @@ impl SophonPatcher {
 
             let already_downloaded_size = fs_extra::dir::get_size(&self.temp_folder)?;
 
-            let size_to_check = download_bytes - already_downloaded_size;
+            let size_to_check = download_bytes.saturating_sub(already_downloaded_size);
 
-            Self::free_space_check(updater.clone(), &self.temp_folder, size_to_check)?;
+            if size_to_check > 0 {
+                Self::free_space_check(updater.clone(), &self.temp_folder, size_to_check)?;
+            }
         }
 
         self.create_temp_dirs()?;

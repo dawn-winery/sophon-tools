@@ -411,9 +411,11 @@ impl SophonInstaller {
 
             let already_installed_size = fs_extra::dir::get_size(output_folder)?;
 
-            let size_to_check = installed_size - already_installed_size;
+            let size_to_check = installed_size.saturating_sub(already_installed_size);
 
-            Self::free_space_check(&updater, output_folder, size_to_check)?;
+            if size_to_check != 0 {
+                Self::free_space_check(&updater, output_folder, size_to_check)?;
+            }
         }
 
         tracing::info!("Downloading files");
