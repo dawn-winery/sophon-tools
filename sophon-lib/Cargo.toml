@@ -8,6 +8,7 @@ license = "GPL-3.0"
 default = ["vendored-hpatchz"]
 vendored-hpatchz = []
 paimon = ["dep:paimon"]
+extra-logs = []
 
 [dependencies]
 zstd = { version = "0.13" }

@@ -509,6 +509,7 @@ impl SophonPatcher {
                     )
                     .unwrap_or(false)
                     {
+                        #[cfg(feature = "extra-logs")]
                         tracing::debug!(
                             filename = patch_info.file_manifest.asset_name,
                             "File is already patched, skipping",
@@ -562,7 +563,7 @@ impl SophonPatcher {
                 let sender_clone = file_patch_sender.clone();
                 let updater_clone = updater.clone();
                 scope.spawn(move || {
-                    let _span = tracing::trace_span!("Download thread", thread_num = i).entered();
+                    let _span = tracing::debug_span!("Download thread", thread_idx = i).entered();
 
                     self.artifact_download_loop(
                         download_queue_ref,
@@ -581,7 +582,7 @@ impl SophonPatcher {
                 let receiver_clone = file_patch_receiver.clone();
 
                 scope.spawn(move || {
-                    let _span = tracing::debug_span!("Patching thread", thread_num = i).entered();
+                    let _span = tracing::debug_span!("Patching thread", thread_idx = i).entered();
 
                     self.file_patch_loop(game_folder, updater_clone, index_ref, receiver_clone);
                 });
@@ -592,7 +593,7 @@ impl SophonPatcher {
                 (updater)(Update::DeletingStarted);
 
                 let _deleting_unused_span =
-                    tracing::trace_span!("Deleting unused", amount = unused.assets.len()).entered();
+                    tracing::debug_span!("Deleting unused", amount = unused.assets.len()).entered();
 
                 // Deleting unused files
                 for unused_asset in &unused.assets {
@@ -756,6 +757,7 @@ impl SophonPatcher {
                     length: task.patch_chunk.patch_length,
                 })
             } else if artifact_path.exists() {
+                #[cfg(feature = "extra-logs")]
                 tracing::debug!(
                     artifact = ?artifact_path,
                     "Artifact already exists, skipping download"
@@ -992,7 +994,7 @@ impl SophonPatcher {
                 file_patch_task.file_manifest.asset_size,
                 &file_patch_task.file_manifest.asset_hash_md5,
             ) {
-                // shouldn't be encountered sicne the download queue is filtered, but keeping the
+                // shouldn't be encountered since the download queue is filtered, but keeping the
                 // check and message just in case
                 tracing::debug!(
                     file = ?target_path,
@@ -1009,6 +1011,7 @@ impl SophonPatcher {
 
         match res {
             Ok(()) => {
+                #[cfg(feature = "extra-logs")]
                 tracing::debug!(
                     name = ?file_patch_task.file_manifest.asset_name,
                     "Successfully patched"

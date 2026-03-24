@@ -683,7 +683,8 @@ impl SophonInstaller {
 
         tracing::debug!("Starting download");
         std::thread::scope(|scope| {
-            for _ in 0..thread_count {
+            for i in 0..thread_count {
+                let _ = tracing::debug_span!("Downloading thread", thread_idx = i).entered();
                 let updater_clone = updater.clone();
                 scope.spawn(|| {
                     self.artifact_download_loop(
@@ -725,6 +726,7 @@ impl SophonInstaller {
             let artifact_path = self.tmp_artifact_file_path(&task);
 
             let res = if artifact_path.exists() {
+                #[cfg(feature = "extra-logs")]
                 tracing::debug!(artifact = ?artifact_path, "Artifact already exists, skipping download");
                 Ok(ChunkLocation::Filesystem(artifact_path))
             } else {
@@ -975,6 +977,7 @@ impl SophonInstaller {
 
         match res {
             Ok(true) => {
+                #[cfg(feature = "extra-logs")]
                 tracing::debug!(
                     "Successfully downloaded `{}`",
                     file_info.file_manifest.asset_name
@@ -982,6 +985,7 @@ impl SophonInstaller {
                 (updater)(downloading_index.add_msg_files(1))
             }
             Ok(false) => {
+                #[cfg(feature = "extra-logs")]
                 tracing::debug!(
                     chunk = downloaded_chunk.chunk_manifest.chunk_name,
                     file = file_info.file_manifest.asset_name,
