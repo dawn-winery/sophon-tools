@@ -260,7 +260,7 @@ impl UpdateArgs {
                 ));
             } else {
                 progress_bar.finish_with_message(format!(
-                    "Done updating coomponent `{}`",
+                    "Done updating component `{}`",
                     update_manifest.matching_field,
                 ));
             }
