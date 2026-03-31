@@ -161,7 +161,7 @@ impl UpdateArgs {
                 .timeout(Duration::from_secs(30)),
         )
         .build()
-        .unwrap();
+        .expect("Must be a valid configuration");
 
         println!("Fetching update information...");
         let branches =
@@ -195,7 +195,7 @@ impl UpdateArgs {
         if !dialoguer::Confirm::new()
             .with_prompt("Proceed with update?")
             .interact()
-            .unwrap()
+            .map_err(|e| e.to_string())?
         {
             return Err("Aborted by user".to_owned());
         }
@@ -206,16 +206,16 @@ impl UpdateArgs {
                 .iter()
                 .find(|(k, _)| **k == self.from)
                 .and_then(|(_, v)| v.compressed_size.parse::<u64>().ok())
-                .expect("Failed to find/parse downlaod size");
+                .expect("Failed to find/parse download size");
             let download_style =
                 ProgressStyle::default_bar()
                 .template("{msg}\n{spinner} [{elapsed_precise}] [{wide_bar}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})")
-                .unwrap();
+                .expect("Template should be valid");
             let file_check_style = ProgressStyle::default_bar()
                 .template(
                     "{msg}\n{spinner} [{elapsed_precise}] [{wide_bar}] {pos}/{len} {percent}%",
                 )
-                .unwrap();
+                .expect("Template should be valid");
 
             let progress_bar = ProgressBar::new(total_download).with_style(download_style.clone());
             progress_bar.enable_steady_tick(Duration::from_secs_f32(0.25));
@@ -231,7 +231,7 @@ impl UpdateArgs {
             let res = if !self.extra.preload_pretend {
                 updater.update(
                     &self.game.game_dir,
-                    Version::from_str(&self.from).unwrap(),
+                    Version::from_str(&self.from).expect("API must have valid version string"),
                     thread_count,
                     Self::new_updater(
                         &progress_bar,
@@ -242,7 +242,7 @@ impl UpdateArgs {
                 )
             } else {
                 updater.pre_download(
-                    Version::from_str(&self.from).unwrap(),
+                    Version::from_str(&self.from).expect("API must have valid version string"),
                     thread_count,
                     Self::new_updater(
                         &progress_bar,

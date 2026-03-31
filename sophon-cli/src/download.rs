@@ -99,7 +99,7 @@ impl DownloadArgs {
                 .timeout(Duration::from_secs(30)),
         )
         .build()
-        .unwrap();
+        .expect("Client config should be valid");
 
         println!("Fetching download information...");
         let branches =
@@ -127,22 +127,26 @@ impl DownloadArgs {
         if !dialoguer::Confirm::new()
             .with_prompt("Proceed with download?")
             .interact()
-            .unwrap()
+            .map_err(|e| e.to_string())?
         {
             return Err("Aborted by user".to_owned());
         }
 
         for download_info in downloads_info.manifests {
-            let total_download = download_info.stats.compressed_size.parse::<u64>().unwrap();
+            let total_download = download_info
+                .stats
+                .compressed_size
+                .parse::<u64>()
+                .expect("API should have valid integer");
             let download_style =
                 ProgressStyle::default_bar()
                 .template("{msg}\n{spinner} [{elapsed_precise}] [{wide_bar}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})")
-                .unwrap();
+                .expect("Template should be valid");
             let file_check_style = ProgressStyle::default_bar()
                 .template(
                     "{msg}\n{spinner} [{elapsed_precise}] [{wide_bar}] {pos}/{len} {percent}%",
                 )
-                .unwrap();
+                .expect("Template should be valid");
 
             let progress_bar = ProgressBar::new(total_download).with_style(download_style.clone());
             progress_bar.enable_steady_tick(Duration::from_secs_f32(0.25));
