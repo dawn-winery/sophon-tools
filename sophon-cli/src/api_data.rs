@@ -1,9 +1,12 @@
-use std::io::{Write, stdout};
+use std::{
+    fmt::Display,
+    io::{Write, stdout},
+};
 
 use clap::{Args, ValueEnum};
 use serde::Serialize;
 use sophon_lib::{
-    GameEdition,
+    GameEdition, SophonError,
     api::{
         get_download_manifest, get_download_manifest_raw, get_patch_manifest,
         get_patch_manifest_raw,
@@ -156,16 +159,16 @@ impl MultipleVersionFilter {
             println!(
                 "{}",
                 sophon_lib::api::get_game_scan_info_raw(client, &edition)
-                    .map_err(|e| format!("Failed to get game scan info: {e:?}"))?
+                    .map_err(DumpError::game_scan)?
             );
             return Ok(());
         }
 
-        let game_scan_info = sophon_lib::api::get_game_scan_info(client, &edition)
-            .map_err(|e| format!("Failed to get game scan info: {e:?}"))?;
+        let game_scan_info =
+            sophon_lib::api::get_game_scan_info(client, &edition).map_err(DumpError::game_scan)?;
 
         let Some(game_id) = game else {
-            dump_value_formatted(&game_scan_info, format);
+            dump_value_formatted(&game_scan_info, format)?;
             return Ok(());
         };
 
@@ -186,7 +189,7 @@ impl MultipleVersionFilter {
                 .iter()
                 .max_by_key(|hash| &hash.version)
             {
-                dump_value_formatted(game_latest, format);
+                dump_value_formatted(game_latest, format)?;
                 Ok(())
             } else {
                 Err("No exe versions, this is unexpected".to_string())
@@ -197,13 +200,13 @@ impl MultipleVersionFilter {
                 .iter()
                 .find(|info| info.version == target_version)
             {
-                dump_value_formatted(version_filtered, format);
+                dump_value_formatted(version_filtered, format)?;
                 Ok(())
             } else {
                 Err(format!("Version {target_version} not found"))
             }
         } else {
-            dump_value_formatted(game_filtered, format);
+            dump_value_formatted(game_filtered, format)?;
             Ok(())
         }
     }
@@ -223,16 +226,16 @@ impl MultipleVersionFilter {
             println!(
                 "{}",
                 sophon_lib::api::get_game_branches_info_raw(client, &edition)
-                    .map_err(|e| format!("Failed to get game branches info: {e:?}"))?
+                    .map_err(DumpError::game_branches)?
             );
             return Ok(());
         }
 
         let game_branches = sophon_lib::api::get_game_branches_info(client, &edition)
-            .map_err(|e| format!("Failed to get game branches info: {e:?}"))?;
+            .map_err(DumpError::game_branches)?;
 
         let Some(game_id_or_biz) = game else {
-            dump_value_formatted(&game_branches, format);
+            dump_value_formatted(&game_branches, format)?;
             return Ok(());
         };
 
@@ -240,19 +243,19 @@ impl MultipleVersionFilter {
             if let Some(latest_branch) =
                 game_branches.get_game_branch_by_id_or_biz_latest(&game_id_or_biz)
             {
-                dump_value_formatted(latest_branch, format);
+                dump_value_formatted(latest_branch, format)?;
                 return Ok(());
             }
         } else {
             let mut filtered_branches =
                 game_branches.get_game_branches_by_id_or_biz(&game_id_or_biz, version.as_deref());
             if let Some(first_item) = filtered_branches.next() {
-                dump_value_formatted(first_item, format);
+                dump_value_formatted(first_item, format)?;
                 for branch in filtered_branches {
                     if matches!(format, DumpFormat::Pretty) {
                         print!("\n\n");
                     }
-                    dump_value_formatted(branch, format);
+                    dump_value_formatted(branch, format)?;
                 }
                 return Ok(());
             }
@@ -272,13 +275,13 @@ impl MultipleVersionFilter {
             println!(
                 "{}",
                 sophon_lib::api::get_game_configs_raw(client, &edition)
-                    .map_err(|e| format!("Failed to get game configs: {e:?}"))?
+                    .map_err(DumpError::game_configs)?
             );
             return Ok(());
         }
 
-        let mut game_configs = sophon_lib::api::get_game_configs(client, &edition)
-            .map_err(|e| format!("Failed to get game configs: {e:?}"))?;
+        let mut game_configs =
+            sophon_lib::api::get_game_configs(client, &edition).map_err(DumpError::game_configs)?;
 
         if let Some(game_id_or_biz) = game {
             game_configs.launch_configs.retain(|launch_config| {
@@ -287,7 +290,7 @@ impl MultipleVersionFilter {
         }
 
         if !game_configs.launch_configs.is_empty() {
-            dump_value_formatted(&game_configs, format);
+            dump_value_formatted(&game_configs, format)?;
             return Ok(());
         }
 
@@ -313,25 +316,25 @@ impl SingleVersionFilter {
             );
         }
         let game_branches = sophon_lib::api::get_game_branches_info(client, &edition)
-            .map_err(|e| format!("Failed to get game branches info: {e:?}"))?;
+            .map_err(DumpError::game_branches)?;
 
         if version.is_none() {
             if let Some(latest_branch) =
                 game_branches.get_package_by_id_or_biz_latest(&game, preload)
             {
-                dump_value_formatted(latest_branch, format);
+                dump_value_formatted(latest_branch, format)?;
             }
             return Ok(());
         } else {
             let mut filtered_branches =
                 game_branches.get_packages_by_id_or_biz(&game, version.as_deref(), preload);
             if let Some(first_item) = filtered_branches.next() {
-                dump_value_formatted(first_item, format);
+                dump_value_formatted(first_item, format)?;
                 for branch in filtered_branches {
                     if matches!(format, DumpFormat::Pretty) {
                         print!("\n\n");
                     }
-                    dump_value_formatted(branch, format);
+                    dump_value_formatted(branch, format)?;
                 }
                 return Ok(());
             }
@@ -358,7 +361,7 @@ impl MultipleMatchingFieldFilter {
             matching_field,
         } = self;
         let game_branches = sophon_lib::api::get_game_branches_info(client, &edition)
-            .map_err(|e| format!("Failed to get game branches info: {e:?}"))?;
+            .map_err(DumpError::game_branches)?;
 
         let package = if version.is_none() {
             game_branches.get_package_by_id_or_biz_latest(&game, preload)
@@ -376,12 +379,12 @@ impl MultipleMatchingFieldFilter {
             println!(
                 "{}",
                 sophon_lib::api::get_game_download_sophon_info_raw(client, package, &edition)
-                    .map_err(|e| format!("Failed to get sophon download info: {e:?}"))?
+                    .map_err(DumpError::sophon_download)?
             );
         } else {
             let mut downloads_info =
                 sophon_lib::api::get_game_download_sophon_info(client, package, &edition)
-                    .map_err(|e| format!("Failed to get sophon download info: {e:?}"))?;
+                    .map_err(DumpError::sophon_download)?;
 
             if !matching_field.is_empty() {
                 downloads_info
@@ -389,7 +392,7 @@ impl MultipleMatchingFieldFilter {
                     .retain(|download_info| matching_field.contains(&download_info.matching_field));
             }
 
-            dump_value_formatted(&downloads_info, format);
+            dump_value_formatted(&downloads_info, format)?;
         }
 
         Ok(())
@@ -411,7 +414,7 @@ impl MultipleMatchingFieldFilter {
             matching_field,
         } = self;
         let game_branches = sophon_lib::api::get_game_branches_info(client, &edition)
-            .map_err(|e| format!("Failed to get game branches info: {e:?}"))?;
+            .map_err(DumpError::game_branches)?;
 
         let package = if version.is_none() {
             game_branches.get_package_by_id_or_biz_latest(&game, preload)
@@ -429,11 +432,11 @@ impl MultipleMatchingFieldFilter {
             println!(
                 "{}",
                 sophon_lib::api::get_game_diffs_sophon_info_raw(client, package, &edition)
-                    .map_err(|e| format!("Failed to get sophon diffs: {e:?}"))?
+                    .map_err(DumpError::sophon_diffs)?
             );
         } else {
             let mut diffs = sophon_lib::api::get_game_diffs_sophon_info(client, package, &edition)
-                .map_err(|e| format!("Failed to get sophon diffs: {e:?}"))?;
+                .map_err(DumpError::sophon_diffs)?;
 
             if !matching_field.is_empty() {
                 diffs
@@ -441,7 +444,7 @@ impl MultipleMatchingFieldFilter {
                     .retain(|download_info| matching_field.contains(&download_info.matching_field));
             }
 
-            dump_value_formatted(&diffs, format);
+            dump_value_formatted(&diffs, format)?;
         }
 
         Ok(())
@@ -465,7 +468,7 @@ impl SingleMatchingFieldFilter {
             matching_field,
         } = self;
         let game_branches = sophon_lib::api::get_game_branches_info(client, &edition)
-            .map_err(|e| format!("Failed to get game branches info: {e:?}"))?;
+            .map_err(DumpError::game_branches)?;
 
         let Some(package) = game_branches
             .get_packages_by_id_or_biz(&game, version.as_deref(), preload)
@@ -475,7 +478,7 @@ impl SingleMatchingFieldFilter {
         };
 
         let downloads = sophon_lib::api::get_game_download_sophon_info(client, package, &edition)
-            .map_err(|e| format!("Failed to get sophon download info: {e:?}"))?;
+            .map_err(DumpError::sophon_download)?;
         let Some(download_info) = downloads
             .manifests
             .iter()
@@ -490,13 +493,11 @@ impl SingleMatchingFieldFilter {
             let data = get_download_manifest_raw(client, download_info)
                 .map_err(|e| format!("Failed to get download manifest: {e:?}"))?;
             let mut output = stdout();
-            output
-                .write_all(&data)
-                .map_err(|e| format!("I/O error when trying to output data: {e:?}"))?;
+            output.write_all(&data).map_err(DumpError::output_io)?;
         } else {
             let download_manifest = get_download_manifest(client, download_info)
-                .map_err(|e| format!("Failed to get download manifest: {e:?}"))?;
-            dump_value_formatted(&download_manifest, format);
+                .map_err(DumpError::download_manifest)?;
+            dump_value_formatted(&download_manifest, format)?;
         }
 
         Ok(())
@@ -518,7 +519,7 @@ impl SingleMatchingFieldFilter {
             matching_field,
         } = self;
         let game_branches = sophon_lib::api::get_game_branches_info(client, &edition)
-            .map_err(|e| format!("Failed to get game branches info: {e:?}"))?;
+            .map_err(DumpError::game_branches)?;
 
         let Some(package) = game_branches
             .get_packages_by_id_or_biz(&game, version.as_deref(), preload)
@@ -528,7 +529,7 @@ impl SingleMatchingFieldFilter {
         };
 
         let diffs = sophon_lib::api::get_game_diffs_sophon_info(client, package, &edition)
-            .map_err(|e| format!("Failed to get sophon diffs: {e:?}"))?;
+            .map_err(DumpError::sophon_diffs)?;
         let Some(diff_info) = diffs
             .manifests
             .iter()
@@ -540,16 +541,14 @@ impl SingleMatchingFieldFilter {
         };
 
         if matches!(format, DumpFormat::Raw) {
-            let data = get_patch_manifest_raw(client, diff_info)
-                .map_err(|e| format!("Failed to get patch manifest: {e:?}"))?;
+            let data =
+                get_patch_manifest_raw(client, diff_info).map_err(DumpError::patch_manifest)?;
             let mut output = stdout();
-            output
-                .write_all(&data)
-                .map_err(|e| format!("I/O error when trying to output data: {e:?}"))?;
+            output.write_all(&data).map_err(DumpError::output_io)?;
         } else {
-            let patch_manifest = get_patch_manifest(client, diff_info)
-                .map_err(|e| format!("Failed to get patch manifest: {e:?}"))?;
-            dump_value_formatted(&patch_manifest, format);
+            let patch_manifest =
+                get_patch_manifest(client, diff_info).map_err(DumpError::patch_manifest)?;
+            dump_value_formatted(&patch_manifest, format)?;
         }
 
         Ok(())
@@ -557,7 +556,7 @@ impl SingleMatchingFieldFilter {
 }
 
 /// Helper for outputting data in all the supported formats EXCEPT raw
-fn dump_value_formatted<T>(value: &T, format: DumpFormat)
+fn dump_value_formatted<T>(value: &T, format: DumpFormat) -> Result<(), DumpError>
 where
     T: core::fmt::Debug,
     T: PrettyPrint,
@@ -567,12 +566,11 @@ where
         DumpFormat::Debug => println!("{value:?}"),
         DumpFormat::DebugPretty => println!("{value:#?}"),
         DumpFormat::Json => {
-            let serialized = serde_json::to_string(&value).expect("Failed to serialize value");
+            let serialized = serde_json::to_string(&value)?;
             println!("{}", serialized)
         }
         DumpFormat::JsonPretty => {
-            let serialized =
-                serde_json::to_string_pretty(&value).expect("Failed to serialize value");
+            let serialized = serde_json::to_string_pretty(&value)?;
             println!("{}", serialized)
         }
         DumpFormat::Pretty => {
@@ -586,5 +584,98 @@ where
         // deduplication. Although at that point I have a hunch that it blows up into being more
         // complicated to maintain that what is here now.
         DumpFormat::Raw => unreachable!("Must be handled earlier in code"),
+    }
+
+    Ok(())
+}
+
+#[derive(Debug)]
+pub struct DumpError {
+    kind: DumpErrorKind,
+    reason: String,
+}
+
+impl Display for DumpError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.kind, self.reason)
+    }
+}
+
+impl From<serde_json::Error> for DumpError {
+    fn from(value: serde_json::Error) -> Self {
+        Self {
+            kind: DumpErrorKind::Serialize,
+            reason: format!("{value:?}"),
+        }
+    }
+}
+
+impl DumpError {
+    fn output_io(e: std::io::Error) -> Self {
+        Self {
+            kind: DumpErrorKind::OutputIo,
+            reason: format!("{e:?}"),
+        }
+    }
+}
+
+macro_rules! dump_error_constructors {
+    ($($varname:ident => $methname:ident),*) => {
+        impl DumpError {$(
+            fn $methname (e: SophonError) -> Self {
+                Self {
+                    kind: DumpErrorKind::$varname,
+                    reason: format!("{e:?}")
+                }
+            }
+        )*}
+    }
+}
+
+dump_error_constructors!(
+    PatchManifest => patch_manifest,
+    SophonDiffs => sophon_diffs,
+    GameBranches => game_branches,
+    DownloadManifest => download_manifest,
+    SophonDownload => sophon_download,
+    GameConfigs => game_configs,
+    GameScan => game_scan
+);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DumpErrorKind {
+    GameBranches,
+    GameScan,
+    GameConfigs,
+    SophonDownload,
+    DownloadManifest,
+    SophonDiffs,
+    PatchManifest,
+    OutputIo,
+    Serialize,
+}
+
+impl Display for DumpErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::GameBranches => "Failed to get game branches",
+            Self::GameScan => "Failed to get game scan info",
+            Self::GameConfigs => "Faield to get game configs",
+            Self::SophonDownload => "Failed to get sophondownload info",
+            Self::DownloadManifest => "Failed to get download manifest",
+            Self::SophonDiffs => "Failed to get sophon diffs",
+            Self::PatchManifest => "Failed to get patch manifest",
+            Self::OutputIo => "I/O error when trying to output data",
+            Self::Serialize => "Failed to serialize value",
+        })
+    }
+}
+
+impl std::error::Error for DumpError {}
+
+// why is this not impl'ed for ToString/Display?
+impl From<DumpError> for String {
+    fn from(value: DumpError) -> Self {
+        value.to_string()
     }
 }
