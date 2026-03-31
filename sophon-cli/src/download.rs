@@ -129,7 +129,7 @@ impl DownloadArgs {
             .interact()
             .unwrap()
         {
-            std::process::exit(1)
+            return Err("Aborted by user".to_owned());
         }
 
         for download_info in downloads_info.manifests {

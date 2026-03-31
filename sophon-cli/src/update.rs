@@ -197,7 +197,7 @@ impl UpdateArgs {
             .interact()
             .unwrap()
         {
-            std::process::exit(1)
+            return Err("Aborted by user".to_owned());
         }
 
         for update_manifest in diffs_info.manifests {

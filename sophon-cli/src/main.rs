@@ -1,4 +1,4 @@
-use std::{path::PathBuf, str::FromStr};
+use std::{path::PathBuf, process::ExitCode, str::FromStr};
 
 use clap::{Args, Parser, Subcommand, ValueHint};
 use sophon_lib::GameEdition;
@@ -117,24 +117,20 @@ fn init_tracing() {
     registry.init()
 }
 
-fn main() {
+fn main() -> Result<(), String> {
     init_tracing();
 
     let cli_args = Cli::parse();
     let edition = GameEdition::from_str(&cli_args.edition).unwrap();
 
     // TODO? custom error type
-    let action_result = match cli_args.action {
+
+    match cli_args.action {
         Action::Dump { format, target } => {
             target.dump_api_data(edition, api_data::decide_format(format))
         }
         Action::Download(args) => args.download(edition, cli_args.cache_dir, cli_args.threads),
         Action::Repair(args) => args.repair(edition, cli_args.cache_dir, cli_args.threads),
         Action::Update(args) => args.update(edition, cli_args.cache_dir, cli_args.threads),
-    };
-
-    if let Err(err) = action_result {
-        eprintln!("{err}");
-        std::process::exit(1)
     }
 }
