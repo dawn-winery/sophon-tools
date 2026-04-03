@@ -109,9 +109,10 @@ impl PrettyPrint for SophonDownloadInfo {
         println!("Download stats:");
         self.stats.pretty_print();
         if self.stats != self.deduplicated_stats {
-            println!("!!! Stats do not match deduplicated(?) stats, somehow !!!");
-            println!("Deduplicated (repeated?) download stats:");
+            println!("Deduplicated download stats:");
             self.deduplicated_stats.pretty_print();
+        } else {
+            println!("Deduplicated stats match regular stats");
         }
     }
 }
