@@ -1,4 +1,4 @@
-use std::{path::PathBuf, process::ExitCode, str::FromStr};
+use std::{path::PathBuf, str::FromStr};
 
 use clap::{Args, Parser, Subcommand, ValueHint};
 use sophon_lib::GameEdition;
