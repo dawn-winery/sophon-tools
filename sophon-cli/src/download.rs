@@ -91,6 +91,7 @@ impl DownloadArgs {
             .game
             .component
             .unwrap_or_else(|| vec!["game".to_owned()]);
+        let match_extra_components = components.iter().any(|c| c == "extra-components");
         // doing this conversion because the blocking client doesn't have these options
         let client = reqwest::blocking::ClientBuilder::from(
             reqwest::ClientBuilder::new()
@@ -117,9 +118,12 @@ impl DownloadArgs {
         let mut downloads_info = get_game_download_sophon_info(&client, package_info, &edition)
             .expect("Failed to get download info");
 
-        downloads_info
-            .manifests
-            .retain(|download_info| components.contains(&download_info.matching_field));
+        downloads_info.manifests.retain(|download_info| {
+            components.contains(&download_info.matching_field)
+                || (match_extra_components
+                    && !(["zh-cn", "en-us", "ja-jp", "ko-kr"]
+                        .contains(&download_info.matching_field.as_str())))
+        });
 
         downloads_info.pretty_print();
         println!();
