@@ -9,7 +9,7 @@ use sophon_lib::{
 };
 
 use super::GameCommon;
-use crate::{DownloadParameters, pretty_print::PrettyPrint};
+use crate::{CustomPackageInfo, DownloadParameters, pretty_print::PrettyPrint};
 
 #[derive(Debug, Args)]
 /// Download the game
@@ -29,6 +29,9 @@ pub struct DownloadArgs {
 
     #[command(flatten)]
     extra: DownloadParameters,
+
+    #[command(flatten)]
+    custom_package_info: CustomPackageInfo,
 }
 
 impl DownloadArgs {
@@ -102,20 +105,31 @@ impl DownloadArgs {
         .build()
         .expect("Client config should be valid");
 
-        println!("Fetching download information...");
-        let branches =
-            get_game_branches_info(&client, &edition).expect("Failed to get game branches");
-        let package_info = if self.version.is_some() {
-            branches
-                .get_packages_by_id_or_biz(&self.game.game, self.version.as_deref(), self.preload)
-                .next()
-                .expect("Failed to find game branch")
-        } else {
-            branches
-                .get_package_by_id_or_biz_latest(&self.game.game, self.preload)
-                .expect("Failed to find game")
-        };
-        let mut downloads_info = get_game_download_sophon_info(&client, package_info, &edition)
+        let package_info =
+            if let Some(adhoc_package_info) = self.custom_package_info.assemble_adhoc() {
+                println!("Using provided ad-hoc package info");
+                adhoc_package_info
+            } else {
+                println!("Fetching download information...");
+                let branches =
+                    get_game_branches_info(&client, &edition).expect("Failed to get game branches");
+                if self.version.is_some() {
+                    branches
+                        .get_packages_by_id_or_biz(
+                            &self.game.game,
+                            self.version.as_deref(),
+                            self.preload,
+                        )
+                        .next()
+                        .expect("Failed to find game branch")
+                } else {
+                    branches
+                        .get_package_by_id_or_biz_latest(&self.game.game, self.preload)
+                        .expect("Failed to find game")
+                }
+                .clone()
+            };
+        let mut downloads_info = get_game_download_sophon_info(&client, &package_info, &edition)
             .expect("Failed to get download info");
 
         downloads_info.manifests.retain(|download_info| {

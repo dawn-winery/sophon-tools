@@ -1,7 +1,7 @@
-use std::{path::PathBuf, str::FromStr};
+use std::{io::BufReader, path::PathBuf, str::FromStr};
 
 use clap::{Args, Parser, Subcommand, ValueHint};
-use sophon_lib::GameEdition;
+use sophon_lib::{GameEdition, api::schemas::game_branches::PackageInfo};
 use tracing_subscriber::{
     EnvFilter, Layer, filter::filter_fn, layer::SubscriberExt, util::SubscriberInitExt,
 };
@@ -86,6 +86,55 @@ struct DownloadParameters {
     /// the intermediates
     #[arg(long)]
     preload_pretend: bool,
+}
+
+#[derive(Debug, Args)]
+struct CustomPackageInfo {
+    /// Ad-hoc package info branch
+    #[arg(long = "package-info-branch")]
+    branch: Option<String>,
+    /// Ad-hoc package info password
+    #[arg(long = "package-info-password")]
+    password: Option<String>,
+    /// Ad-hoc package info package id
+    #[arg(long = "package-info-package-id")]
+    package_id: Option<String>,
+    /// Ad-hoc package info tag
+    #[arg(long = "package-info-tag")]
+    tag: Option<String>,
+    /// Ad-hoc package info from a file. Overrides the other package-info args.
+    #[arg(long = "package-info")]
+    json_file: Option<PathBuf>,
+}
+
+impl CustomPackageInfo {
+    pub(crate) fn assemble_adhoc(self) -> Option<PackageInfo> {
+        if let Some(json_file_path) = &self.json_file
+            && let Some(package_info) = std::fs::File::open(json_file_path)
+                .inspect_err(|err| eprintln!("Faield to open package info file: {err:?}"))
+                .ok()
+                .map(BufReader::new)
+                .and_then(|mut package_info_file| {
+                    serde_json::from_reader::<_, PackageInfo>(&mut package_info_file)
+                        .inspect_err(|err| eprintln!("Failed to parse package info file: {err:?}"))
+                        .ok()
+                })
+        {
+            return Some(package_info);
+        }
+
+        match (self.branch, self.password, self.package_id, self.tag) {
+            (Some(branch), Some(password), Some(package_id), Some(tag)) => Some(PackageInfo {
+                package_id,
+                branch,
+                password,
+                tag,
+                diff_tags: vec![],
+                categories: vec![],
+            }),
+            _ => None,
+        }
+    }
 }
 
 fn is_piped() -> bool {

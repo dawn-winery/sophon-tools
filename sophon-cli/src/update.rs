@@ -17,7 +17,7 @@ use sophon_lib::{
 };
 
 use super::{DownloadParameters, GameCommon};
-use crate::pretty_print::PrettyPrint;
+use crate::{CustomPackageInfo, pretty_print::PrettyPrint};
 
 pub fn autodetect_game_ver(
     game_folder: &Path,
@@ -87,6 +87,9 @@ pub struct UpdateArgs {
 
     #[command(flatten)]
     extra: DownloadParameters,
+
+    #[command(flatten)]
+    custom_package_info: CustomPackageInfo,
 }
 
 impl UpdateArgs {
@@ -163,21 +166,29 @@ impl UpdateArgs {
         .build()
         .expect("Must be a valid configuration");
 
-        println!("Fetching update information...");
-        let branches =
-            get_game_branches_info(&client, &game_edition).expect("Failed to get game branches");
-        let package_info = if self.to.is_some() {
-            branches
-                .get_packages_by_id_or_biz(&self.game.game, self.to.as_deref(), self.preload)
-                .next()
-                .expect("Failed to find game branch")
+        let package_info = if let Some(adhoc_package_info) =
+            self.custom_package_info.assemble_adhoc()
+        {
+            println!("Using provided ad-hoc package info");
+            adhoc_package_info
         } else {
-            branches
-                .get_package_by_id_or_biz_latest(&self.game.game, self.preload)
-                .expect("Failed to find game")
+            println!("Fetching update information...");
+            let branches = get_game_branches_info(&client, &game_edition)
+                .expect("Failed to get game branches");
+            if self.to.is_some() {
+                branches
+                    .get_packages_by_id_or_biz(&self.game.game, self.to.as_deref(), self.preload)
+                    .next()
+                    .expect("Failed to find game branch")
+            } else {
+                branches
+                    .get_package_by_id_or_biz_latest(&self.game.game, self.preload)
+                    .expect("Failed to find game")
+            }
+            .clone()
         };
 
-        let mut diffs_info = get_game_diffs_sophon_info(&client, package_info, &game_edition)
+        let mut diffs_info = get_game_diffs_sophon_info(&client, &package_info, &game_edition)
             .expect("Failed to get update info");
 
         if diffs_info.tag == self.from {

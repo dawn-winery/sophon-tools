@@ -46,21 +46,23 @@ fn get_game_configs_url(edition: &GameEdition) -> String {
 
 fn sophon_patch_info_url(package_info: &PackageInfo, edition: &GameEdition) -> String {
     format!(
-        "{}/downloader/sophon_chunk/api/getPatchBuild?branch={}&password={}&package_id={}",
+        "{}/downloader/sophon_chunk/api/getPatchBuild?branch={}&password={}&package_id={}&tag={}",
         edition.api_host(),
         package_info.branch,
         package_info.password,
-        package_info.package_id
+        package_info.package_id,
+        package_info.tag
     )
 }
 
 fn sophon_download_info_url(package_info: &PackageInfo, edition: &GameEdition) -> String {
     format!(
-        "{}/downloader/sophon_chunk/api/getBuild?branch={}&password={}&package_id={}",
+        "{}/downloader/sophon_chunk/api/getBuild?branch={}&password={}&package_id={}&tag={}",
         edition.api_host(),
         package_info.branch,
         package_info.password,
-        package_info.package_id
+        package_info.package_id,
+        package_info.tag
     )
 }
 
