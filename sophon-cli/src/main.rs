@@ -39,6 +39,7 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Action {
+    #[command(alias = "downlaod")]
     Download(#[command(flatten)] DownloadArgs),
 
     Update(#[command(flatten)] UpdateArgs),
