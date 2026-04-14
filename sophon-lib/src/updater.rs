@@ -872,7 +872,7 @@ impl SophonPatcher {
     // instrumenting to maybe try and see how much time it takes to download, hash
     // check, and apply
     #[tracing::instrument(
-        level = "trace", ret, skip_all,
+        level = "trace", err(Debug), ret, skip_all,
         fields(
             file = task.file_manifest.asset_name,
             patch_chunk = task.patch_chunk.patch_name,
