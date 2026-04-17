@@ -45,7 +45,12 @@ impl DownloadArgs {
             sophon_lib::installer::Update::DownloadingProgressBytes {
                 downloaded_bytes, ..
             } => {
+                let reset_eta = progress_bar.position() == 0;
                 progress_bar.set_position(downloaded_bytes);
+                if reset_eta {
+                    progress_bar.reset_elapsed();
+                    progress_bar.reset_eta();
+                }
                 #[cfg(feature = "tracy")]
                 {
                     let rate = progress_bar.per_sec();
@@ -74,6 +79,7 @@ impl DownloadArgs {
                 progress_bar.set_length(total_bytes);
                 progress_bar.set_position(0);
                 progress_bar.reset_elapsed();
+                progress_bar.reset_eta();
             }
             sophon_lib::installer::Update::CheckingFreeSpace(path) => {
                 progress_bar.set_message(format!("Checking free space at {}", path.display()))
