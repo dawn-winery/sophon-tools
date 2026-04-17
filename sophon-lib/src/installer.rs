@@ -434,13 +434,23 @@ impl SophonInstaller {
         Ok(())
     }
 
+    #[cfg_attr(feature = "extra-logs", tracing::instrument(
+        level = "trace",
+        skip_all,
+        ret, err,
+        fields(
+            file_path = ?file_info.target_file_path(game_folder),
+            offset = chunk_info.chunk_manifest.chunk_on_file_offset,
+            size = chunk_info.chunk_manifest.chunk_size_decompressed
+            )
+        ))]
     fn check_file_region(
         &self,
         game_folder: &Path,
         chunk_info: &ChunkInfo<'_>,
         file_info: &FileInfo<'_>,
     ) -> std::io::Result<bool> {
-        tracing::debug!("entered region checking for some reason");
+        tracing::trace!("checking file region");
         let file_path = file_info.target_file_path(game_folder);
 
         let Ok(fs_metadata) = std::fs::metadata(&file_path) else {
@@ -520,6 +530,11 @@ impl SophonInstaller {
                                 passed: passed_files,
                                 total: total_files,
                             });
+                        } else {
+                            tracing::error!(
+                                asset = file_info.file_manifest.asset_name,
+                                "Broken file detected"
+                            );
                         }
                         !check_res
                     })
@@ -539,10 +554,11 @@ impl SophonInstaller {
                             .check_file_region(game_folder, &chunk_info, file_info)
                             .unwrap_or(false)
                         {
-                            if self.mode_repair {
-                                tracing::error!(
-                                    "Broken file detected: {}",
-                                    file_info.file_manifest.asset_name
+                            if self.mode_repair && cfg!(feature = "extra-logs") {
+                                tracing::debug!(
+                                    asset_name = file_info.file_manifest.asset_name,
+                                    ?chunk_info,
+                                    "Broken file region detected"
                                 )
                             }
                             redownload_set.insert(&chunk_info.chunk_manifest.chunk_name);
