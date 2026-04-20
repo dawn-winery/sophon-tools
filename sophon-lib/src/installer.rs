@@ -13,17 +13,15 @@ use bytes::Bytes;
 use reqwest::blocking::Client;
 
 use super::{
-    SophonError,
+    DEFAULT_CHUNK_RETRIES, SophonError,
     api::{
         get_download_manifest,
         schemas::sophon_manifests::{DownloadInfo, SophonDownloadInfo},
     },
-    check_file, file_md5_hash_str, finalize_file, md5_hash_str, prettify_bytes,
+    check_file, divide_threads, ensure_parent, file_md5_hash_str, file_region_hash_md5,
+    finalize_file, md5_hash_str, prettify_bytes,
     protos::{SophonManifestAssetChunk, SophonManifestAssetProperty, SophonManifestProto},
-};
-use crate::{
-    DEFAULT_CHUNK_RETRIES, divide_threads, ensure_parent, file_region_hash_md5,
-    size_limited_queue::*,
+    utils::size_limited_queue::*,
 };
 
 #[derive(Debug)]

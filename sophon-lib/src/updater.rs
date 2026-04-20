@@ -22,12 +22,10 @@ use super::{
     protos::{
         SophonPatchAssetChunk, SophonPatchAssetProperty, SophonPatchProto, SophonUnusedAssetInfo,
     },
-    utils::version::Version,
-};
-use crate::{
-    file_check_cache::FileCheckCache,
-    size_limited_queue::*,
-    utils::{read_reporter::ReadReporter, read_take_region::ReadTakeRegion},
+    utils::{
+        file_check_cache::FileCheckCache, read_reporter::ReadReporter,
+        read_take_region::ReadTakeRegion, size_limited_queue::*, version::Version,
+    },
 };
 
 #[derive(Debug)]

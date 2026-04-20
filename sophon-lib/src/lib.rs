@@ -13,11 +13,9 @@ pub use reqwest;
 
 pub mod api;
 pub mod error;
-pub(crate) mod file_check_cache;
 pub mod game_edition;
 pub mod installer;
 pub mod protos;
-pub(crate) mod size_limited_queue;
 pub mod updater;
 pub mod utils;
 
