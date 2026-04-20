@@ -10,7 +10,6 @@ use std::{
 };
 
 use bytes::Bytes;
-use crossbeam_channel::{Receiver, SendTimeoutError, Sender};
 use reqwest::blocking::Client;
 
 use super::{
@@ -22,7 +21,10 @@ use super::{
     check_file, file_md5_hash_str, finalize_file, md5_hash_str, prettify_bytes,
     protos::{SophonManifestAssetChunk, SophonManifestAssetProperty, SophonManifestProto},
 };
-use crate::{DEFAULT_CHUNK_RETRIES, divide_threads, ensure_parent, file_region_hash_md5};
+use crate::{
+    DEFAULT_CHUNK_RETRIES, divide_threads, ensure_parent, file_region_hash_md5,
+    size_limited_queue::*,
+};
 
 #[derive(Debug)]
 pub enum Update {
@@ -232,6 +234,15 @@ enum ChunkLocation {
     Filesystem(PathBuf),
 }
 
+impl SizeLimitedQueueLocation for ChunkLocation {
+    fn size(&self) -> std::io::Result<u64> {
+        match self {
+            Self::Filesystem(path) => Ok(std::fs::metadata(path)?.size()),
+            Self::Memory(buf) => Ok(buf.len() as u64),
+        }
+    }
+}
+
 impl ChunkLocation {
     fn check(&self, exp_size: u64, exp_hash: &str) -> std::io::Result<bool> {
         #[allow(clippy::collapsible_if, reason = "only collapsible in Rust >= 1.88.0")]
@@ -249,13 +260,6 @@ impl ChunkLocation {
         Ok(true)
     }
 
-    fn size(&self) -> std::io::Result<u64> {
-        match self {
-            Self::Filesystem(path) => Ok(std::fs::metadata(path)?.size()),
-            Self::Memory(buf) => Ok(buf.len() as u64),
-        }
-    }
-
     fn hash(&self) -> std::io::Result<String> {
         match self {
             Self::Filesystem(path) => file_md5_hash_str(path),
@@ -270,83 +274,14 @@ impl ChunkLocation {
     }
 }
 
-/// Custom [Sender] wrapper that tracks how big the total size of enqueued chunks is
-#[derive(Debug, Clone)]
-struct ChunkQueueSender<'a, 'b> {
-    sender: Sender<(ChunkLocation, ChunkInfo<'a>)>,
-    memory_limit: Option<(u64, &'b AtomicU64)>,
-}
-
-impl<'a> ChunkQueueSender<'a, '_> {
-    /// The timeout is only used for the [Sender::send_timeout] call, ignored while waiting for
-    /// "space" in queue
-    fn send_timeout(
-        &self,
-        chunk: (ChunkLocation, ChunkInfo<'a>),
-        timeout: Duration,
-    ) -> Result<(), SendTimeoutError<(ChunkLocation, ChunkInfo<'a>)>> {
-        let chunk_size = if self.memory_limit.is_some() {
-            Some(chunk.0.size().unwrap_or_else(|_| {
-                // fails only in case of filesystem-backed chunk. Just try to read from chunk
-                // info.
-                chunk.1.chunk_file_info().0
-            }))
-        } else {
-            None
-        };
-        while !self.has_space(&chunk.0, &chunk.1) {
-            std::thread::sleep(Duration::from_millis(50));
-        }
-        self.sender.send_timeout(chunk, timeout)?;
-        if let Some((_, counter)) = self.memory_limit {
-            counter.fetch_add(
-                chunk_size.expect("self.memory_limit is Some, as checked earlier"),
-                std::sync::atomic::Ordering::Release,
-            );
-        }
-        Ok(())
-    }
-
-    fn has_space(&self, loc: &ChunkLocation, chunk_info: &ChunkInfo<'a>) -> bool {
-        // Prevent the queue choking on a chunk that is bigger than the limit.
-        if self.sender.is_empty() {
-            return true;
-        }
-        let Some((limit, counter)) = self.memory_limit else {
-            return true;
-        };
-        let chunk_size = loc.size().unwrap_or_else(|_| {
-            // fails only in case of filesystem-backed chunk. Just try to read from chunk
-            // info.
-            chunk_info.chunk_file_info().0
-        });
-        let queue_size = counter.load(std::sync::atomic::Ordering::Acquire);
-        queue_size + chunk_size <= limit
+impl SizeLimitedQueuePayload for ChunkInfo<'_> {
+    fn raw_size(&self) -> u64 {
+        self.chunk_file_info().0
     }
 }
 
-/// Custom [Receiver] wrapper that tracks how big the total size of enqueued chunks is
-#[derive(Debug, Clone)]
-struct ChunkQueueReceiver<'a, 'b> {
-    receiver: Receiver<(ChunkLocation, ChunkInfo<'a>)>,
-    memory_limit: Option<(u64, &'b AtomicU64)>,
-}
-
-impl<'a> ChunkQueueReceiver<'a, '_> {
-    fn recv(&self) -> Result<(ChunkLocation, ChunkInfo<'a>), crossbeam_channel::RecvError> {
-        self.receiver.recv().map(|(loc, chunk_info)| {
-            if let Some((_, counter)) = self.memory_limit {
-                let chunk_size = loc.size().unwrap_or_else(|_| {
-                    // fails only in case of filesystem-backed chunk. Just try to read from chunk
-                    // info.
-                    chunk_info.chunk_file_info().0
-                });
-                counter.fetch_sub(chunk_size, std::sync::atomic::Ordering::Release);
-            }
-            (loc, chunk_info)
-        })
-    }
-}
+type ChunkQueueSender<'a, 'b> = SizeLimitedQueueSender<'b, ChunkLocation, ChunkInfo<'a>>;
+type ChunkQueueReceiver<'a, 'b> = SizeLimitedQueueReceiver<'b, ChunkLocation, ChunkInfo<'a>>;
 
 #[derive(Debug)]
 pub struct SophonInstaller {
@@ -494,15 +429,10 @@ impl SophonInstaller {
         let game_folder = output_folder.as_ref();
 
         let queue_size = AtomicU64::default();
-        let (chunk_sender, chunk_receiver) = crossbeam_channel::unbounded();
-        let chunk_sender = ChunkQueueSender {
-            sender: chunk_sender,
-            memory_limit: self.chunks_queue_data_limit.map(|lim| (lim, &queue_size)),
-        };
-        let chunk_receiver = ChunkQueueReceiver {
-            receiver: chunk_receiver,
-            memory_limit: self.chunks_queue_data_limit.map(|lim| (lim, &queue_size)),
-        };
+        let (chunk_sender, chunk_receiver) = new_size_limited(
+            crossbeam_channel::unbounded(),
+            self.chunks_queue_data_limit.map(|lim| (lim, &queue_size)),
+        );
 
         let mut redownload_set = HashSet::with_capacity(download_index.chunks_used_in.len());
         let mut chunk_dedupe_set = HashSet::with_capacity(download_index.chunks_used_in.len());

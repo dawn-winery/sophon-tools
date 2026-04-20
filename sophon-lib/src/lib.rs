@@ -16,6 +16,7 @@ use thiserror::Error;
 pub mod api;
 pub mod installer;
 pub mod protos;
+pub(crate) mod size_limited_queue;
 pub mod updater;
 pub mod utils;
 

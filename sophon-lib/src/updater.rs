@@ -10,7 +10,6 @@ use std::{
 };
 
 use bytes::Bytes;
-use crossbeam_channel::{Receiver, Sender};
 use reqwest::{blocking::Client, header::RANGE};
 
 use super::{
@@ -27,6 +26,7 @@ use super::{
 };
 use crate::{
     FileCheckCache,
+    size_limited_queue::*,
     utils::{read_reporter::ReadReporter, read_take_region::ReadTakeRegion},
 };
 
@@ -75,6 +75,12 @@ struct FilePatchInfo<'a> {
     patch_chunk: &'a SophonPatchAssetChunk,
     patch_chunk_download_info: &'a DownloadInfo,
     retries_left: u8,
+}
+
+impl SizeLimitedQueuePayload for FilePatchInfo<'_> {
+    fn raw_size(&self) -> u64 {
+        self.patch_chunk.patch_length
+    }
 }
 
 impl FilePatchInfo<'_> {
@@ -309,7 +315,7 @@ pub enum PatchLocation {
     },
 }
 
-impl PatchLocation {
+impl SizeLimitedQueueLocation for PatchLocation {
     fn size(&self) -> std::io::Result<u64> {
         match self {
             Self::Filesystem(path) => Ok(std::fs::metadata(path)?.size()),
@@ -317,7 +323,9 @@ impl PatchLocation {
             Self::FilesystemRegion { length, .. } => Ok(*length),
         }
     }
+}
 
+impl PatchLocation {
     fn cleanup(&self) {
         if let Self::Filesystem(path) = self {
             let _ = std::fs::remove_file(path);
@@ -354,6 +362,9 @@ pub struct PatchFnArgs<'a> {
     pub src_file: &'a Path,
     pub out_file: &'a Path,
 }
+
+type PatchQueueSender<'a, 'b> = SizeLimitedQueueSender<'b, PatchLocation, FilePatchInfo<'b>>;
+type PatchQueueReceiver<'a, 'b> = SizeLimitedQueueReceiver<'b, PatchLocation, FilePatchInfo<'b>>;
 
 type BoxPatchFn = Box<dyn Fn(PatchFnArgs<'_>) -> std::io::Result<()> + Sync>;
 
@@ -488,7 +499,11 @@ impl SophonPatcher {
         (updater)(update_index.msg_patched());
         (updater)(update_index.msg_bytes());
 
-        let (file_patch_sender, file_patch_receiver) = crossbeam_channel::unbounded();
+        let queue_size = AtomicU64::default();
+        let (file_patch_sender, file_patch_receiver) = new_size_limited(
+            crossbeam_channel::unbounded(),
+            self.patch_queue_mem_limit.map(|lim| (lim, &queue_size)),
+        );
 
         let game_folder = game_folder.as_ref();
 
@@ -705,7 +720,7 @@ impl SophonPatcher {
     fn artifact_download_loop<'a, 'b>(
         &self,
         task_queue: &'b Mutex<VecDeque<FilePatchInfo<'a>>>,
-        patch_queue: Option<Sender<(PatchLocation, FilePatchInfo<'a>)>>,
+        patch_queue: Option<PatchQueueSender<'b, 'a>>,
         update_index: &'b UpdateIndex<'a>,
         updater: impl Fn(Update) + 'b,
     ) {
@@ -940,7 +955,7 @@ impl SophonPatcher {
         game_folder: &'b Path,
         updater: impl Fn(Update) + 'b,
         update_index: &'b UpdateIndex<'a>,
-        queue: Receiver<(PatchLocation, FilePatchInfo<'a>)>,
+        queue: PatchQueueReceiver<'b, 'a>,
     ) {
         while let Ok((loc, task)) = queue.recv() {
             self.file_patch_handler(loc, &task, update_index, game_folder, &updater);
