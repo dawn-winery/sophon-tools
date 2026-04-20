@@ -1,6 +1,6 @@
 [package]
 name = "sophon-lib"
-3ersion = "0.1.2"
+3ersion = "0.1.4"
 edition = "2024"
 license = "GPL-3.0"
 
