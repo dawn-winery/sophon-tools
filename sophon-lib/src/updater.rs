@@ -25,7 +25,7 @@ use super::{
     utils::version::Version,
 };
 use crate::{
-    FileCheckCache,
+    file_check_cache::FileCheckCache,
     size_limited_queue::*,
     utils::{read_reporter::ReadReporter, read_take_region::ReadTakeRegion},
 };

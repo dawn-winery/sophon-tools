@@ -1,19 +1,20 @@
 use std::{
-    collections::HashMap,
-    error::Error,
     fs::File,
     io::{Read, Seek, SeekFrom},
     num::NonZeroUsize,
-    os::unix::fs::{MetadataExt, PermissionsExt},
-    path::{Path, PathBuf},
-    str::FromStr,
+    os::unix::fs::PermissionsExt,
+    path::Path,
 };
 
+pub use error::SophonError;
+pub use game_edition::GameEdition;
 use md5::{Digest, Md5};
 pub use reqwest;
-use thiserror::Error;
 
 pub mod api;
+pub mod error;
+pub(crate) mod file_check_cache;
+pub mod game_edition;
 pub mod installer;
 pub mod protos;
 pub(crate) mod size_limited_queue;
@@ -31,86 +32,6 @@ pub fn prettify_bytes(bytes: u64) -> String {
         format!("{:.2} KB", bytes as f64 / 1024.0)
     } else {
         format!("{:.2} B", bytes)
-    }
-}
-
-/// Implement conversion traits into this enum for use with the APIs, used for getting launcher id,
-/// api host, etc
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
-pub enum GameEdition {
-    Global,
-    China,
-    GlobalBeta { launcher_id: String },
-    ChinaBeta { launcher_id: String },
-}
-
-impl GameEdition {
-    #[inline]
-    pub fn branches_host(&self) -> &str {
-        match self {
-            Self::Global => concat!("https://", "sg-hy", "p-api.", "h", "oy", "over", "se.com"),
-            Self::China => concat!("https://", "hy", "p-api.", "mi", "h", "oyo", ".com"),
-            Self::GlobalBeta { .. } => {
-                concat!("https://", "sg-hy", "p-api-beta.", "hoy", "overse.com")
-            }
-            Self::ChinaBeta { .. } => {
-                concat!("https://", "hy", "p-api-beta.", "mi", "h", "oyo", ".com")
-            }
-        }
-    }
-
-    #[inline]
-    pub fn api_host(&self) -> &str {
-        match self {
-            Self::Global => concat!("https://", "sg-pu", "blic-api.", "hoy", "over", "se.com"),
-            Self::China => concat!("https://", "api-t", "ak", "umi.", "mi", "h", "oyo", ".com"),
-            Self::GlobalBeta { .. } => {
-                concat!("https://", "sg-be", "ta-api.", "hoy", "over", "se.com")
-            }
-            Self::ChinaBeta { .. } => {
-                concat!("https://", "downloader-api-beta.", "mih", "oyo", ".com")
-            }
-        }
-    }
-
-    #[inline]
-    pub fn launcher_id(&self) -> &str {
-        match self {
-            Self::Global => "VYTpXlbWo8",
-            Self::China => "jGHBHlcOq1",
-            Self::GlobalBeta { launcher_id } => launcher_id,
-            Self::ChinaBeta { launcher_id } => launcher_id,
-        }
-    }
-}
-
-#[derive(Debug, Error)]
-#[error("Unknown game edition: {0}")]
-pub struct UnknownValue(String);
-
-impl FromStr for GameEdition {
-    type Err = UnknownValue;
-
-    /// Case-insensitive parse
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let lowercased = s.to_lowercase();
-        match lowercased.as_str() {
-            "global" => Ok(Self::Global),
-            "china" => Ok(Self::China),
-            "global-beta" => Ok(Self::GlobalBeta {
-                launcher_id: "URRJEUzW3X".to_owned(),
-            }),
-            "china-beta" => Ok(Self::ChinaBeta {
-                launcher_id: "GcFHm7rte6".to_owned(),
-            }),
-            _ if lowercased.starts_with("global-beta-") => Ok(Self::GlobalBeta {
-                launcher_id: s[12..].to_owned(),
-            }),
-            _ if lowercased.starts_with("china-beta-") => Ok(Self::ChinaBeta {
-                launcher_id: s[11..].to_owned(),
-            }),
-            _ => Err(UnknownValue(lowercased)),
-        }
     }
 }
 
@@ -165,57 +86,6 @@ pub fn file_md5_hash_str(file_path: impl AsRef<Path>) -> std::io::Result<String>
     Ok(format!("{:x}", md5.finalize()))
 }
 
-#[derive(Debug)]
-struct FileCheckCache {
-    cache: HashMap<(PathBuf, u64, String), (i64, bool)>,
-}
-
-impl FileCheckCache {
-    fn new() -> Self {
-        Self {
-            cache: HashMap::new(),
-        }
-    }
-
-    fn with_capacity(capacity: usize) -> Self {
-        Self {
-            cache: HashMap::with_capacity(capacity),
-        }
-    }
-
-    pub(crate) fn check_file(
-        &mut self,
-        file_path: &Path,
-        expected_size: u64,
-        expected_md5: &str,
-    ) -> bool {
-        if let Some((mtime, check_res)) = self
-            .cache
-            .get(&(file_path.to_owned(), expected_size, expected_md5.to_owned()))
-            .copied()
-        {
-            if std::fs::metadata(file_path)
-                .map(|m| m.mtime() > mtime)
-                .unwrap_or(false)
-            {
-                self.cache
-                    .remove(&(file_path.to_owned(), expected_size, expected_md5.to_owned()));
-            } else {
-                return check_res;
-            }
-        }
-        let check_res = check_file(file_path, expected_size, expected_md5).unwrap_or(false);
-        let mtime = std::fs::metadata(file_path)
-            .map(|m| m.mtime())
-            .unwrap_or(i64::MIN);
-        self.cache.insert(
-            (file_path.to_owned(), expected_size, expected_md5.to_owned()),
-            (mtime, check_res),
-        );
-        check_res
-    }
-}
-
 pub fn check_file(
     file_path: impl AsRef<Path>,
     expected_size: u64,
@@ -264,130 +134,6 @@ fn file_region_hash_md5(file: &mut File, offset: u64, length: u64) -> std::io::R
     std::io::copy(&mut region_reader, &mut hasher)?;
 
     Ok(format!("{:x}", hasher.finalize()))
-}
-
-// TODO:
-// - Cull some variants of SophonError, especially those that are unused
-// - Make some better variants describing where the error happened, perhaps steal anyhow's context
-//   idea but simpler, especially useful for I/O errors.
-// - Cull unused installer/update messages
-
-#[derive(Error, Debug)]
-pub enum SophonError {
-    /// Specified downloading path is not available in system
-    ///
-    /// `(path)`
-    #[error("Path is not mounted: {0:?}")]
-    PathNotMounted(PathBuf),
-
-    /// No free space available under specified path
-    #[error("No free space available for specified path: {0:?} (requires {}, available {})", prettify_bytes(*.required), prettify_bytes(*.available))]
-    NoSpaceAvailable {
-        path: PathBuf,
-        required: u64,
-        available: u64,
-    },
-
-    /// Failed to create or open output file
-    #[error("Failed to create output file {path:?} caused by {source}", source = OptionDisplay {value: self.source(), default: "<source not specified>"})]
-    OutputFileError {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
-
-    /// Failed to create or open temporary output file
-    #[error("Failed to create temporary output file {path:?} caused by {source}", source = OptionDisplay {value: self.source(), default: "<source not specified>"})]
-    TempFileError {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
-
-    /// Couldn't get metadata of existing output file
-    ///
-    /// This metadata supposed to be used to continue downloading of the file
-    #[error("Failed to read metadata of the output file {path:?}: {message}")]
-    OutputFileMetadataError { path: PathBuf, message: String },
-
-    /// reqwest error
-    #[error("Reqwest error: {0} caused by {source}", source = OptionDisplay {value: self.source(), default: "<source not specified>"})]
-    Reqwest(#[from] reqwest::Error),
-
-    #[error("Chunk hash mismatch: expected `{expected}`, got `{got}`")]
-    ChunkHashMismatch { expected: String, got: String },
-
-    #[error("File {path:?} hash mismatch: expected `{expected}`, got `{got}`")]
-    FileHashMismatch {
-        path: PathBuf,
-        expected: String,
-        got: String,
-    },
-
-    #[error("IO error: {0}")]
-    IoError(#[from] std::io::Error),
-
-    #[error("Failed to download chunk {0}, out of retries")]
-    ChunkDownloadFailed(String),
-
-    #[error("Failed to apply hdiff patch: {0}")]
-    PatchingError(String),
-
-    #[error(
-        "Failed to download chunk/patch, {name} size mismatch. Expected {expected}, got {got}."
-    )]
-    DownloadSizeMismatch {
-        name: &'static str,
-        expected: u64,
-        got: u64,
-    },
-
-    #[error("Invalid thread amount: {0}, must be above 0")]
-    InvalidThreadAmount(usize),
-}
-
-impl From<fs_extra::error::Error> for SophonError {
-    fn from(err: fs_extra::error::Error) -> Self {
-        type FsExtraErrorKind = fs_extra::error::ErrorKind;
-        type StdIoErrorKind = std::io::ErrorKind;
-
-        let message = err.to_string();
-
-        let kind = match err.kind {
-            FsExtraErrorKind::NotFound => StdIoErrorKind::NotFound,
-            FsExtraErrorKind::PermissionDenied => StdIoErrorKind::PermissionDenied,
-            FsExtraErrorKind::AlreadyExists => StdIoErrorKind::AlreadyExists,
-            FsExtraErrorKind::Interrupted => StdIoErrorKind::Interrupted,
-            FsExtraErrorKind::InvalidFolder => StdIoErrorKind::NotADirectory,
-            FsExtraErrorKind::InvalidFile => StdIoErrorKind::IsADirectory,
-            FsExtraErrorKind::InvalidFileName => StdIoErrorKind::InvalidFilename,
-            FsExtraErrorKind::InvalidPath => StdIoErrorKind::InvalidInput,
-            FsExtraErrorKind::Io(error) => return Self::IoError(error),
-            FsExtraErrorKind::StripPrefix(_) => StdIoErrorKind::InvalidInput,
-            FsExtraErrorKind::OsString(_) => StdIoErrorKind::InvalidInput,
-            FsExtraErrorKind::Other => StdIoErrorKind::Other,
-        };
-
-        Self::IoError(std::io::Error::new(kind, message))
-    }
-}
-
-struct OptionDisplay<T, D> {
-    value: Option<T>,
-    default: D,
-}
-
-impl<T, D> std::fmt::Display for OptionDisplay<T, D>
-where
-    T: std::fmt::Display,
-    D: std::fmt::Display,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self.value {
-            Some(v) => std::fmt::Display::fmt(v, f),
-            None => std::fmt::Display::fmt(&self.default, f),
-        }
-    }
 }
 
 /// Divides thread count for the two pools. Element 0 is for downloading, element 1 is for
