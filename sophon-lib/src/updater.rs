@@ -302,8 +302,6 @@ impl<'a> UpdateIndex<'a> {
     }
 }
 
-// TODO: in-memory queue, queue limit
-
 #[derive(Debug, Clone)]
 pub enum PatchLocation {
     Memory(Bytes),
@@ -445,6 +443,13 @@ impl SophonPatcher {
             (updater)(Update::CheckingFreeSpace(self.temp_folder.clone()));
 
             // TODO: queue limit check when the queue limit is implemented
+
+            #[allow(clippy::collapsible_if, reason = "only collapsible in Rust >= 1.88.0")]
+            if !self.patches_in_memory {
+                if let Some(queue_limit) = self.patch_queue_mem_limit {
+                    Self::free_space_check(&updater, &self.temp_folder, queue_limit)?;
+                }
+            }
 
             let download_bytes: u64 = self
                 .diff_info
@@ -1265,7 +1270,7 @@ impl SophonPatcher {
     }
 
     fn free_space_check(
-        updater: impl Fn(Update) + Clone + Send,
+        updater: impl Fn(Update),
         path: impl AsRef<Path>,
         required: u64,
     ) -> Result<(), SophonError> {
