@@ -530,7 +530,7 @@ impl SophonInstaller {
                                 passed: passed_files,
                                 total: total_files,
                             });
-                        } else {
+                        } else if self.mode_repair {
                             tracing::error!(
                                 asset = file_info.file_manifest.asset_name,
                                 "Broken file detected"
