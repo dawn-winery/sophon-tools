@@ -895,12 +895,16 @@ impl SophonInstaller {
             })
             // Check if the temporary file is completed
             .and_then(|_| {
-                check_file(
-                    &working_file,
-                    file_info.file_manifest.asset_size,
-                    &file_info.file_manifest.asset_hash_md5,
-                )
-                .map_err(SophonError::IoError)
+                if !self.inplace {
+                    check_file(
+                        &working_file,
+                        file_info.file_manifest.asset_size,
+                        &file_info.file_manifest.asset_hash_md5,
+                    )
+                    .map_err(SophonError::IoError)
+                } else {
+                    Ok(false)
+                }
             })
             // If it is, finalize and remove temporary file
             // I know it basically checks twice
