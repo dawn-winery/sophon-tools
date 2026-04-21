@@ -342,7 +342,16 @@ impl SophonInstaller {
 
             (updater)(Update::CheckingFreeSpace(output_folder.to_owned()));
 
-            let already_installed_size = fs_extra::dir::get_size(output_folder)?;
+            let already_installed_size = fs_extra::dir::get_size(output_folder)
+                .map_err(|ioerr| match ioerr.kind {
+                    fs_extra::error::ErrorKind::NotFound => {
+                        let err = SophonError::PathNotMounted(output_folder.to_owned());
+                        tracing::error!(?err, "Error checking size of installed files");
+                        err
+                    }
+                    _ => ioerr.into(),
+                })
+                .unwrap_or(0);
 
             let size_to_check = installed_size.saturating_sub(already_installed_size);
 
