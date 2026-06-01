@@ -136,7 +136,7 @@ impl<'a> FileInfo<'a> {
 
 #[derive(Debug)]
 struct DownloadIndex<'a> {
-    chunks_used_in: HashMap<&'a String, Vec<&'a String>>,
+    chunks_used_in: HashMap<&'a String, HashSet<&'a String>>,
     files: HashMap<&'a String, FileInfo<'a>>,
     total_bytes: u64,
     downloaded_bytes: AtomicU64,
@@ -154,8 +154,8 @@ impl<'a> DownloadIndex<'a> {
             for chunk_manifest in &file_manifest.asset_chunks {
                 let chunk_files_list = chunks_info
                     .entry(&chunk_manifest.chunk_name)
-                    .or_insert_with(|| (vec![], chunk_manifest.chunk_size));
-                chunk_files_list.0.push(&file_manifest.asset_name);
+                    .or_insert_with(|| (HashSet::new(), chunk_manifest.chunk_size));
+                chunk_files_list.0.insert(&file_manifest.asset_name);
             }
 
             files.insert(
@@ -567,17 +567,29 @@ impl SophonInstaller {
             .sum::<u64>();
         let download_queue = Mutex::new(download_queue);
 
+        if self.mode_repair {
+            download_index.total_bytes = actual_download;
+        }
+
         (updater)(Update::DownloadingStarted {
             location: game_folder.to_owned(),
             total_bytes: download_index.total_bytes,
-            total_files,
+            total_files: if !self.mode_repair {
+                total_files
+            } else {
+                total_files - passed_files
+            },
         });
 
         (updater)(download_index.add_msg_files(0));
 
         // add all the skipped chunks to the download progress so that the displayed total is more
         // accurate
-        (updater)(download_index.add_msg_bytes(download_index.total_bytes - actual_download));
+        (updater)(download_index.add_msg_bytes(if !self.mode_repair {
+            download_index.total_bytes - actual_download
+        } else {
+            0
+        }));
 
         tracing::debug!("Spawning threads");
         std::thread::scope(|scope| {
@@ -878,6 +890,9 @@ impl SophonInstaller {
                 .get(&downloaded_chunk.chunk_manifest.chunk_name)
                 .expect("All chunks must be indexed");
             for file_id in files_with_chunk {
+                if self.mode_repair && !download_index.repair_checklist.contains_key(file_id) {
+                    continue;
+                }
                 self.file_assembly_partial_handler(
                     &downloaded_chunk,
                     &loc,
@@ -988,6 +1003,7 @@ impl SophonInstaller {
             }
             Ok(false) => {
                 if self.mode_repair
+                    && self.inplace
                     && downloading_index.repair_check_off(
                         &file_info.file_manifest.asset_name,
                         &downloaded_chunk.chunk_manifest.chunk_name,
