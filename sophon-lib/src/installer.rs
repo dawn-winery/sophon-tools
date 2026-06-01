@@ -568,7 +568,7 @@ impl SophonInstaller {
                 });
             }
 
-            // drop the original sender and receiver so teh rest is in the spawned threads
+            // drop the original sender and receiver so the rest is in the spawned threads
             drop(chunk_sender);
             drop(chunk_receiver);
         });
@@ -888,7 +888,7 @@ impl SophonInstaller {
             .iter()
             .filter(|chinfo| chinfo.chunk_name == downloaded_chunk.chunk_manifest.chunk_name);
 
-        // do not check teh target file here, as it was already excluded during queue building
+        // do not check the target file here, as it was already excluded during queue building
         let res = chunk_infos_for_file
             .try_for_each(|chunk_info| {
                 self.file_assembly_partial(
