@@ -141,6 +141,8 @@ struct DownloadIndex<'a> {
     total_bytes: u64,
     downloaded_bytes: AtomicU64,
     downloaded_files: AtomicU64,
+    /// Key: asset_name, Value: [chunk_name]
+    repair_checklist: HashMap<&'a String, Mutex<HashSet<&'a String>>>,
 }
 
 impl<'a> DownloadIndex<'a> {
@@ -174,6 +176,7 @@ impl<'a> DownloadIndex<'a> {
             files,
             downloaded_bytes: AtomicU64::new(0),
             downloaded_files: AtomicU64::new(0),
+            repair_checklist: HashMap::new(),
         }
     }
 
@@ -223,6 +226,23 @@ impl<'a> DownloadIndex<'a> {
             };
             queue_lock.push_back(chunk);
         }
+    }
+
+    /// Returns true if the file is completed
+    fn repair_check_off(&self, asset_name: &'a String, chunk_name: &'a String) -> bool {
+        let Some(checklist) = self.repair_checklist.get(asset_name) else {
+            tracing::warn!(asset_name, "File was not included in the checklist!");
+            return false;
+        };
+        let mut checklist = checklist.lock().expect("Nothing should poison the lock");
+        if !checklist.remove(&chunk_name) {
+            tracing::warn!(
+                asset_name,
+                chunk_name,
+                "Chunk was removed from file checklist twice"
+            );
+        }
+        checklist.is_empty()
     }
 }
 
@@ -425,7 +445,7 @@ impl SophonInstaller {
     ) {
         tracing::debug!("Starting mutlithreaded download and install");
 
-        let download_index = DownloadIndex::new(&self.download_info, &self.manifest);
+        let mut download_index = DownloadIndex::new(&self.download_info, &self.manifest);
         tracing::info!(
             "{} Chunks to download, {} Files to install, {} total bytes",
             download_index.chunks_used_in.len(),
@@ -480,15 +500,17 @@ impl SophonInstaller {
                             .chunks_iter()
                             .map(move |chinfo| (file_info, chinfo))
                     })
-                    .filter_map(move |(file_info, chunk_info)| {
-                        if redownload_set.contains(&chunk_info.chunk_manifest.chunk_name) {
+                    .filter(move |(file_info, chunk_info)| {
+                        if redownload_set.contains(&chunk_info.chunk_manifest.chunk_name)
+                            && !self.mode_repair
+                        {
                             // This chunk was already checked, and included in the queue. No need
                             // for duplicates, as they will be filtered
                             // in the next filter call
-                            return None;
+                            return false;
                         }
                         if !self
-                            .check_file_region(game_folder, &chunk_info, file_info)
+                            .check_file_region(game_folder, chunk_info, file_info)
                             .unwrap_or(false)
                         {
                             if self.mode_repair && cfg!(feature = "extra-logs") {
@@ -499,10 +521,22 @@ impl SophonInstaller {
                                 )
                             }
                             redownload_set.insert(&chunk_info.chunk_manifest.chunk_name);
-                            Some(chunk_info)
+                            true
                         } else {
-                            None
+                            false
                         }
+                    })
+                    .map(|(file_info, chunk_info)| {
+                        if self.mode_repair {
+                            let repair_checklist = download_index
+                                .repair_checklist
+                                .entry(&file_info.file_manifest.asset_name)
+                                .or_default()
+                                .get_mut()
+                                .expect("Nothing to poison the lock yet");
+                            repair_checklist.insert(&chunk_info.chunk_manifest.chunk_name);
+                        }
+                        chunk_info
                     })
                     .filter(move |chunk_info| {
                         chunk_dedupe_set.insert(&chunk_info.chunk_manifest.chunk_name)
@@ -942,6 +976,18 @@ impl SophonInstaller {
                 (updater)(downloading_index.add_msg_files(1))
             }
             Ok(false) => {
+                if self.mode_repair {
+                    if downloading_index.repair_check_off(
+                        &file_info.file_manifest.asset_name,
+                        &downloaded_chunk.chunk_manifest.chunk_name,
+                    ) {
+                        tracing::info!(
+                            file = file_info.file_manifest.asset_name,
+                            "Finished repair for file"
+                        );
+                        (updater)(downloading_index.add_msg_files(1))
+                    }
+                }
                 #[cfg(feature = "extra-logs")]
                 tracing::debug!(
                     chunk = downloaded_chunk.chunk_manifest.chunk_name,
