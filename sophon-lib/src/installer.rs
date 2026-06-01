@@ -488,6 +488,8 @@ impl SophonInstaller {
                                 total: total_files,
                             });
                         } else if self.mode_repair {
+                            // if this is not repair (so, download), then it's just a
+                            // not-yet-downlaoded file, no need to sound the "BROKEN FILE" alarm
                             tracing::error!(
                                 asset = file_info.file_manifest.asset_name,
                                 "Broken file detected"
@@ -495,18 +497,17 @@ impl SophonInstaller {
                         }
                         !check_res
                     })
-                    .flat_map(|file_info| {
-                        file_info
-                            .chunks_iter()
-                            .map(move |chinfo| (file_info, chinfo))
-                    })
+                    .flat_map(|file_info| std::iter::repeat(file_info).zip(file_info.chunks_iter()))
                     .filter(move |(file_info, chunk_info)| {
-                        if redownload_set.contains(&chunk_info.chunk_manifest.chunk_name)
-                            && !self.mode_repair
+                        if !self.mode_repair
+                            && redownload_set.contains(&chunk_info.chunk_manifest.chunk_name)
                         {
                             // This chunk was already checked, and included in the queue. No need
                             // for duplicates, as they will be filtered
                             // in the next filter call
+                            //
+                            // but if it's repair, need to account for all files where the chunk
+                            // appears, hence `&& !self.mode_repair`
                             return false;
                         }
                         if !self
@@ -520,7 +521,11 @@ impl SophonInstaller {
                                     "Broken file region detected"
                                 )
                             }
-                            redownload_set.insert(&chunk_info.chunk_manifest.chunk_name);
+                            if !self.mode_repair {
+                                // redownload set gets completely unused in the case of repair, but
+                                // that one has its own hashsets to deal with
+                                redownload_set.insert(&chunk_info.chunk_manifest.chunk_name);
+                            }
                             true
                         } else {
                             false
@@ -539,12 +544,18 @@ impl SophonInstaller {
                         chunk_info
                     })
                     .filter(move |chunk_info| {
+                        // deduplicate for the download to avoid queueing up teh same chunk in
+                        // multiple threads or having separate retry counters for the same chunk
+                        // or- why am I explaining that this better not have duplicate chunks?
                         chunk_dedupe_set.insert(&chunk_info.chunk_manifest.chunk_name)
                     }),
             )
         });
 
         // Early exit if all files are already downloaded
+        //
+        // OR if the user (of the library) demanded to skip download/repair, like checking files
+        // without repairing.
         if self.skip_download_repair || download_queue.is_empty() {
             (updater)(Update::DownloadingFinished);
             return;
@@ -976,17 +987,17 @@ impl SophonInstaller {
                 (updater)(downloading_index.add_msg_files(1))
             }
             Ok(false) => {
-                if self.mode_repair {
-                    if downloading_index.repair_check_off(
+                if self.mode_repair
+                    && downloading_index.repair_check_off(
                         &file_info.file_manifest.asset_name,
                         &downloaded_chunk.chunk_manifest.chunk_name,
-                    ) {
-                        tracing::info!(
-                            file = file_info.file_manifest.asset_name,
-                            "Finished repair for file"
-                        );
-                        (updater)(downloading_index.add_msg_files(1))
-                    }
+                    )
+                {
+                    tracing::info!(
+                        file = file_info.file_manifest.asset_name,
+                        "Finished repair for file"
+                    );
+                    (updater)(downloading_index.add_msg_files(1))
                 }
                 #[cfg(feature = "extra-logs")]
                 tracing::debug!(
