@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use bytes::Bytes;
 use prost::Message;
 use reqwest::blocking::Client;
@@ -140,6 +142,28 @@ pub fn get_protobuf_from_url_raw(
     };
 
     Ok(protobuf_bytes)
+}
+
+/// Try to decode protobuf from arbitrary data. Tries to decompress the data using zstd, and if
+/// that fails, assumes the data is uncompressed
+pub fn decode_protobuf<T>(data: &[u8]) -> Result<T, SophonError>
+where
+    T: Message,
+    T: Default,
+{
+    let mut data_ref = data;
+    let decomperssed_data = zstd::decode_all(&mut data_ref)
+        .inspect_err(|err| {
+            tracing::warn!(
+                ?err,
+                "Failed to decomperss provided data stream, assuming the data is uncompressed"
+            )
+        })
+        .map(Cow::Owned)
+        .unwrap_or(Cow::Borrowed(data));
+
+    T::decode(decomperssed_data.as_ref())
+        .map_err(|err| SophonError::IoError(std::io::Error::other(err)))
 }
 
 // Specific API endpoint and datatype getters

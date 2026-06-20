@@ -1,6 +1,7 @@
 use std::{
     fmt::Display,
-    io::{Write, stdout},
+    io::{Read, Write, stdout},
+    path::PathBuf,
 };
 
 use clap::{Args, ValueEnum};
@@ -11,6 +12,7 @@ use sophon_lib::{
         get_download_manifest, get_download_manifest_raw, get_patch_manifest,
         get_patch_manifest_raw,
     },
+    protos::{SophonManifestProto, SophonPatchProto},
     reqwest::blocking::Client,
 };
 
@@ -90,6 +92,10 @@ pub struct SingleMatchingFieldFilter {
     /// Matching field / component to dump information for
     #[arg(short, long, alias("component"), default_value = "game")]
     matching_field: String,
+
+    /// ad-hoc local file to parse and display information about
+    #[arg(long)]
+    manifest_file: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -466,7 +472,31 @@ impl SingleMatchingFieldFilter {
                     preload,
                 },
             matching_field,
+            manifest_file,
         } = self;
+
+        if let Some(manifest_file) = manifest_file {
+            let mut manifest_file =
+                std::fs::File::open(&manifest_file).expect("Failed to open manifest file");
+            if matches!(format, DumpFormat::Raw) {
+                // This would be a weird case but ok
+                let mut output = stdout();
+                std::io::copy(&mut manifest_file, &mut output).map_err(DumpError::output_io)?;
+            } else {
+                let mut manifest_bytes =
+                    Vec::with_capacity(manifest_file.metadata().unwrap().len() as usize);
+                manifest_file
+                    .read_to_end(&mut manifest_bytes)
+                    .expect("Failed to read from manifest file");
+                let download_manifest =
+                    sophon_lib::api::decode_protobuf::<SophonManifestProto>(&manifest_bytes)
+                        .map_err(DumpError::download_manifest)?;
+                dump_value_formatted(&download_manifest, format)?;
+            }
+
+            return Ok(());
+        }
+
         let game_branches = sophon_lib::api::get_game_branches_info(client, &edition)
             .map_err(DumpError::game_branches)?;
 
@@ -517,7 +547,29 @@ impl SingleMatchingFieldFilter {
                     preload,
                 },
             matching_field,
+            manifest_file,
         } = self;
+
+        if let Some(manifest_file) = manifest_file {
+            let mut manifest_file =
+                std::fs::File::open(&manifest_file).expect("Failed to open manifest file");
+            if matches!(format, DumpFormat::Raw) {
+                let mut output = stdout();
+                std::io::copy(&mut manifest_file, &mut output).map_err(DumpError::output_io)?;
+            } else {
+                let mut manifest_bytes =
+                    Vec::with_capacity(manifest_file.metadata().unwrap().len() as usize);
+                manifest_file
+                    .read_to_end(&mut manifest_bytes)
+                    .expect("Failed to read from manifest file");
+                let patch_manifest =
+                    sophon_lib::api::decode_protobuf::<SophonPatchProto>(&manifest_bytes)
+                        .map_err(DumpError::patch_manifest)?;
+                dump_value_formatted(&patch_manifest, format)?;
+            }
+            return Ok(());
+        }
+
         let game_branches = sophon_lib::api::get_game_branches_info(client, &edition)
             .map_err(DumpError::game_branches)?;
 
