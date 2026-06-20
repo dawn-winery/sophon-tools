@@ -52,6 +52,10 @@ enum Action {
         #[arg(short, long)]
         format: Option<DumpFormat>,
 
+        /// Output verbosity, primarily used by the pretty format
+        #[arg(short, long, action = clap::ArgAction::Count)]
+        verbosity: u8,
+
         #[command(subcommand)]
         target: DumpTarget,
     },
@@ -176,9 +180,11 @@ fn main() -> Result<(), String> {
     // TODO? custom error type
 
     match cli_args.action {
-        Action::Dump { format, target } => {
-            target.dump_api_data(edition, api_data::decide_format(format))
-        }
+        Action::Dump {
+            format,
+            target,
+            verbosity,
+        } => target.dump_api_data(edition, api_data::decide_format(format), verbosity),
         Action::Download(args) => args.download(edition, cli_args.cache_dir, cli_args.threads),
         Action::Repair(args) => args.repair(edition, cli_args.cache_dir, cli_args.threads),
         Action::Update(args) => args.update(edition, cli_args.cache_dir, cli_args.threads),

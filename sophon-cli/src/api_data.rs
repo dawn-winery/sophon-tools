@@ -127,24 +127,41 @@ pub fn decide_format(user_selection: Option<DumpFormat>) -> DumpFormat {
 }
 
 impl DumpTarget {
-    pub fn dump_api_data(self, edition: GameEdition, format: DumpFormat) -> Result<(), String> {
+    pub fn dump_api_data(
+        self,
+        edition: GameEdition,
+        format: DumpFormat,
+        verbosity: u8,
+    ) -> Result<(), String> {
         let client = sophon_lib::reqwest::blocking::Client::new();
         match self {
-            DumpTarget::GameScanInfo(args) => args.dump_game_scan_info(&client, edition, format),
+            DumpTarget::GameScanInfo(args) => {
+                args.dump_game_scan_info(&client, edition, format, verbosity)
+            }
             DumpTarget::GameConfigs(args) => {
-                args.dump_game_launch_configs(&client, edition, format)
+                args.dump_game_launch_configs(&client, edition, format, verbosity)
             }
 
-            DumpTarget::GameBranches(args) => args.dump_game_branches(&client, edition, format),
-            DumpTarget::PackageInfo(args) => args.dump_package_info(&client, edition, format),
+            DumpTarget::GameBranches(args) => {
+                args.dump_game_branches(&client, edition, format, verbosity)
+            }
+            DumpTarget::PackageInfo(args) => {
+                args.dump_package_info(&client, edition, format, verbosity)
+            }
 
-            DumpTarget::DownloadInfo(args) => args.dump_download_info(&client, edition, format),
+            DumpTarget::DownloadInfo(args) => {
+                args.dump_download_info(&client, edition, format, verbosity)
+            }
             DumpTarget::DownloadManifest(args) => {
-                args.dump_download_manifest(&client, edition, format)
+                args.dump_download_manifest(&client, edition, format, verbosity)
             }
 
-            DumpTarget::PatchInfo(args) => args.dump_patch_info(&client, edition, format),
-            DumpTarget::PatchManifest(args) => args.dump_patch_manifest(&client, edition, format),
+            DumpTarget::PatchInfo(args) => {
+                args.dump_patch_info(&client, edition, format, verbosity)
+            }
+            DumpTarget::PatchManifest(args) => {
+                args.dump_patch_manifest(&client, edition, format, verbosity)
+            }
         }
     }
 }
@@ -155,6 +172,7 @@ impl MultipleVersionFilter {
         client: &Client,
         edition: GameEdition,
         format: DumpFormat,
+        verbosity: u8,
     ) -> Result<(), String> {
         let Self {
             game,
@@ -174,7 +192,7 @@ impl MultipleVersionFilter {
             sophon_lib::api::get_game_scan_info(client, &edition).map_err(DumpError::game_scan)?;
 
         let Some(game_id) = game else {
-            dump_value_formatted(&game_scan_info, format)?;
+            dump_value_formatted(&game_scan_info, format, verbosity)?;
             return Ok(());
         };
 
@@ -195,7 +213,7 @@ impl MultipleVersionFilter {
                 .iter()
                 .max_by_key(|hash| &hash.version)
             {
-                dump_value_formatted(game_latest, format)?;
+                dump_value_formatted(game_latest, format, verbosity)?;
                 Ok(())
             } else {
                 Err("No exe versions, this is unexpected".to_string())
@@ -206,13 +224,13 @@ impl MultipleVersionFilter {
                 .iter()
                 .find(|info| info.version == target_version)
             {
-                dump_value_formatted(version_filtered, format)?;
+                dump_value_formatted(version_filtered, format, verbosity)?;
                 Ok(())
             } else {
                 Err(format!("Version {target_version} not found"))
             }
         } else {
-            dump_value_formatted(game_filtered, format)?;
+            dump_value_formatted(game_filtered, format, verbosity)?;
             Ok(())
         }
     }
@@ -222,6 +240,7 @@ impl MultipleVersionFilter {
         client: &Client,
         edition: GameEdition,
         format: DumpFormat,
+        verbosity: u8,
     ) -> Result<(), String> {
         let Self {
             game,
@@ -241,7 +260,7 @@ impl MultipleVersionFilter {
             .map_err(DumpError::game_branches)?;
 
         let Some(game_id_or_biz) = game else {
-            dump_value_formatted(&game_branches, format)?;
+            dump_value_formatted(&game_branches, format, verbosity)?;
             return Ok(());
         };
 
@@ -249,19 +268,19 @@ impl MultipleVersionFilter {
             if let Some(latest_branch) =
                 game_branches.get_game_branch_by_id_or_biz_latest(&game_id_or_biz)
             {
-                dump_value_formatted(latest_branch, format)?;
+                dump_value_formatted(latest_branch, format, verbosity)?;
                 return Ok(());
             }
         } else {
             let mut filtered_branches =
                 game_branches.get_game_branches_by_id_or_biz(&game_id_or_biz, version.as_deref());
             if let Some(first_item) = filtered_branches.next() {
-                dump_value_formatted(first_item, format)?;
+                dump_value_formatted(first_item, format, verbosity)?;
                 for branch in filtered_branches {
                     if matches!(format, DumpFormat::Pretty) {
                         print!("\n\n");
                     }
-                    dump_value_formatted(branch, format)?;
+                    dump_value_formatted(branch, format, verbosity)?;
                 }
                 return Ok(());
             }
@@ -275,6 +294,7 @@ impl MultipleVersionFilter {
         client: &Client,
         edition: GameEdition,
         format: DumpFormat,
+        verbosity: u8,
     ) -> Result<(), String> {
         let Self { game, .. } = self;
         if matches!(format, DumpFormat::Raw) {
@@ -296,7 +316,7 @@ impl MultipleVersionFilter {
         }
 
         if !game_configs.launch_configs.is_empty() {
-            dump_value_formatted(&game_configs, format)?;
+            dump_value_formatted(&game_configs, format, verbosity)?;
             return Ok(());
         }
 
@@ -310,6 +330,7 @@ impl SingleVersionFilter {
         client: &Client,
         edition: GameEdition,
         format: DumpFormat,
+        verbosity: u8,
     ) -> Result<(), String> {
         let Self {
             game,
@@ -328,19 +349,19 @@ impl SingleVersionFilter {
             if let Some(latest_branch) =
                 game_branches.get_package_by_id_or_biz_latest(&game, preload)
             {
-                dump_value_formatted(latest_branch, format)?;
+                dump_value_formatted(latest_branch, format, verbosity)?;
             }
             return Ok(());
         } else {
             let mut filtered_branches =
                 game_branches.get_packages_by_id_or_biz(&game, version.as_deref(), preload);
             if let Some(first_item) = filtered_branches.next() {
-                dump_value_formatted(first_item, format)?;
+                dump_value_formatted(first_item, format, verbosity)?;
                 for branch in filtered_branches {
                     if matches!(format, DumpFormat::Pretty) {
                         print!("\n\n");
                     }
-                    dump_value_formatted(branch, format)?;
+                    dump_value_formatted(branch, format, verbosity)?;
                 }
                 return Ok(());
             }
@@ -356,6 +377,7 @@ impl MultipleMatchingFieldFilter {
         client: &Client,
         edition: GameEdition,
         format: DumpFormat,
+        verbosity: u8,
     ) -> Result<(), String> {
         let Self {
             parent:
@@ -398,7 +420,7 @@ impl MultipleMatchingFieldFilter {
                     .retain(|download_info| matching_field.contains(&download_info.matching_field));
             }
 
-            dump_value_formatted(&downloads_info, format)?;
+            dump_value_formatted(&downloads_info, format, verbosity)?;
         }
 
         Ok(())
@@ -409,6 +431,7 @@ impl MultipleMatchingFieldFilter {
         client: &Client,
         edition: GameEdition,
         format: DumpFormat,
+        verbosity: u8,
     ) -> Result<(), String> {
         let Self {
             parent:
@@ -450,7 +473,7 @@ impl MultipleMatchingFieldFilter {
                     .retain(|download_info| matching_field.contains(&download_info.matching_field));
             }
 
-            dump_value_formatted(&diffs, format)?;
+            dump_value_formatted(&diffs, format, verbosity)?;
         }
 
         Ok(())
@@ -463,6 +486,7 @@ impl SingleMatchingFieldFilter {
         client: &Client,
         edition: GameEdition,
         format: DumpFormat,
+        verbosity: u8,
     ) -> Result<(), String> {
         let Self {
             parent:
@@ -491,7 +515,7 @@ impl SingleMatchingFieldFilter {
                 let download_manifest =
                     sophon_lib::api::decode_protobuf::<SophonManifestProto>(&manifest_bytes)
                         .map_err(DumpError::download_manifest)?;
-                dump_value_formatted(&download_manifest, format)?;
+                dump_value_formatted(&download_manifest, format, verbosity)?;
             }
 
             return Ok(());
@@ -527,7 +551,7 @@ impl SingleMatchingFieldFilter {
         } else {
             let download_manifest = get_download_manifest(client, download_info)
                 .map_err(DumpError::download_manifest)?;
-            dump_value_formatted(&download_manifest, format)?;
+            dump_value_formatted(&download_manifest, format, verbosity)?;
         }
 
         Ok(())
@@ -538,6 +562,7 @@ impl SingleMatchingFieldFilter {
         client: &Client,
         edition: GameEdition,
         format: DumpFormat,
+        verbosity: u8,
     ) -> Result<(), String> {
         let Self {
             parent:
@@ -565,7 +590,7 @@ impl SingleMatchingFieldFilter {
                 let patch_manifest =
                     sophon_lib::api::decode_protobuf::<SophonPatchProto>(&manifest_bytes)
                         .map_err(DumpError::patch_manifest)?;
-                dump_value_formatted(&patch_manifest, format)?;
+                dump_value_formatted(&patch_manifest, format, verbosity)?;
             }
             return Ok(());
         }
@@ -600,7 +625,7 @@ impl SingleMatchingFieldFilter {
         } else {
             let patch_manifest =
                 get_patch_manifest(client, diff_info).map_err(DumpError::patch_manifest)?;
-            dump_value_formatted(&patch_manifest, format)?;
+            dump_value_formatted(&patch_manifest, format, verbosity)?;
         }
 
         Ok(())
@@ -608,7 +633,7 @@ impl SingleMatchingFieldFilter {
 }
 
 /// Helper for outputting data in all the supported formats EXCEPT raw
-fn dump_value_formatted<T>(value: &T, format: DumpFormat) -> Result<(), DumpError>
+fn dump_value_formatted<T>(value: &T, format: DumpFormat, verbosity: u8) -> Result<(), DumpError>
 where
     T: core::fmt::Debug,
     T: PrettyPrint,
@@ -626,7 +651,7 @@ where
             println!("{}", serialized)
         }
         DumpFormat::Pretty => {
-            value.pretty_print();
+            value.pretty_print(verbosity);
         }
         // I don't really like this unreachable, but removing it would probably need a refactor.
         //

@@ -200,7 +200,7 @@ impl UpdateArgs {
             .manifests
             .retain(|diff| components.contains(&diff.matching_field));
 
-        diffs_info.pretty_print();
+        diffs_info.pretty_print(0);
         println!();
 
         if !dialoguer::Confirm::new()

@@ -150,7 +150,7 @@ impl RepairArgs {
             .manifests
             .retain(|download_info| components.contains(&download_info.matching_field));
 
-        downloads_info.pretty_print();
+        downloads_info.pretty_print(0);
         println!();
 
         if !dialoguer::Confirm::new()

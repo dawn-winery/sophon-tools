@@ -145,7 +145,7 @@ impl DownloadArgs {
                         .contains(&download_info.matching_field.as_str())))
         });
 
-        downloads_info.pretty_print();
+        downloads_info.pretty_print(0);
         println!();
 
         if !dialoguer::Confirm::new()

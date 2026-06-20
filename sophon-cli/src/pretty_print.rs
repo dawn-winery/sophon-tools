@@ -20,31 +20,31 @@ fn prettify_bytes_str(bytes_str: &str) -> String {
 }
 
 pub trait PrettyPrint {
-    fn pretty_print(&self);
+    fn pretty_print(&self, verbosity: u8);
 }
 
 impl PrettyPrint for GameBranches {
-    fn pretty_print(&self) {
+    fn pretty_print(&self, verbosity: u8) {
         println!("Game Branches:");
         for game_branch in &self.game_branches {
             print!("\n\n");
-            game_branch.pretty_print()
+            game_branch.pretty_print(verbosity)
         }
     }
 }
 
 impl PrettyPrint for GameBranchInfo {
-    fn pretty_print(&self) {
+    fn pretty_print(&self, verbosity: u8) {
         println!("Game codename: {}", self.game.biz);
         println!("Branch id: `{}`", self.game.id);
         if let Some(main_package) = &self.main {
             println!();
-            main_package.pretty_print();
+            main_package.pretty_print(verbosity);
         }
         if let Some(preload_package) = &self.pre_download {
             println!();
             println!("*** PREDOWNLOAD AVAILABLE ***");
-            preload_package.pretty_print();
+            preload_package.pretty_print(verbosity);
         }
 
         if self.main.is_none() && self.main.is_none() {
@@ -54,7 +54,7 @@ impl PrettyPrint for GameBranchInfo {
 }
 
 impl PrettyPrint for PackageInfo {
-    fn pretty_print(&self) {
+    fn pretty_print(&self, verbosity: u8) {
         println!("Package `{}` (Branch {})", self.package_id, self.branch);
         println!("  Access password: `{}`", self.password);
         println!("  Version tag: {}", self.tag);
@@ -79,7 +79,7 @@ impl PrettyPrint for PackageInfo {
 }
 
 impl PrettyPrint for SophonDownloads {
-    fn pretty_print(&self) {
+    fn pretty_print(&self, verbosity: u8) {
         println!("Build id: {}", self.build_id);
         println!("  Version tag: {}", self.tag);
         println!();
@@ -89,28 +89,28 @@ impl PrettyPrint for SophonDownloads {
         } else {
             for manifest in &self.manifests {
                 println!();
-                manifest.pretty_print()
+                manifest.pretty_print(verbosity)
             }
         }
     }
 }
 
 impl PrettyPrint for SophonDownloadInfo {
-    fn pretty_print(&self) {
+    fn pretty_print(&self, verbosity: u8) {
         println!("Name: {}", self.category_name);
         println!("  Matching id: {}", self.matching_field);
         println!("  ID: {}", self.category_id);
         println!("Manifest (protobuf) info:");
-        self.manifest.pretty_print();
+        self.manifest.pretty_print(verbosity);
         println!("Manifest download info:");
-        self.manifest_download.pretty_print();
+        self.manifest_download.pretty_print(verbosity);
         println!("Chunk download info:");
-        self.chunk_download.pretty_print();
+        self.chunk_download.pretty_print(verbosity);
         println!("Download stats:");
-        self.stats.pretty_print();
+        self.stats.pretty_print(verbosity);
         if self.stats != self.deduplicated_stats {
             println!("Deduplicated download stats:");
-            self.deduplicated_stats.pretty_print();
+            self.deduplicated_stats.pretty_print(verbosity);
         } else {
             println!("Deduplicated stats match regular stats");
         }
@@ -118,7 +118,7 @@ impl PrettyPrint for SophonDownloadInfo {
 }
 
 impl PrettyPrint for Manifest {
-    fn pretty_print(&self) {
+    fn pretty_print(&self, verbosity: u8) {
         println!("  ID: {}", self.id);
         println!("  Checksum: {}", self.checksum);
         println!(
@@ -133,7 +133,7 @@ impl PrettyPrint for Manifest {
 }
 
 impl PrettyPrint for DownloadInfo {
-    fn pretty_print(&self) {
+    fn pretty_print(&self, verbosity: u8) {
         if self.url_suffix.is_empty() {
             println!("  Full base URL: {}", self.url_prefix);
         } else {
@@ -152,7 +152,7 @@ impl PrettyPrint for DownloadInfo {
 }
 
 impl PrettyPrint for ManifestStats {
-    fn pretty_print(&self) {
+    fn pretty_print(&self, verbosity: u8) {
         println!("  File count: {}", self.file_count);
         println!("  Chunk count: {}", self.chunk_count);
         println!(
@@ -167,42 +167,88 @@ impl PrettyPrint for ManifestStats {
 }
 
 impl PrettyPrint for GameScanInfo {
-    fn pretty_print(&self) {
+    fn pretty_print(&self, verbosity: u8) {
         println!("All games scan info:");
         for game_info in &self.game_scan_info {
             println!();
-            game_info.pretty_print()
+            game_info.pretty_print(verbosity)
         }
     }
 }
 
 impl PrettyPrint for ScanInfo {
-    fn pretty_print(&self) {
+    fn pretty_print(&self, verbosity: u8) {
         println!("Game id: `{}`", self.game_id);
         for game_exe in &self.game_exe_list {
-            game_exe.pretty_print();
+            game_exe.pretty_print(verbosity);
         }
     }
 }
 
 impl PrettyPrint for GameExeHash {
-    fn pretty_print(&self) {
+    fn pretty_print(&self, verbosity: u8) {
         println!("{}: `{}`", self.version, self.md5)
     }
 }
 
+/// Checks whether `a` is a prefix of `b`
+fn is_str_prefix(a: &str, b: &str) -> bool {
+    a.len() < b.len() && a.chars().zip(b.chars()).all(|(ac, bc)| ac == bc)
+}
+
 impl PrettyPrint for SophonManifestProto {
-    fn pretty_print(&self) {
-        println!("assets:");
-        for asset in &self.assets {
-            println!();
-            asset.pretty_print()
+    fn pretty_print(&self, verbosity: u8) {
+        match verbosity {
+            0 => {
+                // attempt at a tree-like display, but I forgot the manifest doesn't include
+                // directories. So this needs a more elaborate algorithm to display directory tree
+                // structure
+                println!("Asset tree:");
+                let mut sorted_assets = self.assets.clone();
+                sorted_assets.sort_by_key(|asset| asset.asset_name.clone());
+                let mut prefix_stack: Vec<&String> = vec![];
+                for asset in &sorted_assets {
+                    while prefix_stack
+                        .last()
+                        .map(|top_stack| !is_str_prefix(top_stack, &asset.asset_name))
+                        .unwrap_or(false)
+                    {
+                        prefix_stack.pop();
+                    }
+                    prefix_stack.push(&asset.asset_name);
+                    if prefix_stack
+                        .last()
+                        .map(|top_stack| is_str_prefix(top_stack, &asset.asset_name))
+                        .unwrap_or(true)
+                    {
+                        prefix_stack.pop();
+                        prefix_stack.push(&asset.asset_name);
+                    }
+                    let indent_level = prefix_stack.len();
+                    for _ in (0..indent_level) {
+                        print!("  ");
+                    }
+                    println!(
+                        "  ∟ {} {} `{}`",
+                        asset.asset_name,
+                        HumanBytes(asset.asset_size),
+                        asset.asset_hash_md5
+                    );
+                }
+            }
+            _ => {
+                println!("assets:");
+                for asset in &self.assets {
+                    println!();
+                    asset.pretty_print(verbosity)
+                }
+            }
         }
     }
 }
 
 impl PrettyPrint for SophonManifestAssetProperty {
-    fn pretty_print(&self) {
+    fn pretty_print(&self, verbosity: u8) {
         println!("Filename: \"{}\"", self.asset_name);
         print!("  Type number: {}", self.asset_type);
         if self.asset_type == 0 {
@@ -216,7 +262,7 @@ impl PrettyPrint for SophonManifestAssetProperty {
             println!("  Chunks:");
             for chunk_info in &self.asset_chunks {
                 println!();
-                chunk_info.pretty_print()
+                chunk_info.pretty_print(verbosity)
             }
         } else {
             println!("  Asset has no chunks")
@@ -225,7 +271,7 @@ impl PrettyPrint for SophonManifestAssetProperty {
 }
 
 impl PrettyPrint for SophonManifestAssetChunk {
-    fn pretty_print(&self) {
+    fn pretty_print(&self, verbosity: u8) {
         println!("    Name: `{}`", self.chunk_name);
         println!(
             "    Compressed: size {}, MD5 hash `{}`, unknown field `{:#018x}`",
@@ -243,7 +289,7 @@ impl PrettyPrint for SophonManifestAssetChunk {
 }
 
 impl PrettyPrint for SophonDiffs {
-    fn pretty_print(&self) {
+    fn pretty_print(&self, verbosity: u8) {
         println!("Build id: {}", self.build_id);
         println!("  Patch id: {}", self.patch_id);
         println!("  Version tag: {}", self.tag);
@@ -254,35 +300,35 @@ impl PrettyPrint for SophonDiffs {
         } else {
             for manifest in &self.manifests {
                 println!();
-                manifest.pretty_print()
+                manifest.pretty_print(verbosity)
             }
         }
     }
 }
 
 impl PrettyPrint for SophonDiff {
-    fn pretty_print(&self) {
+    fn pretty_print(&self, verbosity: u8) {
         println!("Name: {}", self.category_name);
         println!("  Matching id: {}", self.matching_field);
         println!("  ID: {}", self.category_id);
         println!("Manifest (protobuf) info:");
-        self.manifest.pretty_print();
+        self.manifest.pretty_print(verbosity);
         println!("Manifest download info:");
-        self.manifest_download.pretty_print();
+        self.manifest_download.pretty_print(verbosity);
         println!("Patch download info:");
-        self.diff_download.pretty_print();
+        self.diff_download.pretty_print(verbosity);
         for (ver, stats) in &self.stats {
             println!("Download stats (from {ver}):");
-            stats.pretty_print();
+            stats.pretty_print(verbosity);
         }
     }
 }
 
 impl PrettyPrint for SophonPatchProto {
-    fn pretty_print(&self) {
+    fn pretty_print(&self, verbosity: u8) {
         println!("Patched assets:");
         for asset in &self.patch_assets {
-            asset.pretty_print();
+            asset.pretty_print(verbosity);
         }
         println!();
         println!();
@@ -299,7 +345,7 @@ impl PrettyPrint for SophonPatchProto {
                     println!("  From version {ver}:");
                     if verbose {
                         for unused_file in &unused_files.assets {
-                            unused_file.pretty_print();
+                            unused_file.pretty_print(verbosity);
                         }
                     } else {
                         println!("    ({} unused files not shown)", unused_files.assets.len())
@@ -311,7 +357,7 @@ impl PrettyPrint for SophonPatchProto {
 }
 
 impl PrettyPrint for SophonPatchAssetProperty {
-    fn pretty_print(&self) {
+    fn pretty_print(&self, verbosity: u8) {
         if !self.asset_patch_chunks.is_empty() {
             println!();
             println!("  File {}", self.asset_name);
@@ -325,7 +371,7 @@ impl PrettyPrint for SophonPatchAssetProperty {
             } else {
                 for (ver, chunk) in &self.asset_patch_chunks {
                     println!("  Patch from version {ver}:");
-                    chunk.pretty_print()
+                    chunk.pretty_print(verbosity)
                 }
             }
             println!();
@@ -341,7 +387,7 @@ impl PrettyPrint for SophonPatchAssetProperty {
 }
 
 impl PrettyPrint for SophonPatchAssetChunk {
-    fn pretty_print(&self) {
+    fn pretty_print(&self, verbosity: u8) {
         println!(
             "    Chunk name: {}; size: {}; hash: {}",
             self.patch_name,
@@ -370,7 +416,7 @@ impl PrettyPrint for SophonPatchAssetChunk {
 }
 
 impl PrettyPrint for SophonUnusedAssetFile {
-    fn pretty_print(&self) {
+    fn pretty_print(&self, verbosity: u8) {
         let Self {
             file_name,
             file_size,
@@ -385,17 +431,17 @@ impl PrettyPrint for SophonUnusedAssetFile {
 }
 
 impl PrettyPrint for GameConfigs {
-    fn pretty_print(&self) {
+    fn pretty_print(&self, verbosity: u8) {
         println!("Game Launch Configs:");
         for launch_config in &self.launch_configs {
             println!();
-            launch_config.pretty_print()
+            launch_config.pretty_print(verbosity)
         }
     }
 }
 
 impl PrettyPrint for GameLaunchConfig {
-    fn pretty_print(&self) {
+    fn pretty_print(&self, verbosity: u8) {
         println!("Game biz: `{}`; id: `{}`", self.game.biz, self.game.id);
         println!("  Executable file name: {}", self.exe_file_name);
         println!("  Default download mode: {}", self.default_download_mode);
