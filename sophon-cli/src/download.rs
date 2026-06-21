@@ -134,7 +134,7 @@ impl DownloadArgs {
                     download_info.matching_field
                 ));
             } else {
-                output.abort_msg(&format!(
+                output.print_msg(&format!(
                     "Finished downloading component `{}`",
                     download_info.matching_field
                 ));

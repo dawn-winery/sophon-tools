@@ -139,7 +139,7 @@ impl RepairArgs {
                     download_info.matching_field
                 ));
             } else if !output.is_finished() {
-                output.abort_msg(&format!(
+                output.print_msg(&format!(
                     "Component `{}`: not all files passed the check",
                     download_info.matching_field
                 ));

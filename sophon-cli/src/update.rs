@@ -211,7 +211,7 @@ impl UpdateArgs {
                     update_manifest.matching_field
                 ));
             } else {
-                output.abort_msg(&format!(
+                output.print_msg(&format!(
                     "Done updating component `{}`",
                     update_manifest.matching_field,
                 ));
