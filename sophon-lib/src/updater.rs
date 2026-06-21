@@ -11,6 +11,7 @@ use std::{
 
 use bytes::Bytes;
 use reqwest::{blocking::Client, header::RANGE};
+use serde::Serialize;
 
 use super::{
     DEFAULT_CHUNK_RETRIES, SophonError,
@@ -28,7 +29,7 @@ use super::{
     },
 };
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub enum Update {
     CheckingFreeSpace(PathBuf),
 
