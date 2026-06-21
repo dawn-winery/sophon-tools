@@ -225,7 +225,7 @@ impl PrettyPrint for SophonManifestProto {
                         prefix_stack.push(&asset.asset_name);
                     }
                     let indent_level = prefix_stack.len();
-                    for _ in (0..indent_level) {
+                    for _ in 0..indent_level {
                         print!("  ");
                     }
                     println!(

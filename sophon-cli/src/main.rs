@@ -8,13 +8,17 @@ use tracing_subscriber::{
 
 mod api_data;
 mod download;
+mod ndjson_messages;
 mod repair;
+mod status_format;
 mod update;
 
 use api_data::{DumpFormat, DumpTarget};
 use download::DownloadArgs;
 use repair::RepairArgs;
 use update::UpdateArgs;
+
+use crate::status_format::StatusFormat;
 
 mod pretty_print;
 
@@ -91,6 +95,9 @@ struct DownloadParameters {
     /// the intermediates
     #[arg(long)]
     preload_pretend: bool,
+    /// Select status output format. Defaults to `ndjson` when piped
+    #[arg(long)]
+    status_format: Option<StatusFormat>,
 }
 
 #[derive(Debug, Args)]

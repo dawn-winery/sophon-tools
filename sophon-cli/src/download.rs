@@ -9,7 +9,7 @@ use sophon_lib::{
 };
 
 use super::GameCommon;
-use crate::{CustomPackageInfo, DownloadParameters, pretty_print::PrettyPrint};
+use crate::{CustomPackageInfo, DownloadParameters, StatusFormat, pretty_print::PrettyPrint};
 
 #[derive(Debug, Args)]
 /// Download the game
@@ -35,61 +35,6 @@ pub struct DownloadArgs {
 }
 
 impl DownloadArgs {
-    fn new_updater(
-        progress_bar: &ProgressBar,
-        download_style: &ProgressStyle,
-        file_check_style: &ProgressStyle,
-        matching_field: &str,
-    ) -> impl Fn(sophon_lib::installer::Update) + Clone + Send {
-        move |msg| match msg {
-            sophon_lib::installer::Update::DownloadingProgressBytes {
-                downloaded_bytes, ..
-            } => {
-                let reset_eta = progress_bar.position() == 0;
-                progress_bar.set_position(downloaded_bytes);
-                if reset_eta {
-                    progress_bar.reset_elapsed();
-                    progress_bar.reset_eta();
-                }
-                #[cfg(feature = "tracy")]
-                {
-                    let rate = progress_bar.per_sec();
-                    tracing_tracy::client::plot!("Downloading speed", rate);
-                }
-            }
-            sophon_lib::installer::Update::CheckingFiles { total_files } => {
-                progress_bar.set_message("Checking existing files");
-                progress_bar.set_style(file_check_style.clone());
-                progress_bar.set_length(total_files);
-                progress_bar.set_position(0);
-            }
-            sophon_lib::installer::Update::CheckingFilesProgress { passed, total } => {
-                progress_bar.set_position(passed);
-                if passed == total {
-                    progress_bar.finish_with_message("All files are already dowloaded");
-                }
-            }
-            sophon_lib::installer::Update::DownloadingStarted {
-                location,
-                total_bytes,
-                ..
-            } => {
-                progress_bar.set_message(format!("Downloading to {}", location.display()));
-                progress_bar.set_style(download_style.clone());
-                progress_bar.set_length(total_bytes);
-                progress_bar.set_position(0);
-                progress_bar.reset_elapsed();
-                progress_bar.reset_eta();
-            }
-            sophon_lib::installer::Update::CheckingFreeSpace(path) => {
-                progress_bar.set_message(format!("Checking free space at {}", path.display()))
-            }
-            sophon_lib::installer::Update::DownloadingFinished => progress_bar
-                .finish_with_message(format!("Finished downloading component {}", matching_field)),
-            _ => {}
-        }
-    }
-
     pub fn download(
         self,
         edition: GameEdition,
@@ -111,12 +56,19 @@ impl DownloadArgs {
         .build()
         .expect("Client config should be valid");
 
+        let output_format = self
+            .extra
+            .status_format
+            .unwrap_or_else(StatusFormat::select_default);
+
+        let output = output_format.into_stateful();
+
         let package_info =
             if let Some(adhoc_package_info) = self.custom_package_info.assemble_adhoc() {
-                println!("Using provided ad-hoc package info");
+                output.print_msg("Using provided ad-hoc package info");
                 adhoc_package_info
             } else {
-                println!("Fetching download information...");
+                output.print_msg("Fetching download information...");
                 let branches =
                     get_game_branches_info(&client, &edition).expect("Failed to get game branches");
                 if self.version.is_some() {
@@ -145,16 +97,7 @@ impl DownloadArgs {
                         .contains(&download_info.matching_field.as_str())))
         });
 
-        downloads_info.pretty_print(0);
-        println!();
-
-        if !dialoguer::Confirm::new()
-            .with_prompt("Proceed with download?")
-            .interact()
-            .map_err(|e| e.to_string())?
-        {
-            return Err("Aborted by user".to_owned());
-        }
+        output.dl_info(&downloads_info)?;
 
         for download_info in downloads_info.manifests {
             let total_download = download_info
@@ -162,20 +105,12 @@ impl DownloadArgs {
                 .compressed_size
                 .parse::<u64>()
                 .expect("API should have valid integer");
-            let download_style =
-                ProgressStyle::default_bar()
-                .template("{msg}\n{spinner} [{elapsed_precise}] [{wide_bar}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})")
-                .expect("Template should be valid");
-            let file_check_style = ProgressStyle::default_bar()
-                .template(
-                    "{msg}\n{spinner} [{elapsed_precise}] [{wide_bar}] {pos}/{len} {percent}%",
-                )
-                .expect("Template should be valid");
-
-            let progress_bar = ProgressBar::new(total_download).with_style(download_style.clone());
-            progress_bar.enable_steady_tick(Duration::from_secs_f32(0.25));
 
             let matching_field = download_info.matching_field.clone();
+
+            let updater = output
+                .clone()
+                .updater_download(&matching_field, total_download);
 
             let mut downloader = sophon_lib::installer::SophonInstaller::new(
                 client.clone(),
@@ -187,35 +122,19 @@ impl DownloadArgs {
             downloader.inplace = self.inplace;
             downloader.chunks_in_mem = self.extra.chunk_buffer_memory;
             downloader.chunks_queue_data_limit = self.extra.memory_buffer_limit;
+
             let res = if !self.extra.preload_pretend {
-                downloader.install(
-                    &self.game.game_dir,
-                    threads,
-                    Self::new_updater(
-                        &progress_bar,
-                        &download_style,
-                        &file_check_style,
-                        &matching_field,
-                    ),
-                )
+                downloader.install(&self.game.game_dir, threads, updater)
             } else {
-                downloader.pre_download(
-                    threads,
-                    Self::new_updater(
-                        &progress_bar,
-                        &download_style,
-                        &file_check_style,
-                        &matching_field,
-                    ),
-                )
+                downloader.pre_download(threads, updater)
             };
             if let Err(why) = res {
-                progress_bar.abandon_with_message(format!(
+                output.abort_msg(&format!(
                     "Failed to download component `{}`: {why:?}",
                     download_info.matching_field
                 ));
             } else {
-                progress_bar.finish_with_message(format!(
+                output.abort_msg(&format!(
                     "Finished downloading component `{}`",
                     download_info.matching_field
                 ));

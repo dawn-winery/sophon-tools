@@ -1,7 +1,6 @@
 use std::{path::PathBuf, time::Duration};
 
 use clap::Args;
-use indicatif::{ProgressBar, ProgressStyle};
 use sophon_lib::{
     GameEdition,
     api::{get_game_branches_info, get_game_download_sophon_info},
@@ -9,7 +8,7 @@ use sophon_lib::{
 };
 
 use super::{DownloadParameters, GameCommon};
-use crate::{CustomPackageInfo, pretty_print::PrettyPrint};
+use crate::{CustomPackageInfo, status_format::StatusFormat};
 
 #[derive(Debug, Args)]
 /// Check and repair game files
@@ -35,73 +34,25 @@ pub struct RepairArgs {
 }
 
 impl RepairArgs {
-    fn new_updater(
-        progress_bar: &ProgressBar,
-        download_style: &ProgressStyle,
-        file_check_style: &ProgressStyle,
-        matching_field: &str,
-    ) -> impl Fn(sophon_lib::installer::Update) + Clone + Send {
-        move |msg| match msg {
-            sophon_lib::installer::Update::DownloadingProgressBytes {
-                downloaded_bytes, ..
-            } => {
-                progress_bar.set_position(downloaded_bytes);
-                #[cfg(feature = "tracy")]
-                {
-                    let rate = progress_bar.per_sec();
-                    tracing_tracy::client::plot!("Downloading speed", rate);
-                }
-            }
-            sophon_lib::installer::Update::CheckingFiles { total_files } => {
-                progress_bar.set_message("Checking files");
-                progress_bar.set_style(file_check_style.clone());
-                progress_bar.set_length(total_files);
-                progress_bar.set_position(0);
-            }
-            sophon_lib::installer::Update::CheckingFilesProgress { passed, total } => {
-                progress_bar.set_position(passed);
-                if passed == total {
-                    progress_bar.finish_with_message("All files passed the check");
-                }
-            }
-            sophon_lib::installer::Update::DownloadingStarted {
-                location,
-                total_bytes,
-                ..
-            } => {
-                progress_bar.set_message(format!("Repairing files at {}", location.display()));
-                progress_bar.set_style(download_style.clone());
-                progress_bar.set_length(total_bytes);
-                progress_bar.set_position(0);
-                progress_bar.reset_elapsed();
-            }
-            sophon_lib::installer::Update::CheckingFreeSpace(path) => {
-                progress_bar.set_message(format!("Checking free space at {}", path.display()))
-            }
-            sophon_lib::installer::Update::DownloadingFinished => {
-                if !progress_bar.is_finished() {
-                    progress_bar.finish_with_message(format!(
-                        "Finished repairing component {}",
-                        matching_field
-                    ))
-                }
-            }
-            _ => {}
-        }
-    }
-
     pub fn repair(
         mut self,
         edition: GameEdition,
         temp_dir: PathBuf,
         threads: usize,
     ) -> Result<(), String> {
+        let output_format = self
+            .extra
+            .status_format
+            .unwrap_or_else(StatusFormat::select_default);
+
+        let output = output_format.into_stateful();
+
         if let Some(game_ver) = &mut self.version
             && game_ver == "auto"
             && let Some(auto_ver) =
                 super::update::autodetect_game_ver(&self.game.game_dir, &self.game.game, &edition)
                     .inspect_err(|err| {
-                        eprintln!("Error autodetecting game version: {err}");
+                        output.print_msg(&format!("Error autodetecting game version: {err}"));
                     })
                     .unwrap_or(None)
         {
@@ -124,10 +75,10 @@ impl RepairArgs {
 
         let package_info =
             if let Some(adhoc_package_info) = self.custom_package_info.assemble_adhoc() {
-                println!("Using provided ad-hoc package info");
+                output.print_msg("Using provided ad-hoc package info");
                 adhoc_package_info
             } else {
-                println!("Fetching download information...");
+                output.print_msg("Fetching download information...");
                 let branches =
                     get_game_branches_info(&client, &edition).expect("Failed to get game branches");
                 if self.version.is_some() {
@@ -150,16 +101,7 @@ impl RepairArgs {
             .manifests
             .retain(|download_info| components.contains(&download_info.matching_field));
 
-        downloads_info.pretty_print(0);
-        println!();
-
-        if !dialoguer::Confirm::new()
-            .with_prompt("Proceed with download?")
-            .interact()
-            .map_err(|e| e.to_string())?
-        {
-            return Err("Aborted by user".to_owned());
-        }
+        output.repair_info(&downloads_info)?;
 
         for download_info in downloads_info
             .manifests
@@ -171,20 +113,12 @@ impl RepairArgs {
                 .compressed_size
                 .parse::<u64>()
                 .expect("API must have valid integer");
-            let download_style =
-                ProgressStyle::default_bar()
-                .template("{msg}\n{spinner} [{elapsed_precise}] [{wide_bar}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})")
-                .expect("Template should be valid");
-            let file_check_style = ProgressStyle::default_bar()
-                .template(
-                    "{msg}\n{spinner} [{elapsed_precise}] [{wide_bar}] {pos}/{len} {percent}%",
-                )
-                .expect("Template should be valid");
-
-            let progress_bar = ProgressBar::new(total_download).with_style(download_style.clone());
-            progress_bar.enable_steady_tick(Duration::from_secs_f32(0.25));
 
             let matching_field = download_info.matching_field.clone();
+
+            let updater = output
+                .clone()
+                .updater_repair(&matching_field, total_download);
 
             let mut downloader = sophon_lib::installer::SophonInstaller::new(
                 client.clone(),
@@ -198,22 +132,14 @@ impl RepairArgs {
             downloader.chunks_queue_data_limit = self.extra.memory_buffer_limit;
             downloader.skip_download_repair = self.dry_run;
             downloader.mode_repair = true;
-            if let Err(why) = downloader.install(
-                &self.game.game_dir,
-                threads,
-                Self::new_updater(
-                    &progress_bar,
-                    &download_style,
-                    &file_check_style,
-                    &matching_field,
-                ),
-            ) {
-                progress_bar.abandon_with_message(format!(
+
+            if let Err(why) = downloader.install(&self.game.game_dir, threads, updater) {
+                output.abort_msg(&format!(
                     "Failed to repair component `{}`: {why:?}",
                     download_info.matching_field
                 ));
-            } else if !progress_bar.is_finished() {
-                progress_bar.abandon_with_message(format!(
+            } else if !output.is_finished() {
+                output.abort_msg(&format!(
                     "Component `{}`: not all files passed the check",
                     download_info.matching_field
                 ));

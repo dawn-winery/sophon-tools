@@ -5,7 +5,6 @@ use std::{
 };
 
 use clap::Args;
-use indicatif::{ProgressBar, ProgressStyle};
 use sophon_lib::{
     GameEdition, SophonError,
     api::{
@@ -17,7 +16,7 @@ use sophon_lib::{
 };
 
 use super::{DownloadParameters, GameCommon};
-use crate::{CustomPackageInfo, pretty_print::PrettyPrint};
+use crate::{CustomPackageInfo, status_format::StatusFormat};
 
 pub fn autodetect_game_ver(
     game_folder: &Path,
@@ -93,63 +92,32 @@ pub struct UpdateArgs {
 }
 
 impl UpdateArgs {
-    fn new_updater(
-        progress_bar: &ProgressBar,
-        download_style: &ProgressStyle,
-        file_check_style: &ProgressStyle,
-        matching_field: &str,
-    ) -> impl Fn(sophon_lib::updater::Update) + Clone + Send {
-        move |msg| match msg {
-            sophon_lib::updater::Update::DownloadingProgressBytes {
-                downloaded_bytes, ..
-            } => {
-                progress_bar.set_position(downloaded_bytes);
-                #[cfg(feature = "tracy")]
-                {
-                    let rate = progress_bar.per_sec();
-                    tracing_tracy::client::plot!("Downloading speed", rate);
-                }
-            }
-            sophon_lib::updater::Update::CheckingFilesStarted => {
-                progress_bar.set_message("Checking existing files");
-                progress_bar.set_style(file_check_style.clone());
-            }
-            sophon_lib::updater::Update::DownloadingStarted(location) => {
-                progress_bar.set_message(format!("Updating game at {}", location.display()));
-                progress_bar.set_style(download_style.clone());
-                progress_bar.set_position(0);
-                progress_bar.reset_elapsed();
-            }
-            sophon_lib::updater::Update::CheckingFreeSpace(path) => {
-                progress_bar.set_message(format!("Checking free space at {}", path.display()))
-            }
-            sophon_lib::updater::Update::DownloadingFinished => progress_bar
-                .finish_with_message(format!("Finished updating component `{}`", matching_field)),
-            _ => {}
-        }
-    }
-
     pub fn update(
         mut self,
         game_edition: GameEdition,
         cache_dir: PathBuf,
         thread_count: usize,
     ) -> Result<(), String> {
+        let output_format = self
+            .extra
+            .status_format
+            .unwrap_or_else(StatusFormat::select_default);
+
+        let output = output_format.into_stateful();
+
         if self.from == "auto"
             && let Some(auto_ver) =
                 autodetect_game_ver(&self.game.game_dir, &self.game.game, &game_edition)
                     .map_err(|e| e.to_string())
-                    .inspect_err(|err| {
-                        eprintln!("Error autodetecting game version: {err}");
-                    })
+                    .inspect_err(|err| eprintln!("Error autodetecting game version: {err}"))
                     .unwrap_or(None)
         {
-            println!("Autodetected {auto_ver}");
+            output.print_msg("Autodetected {auto_ver}");
             self.from = auto_ver;
         };
 
         if self.from == "auto" {
-            eprintln!("Could not autodetect game version");
+            output.abort_msg("Could not autodetect game version");
             return Ok(());
         }
         if self.game.component.is_none() {
@@ -169,10 +137,10 @@ impl UpdateArgs {
         let package_info = if let Some(adhoc_package_info) =
             self.custom_package_info.assemble_adhoc()
         {
-            println!("Using provided ad-hoc package info");
+            output.print_msg("Using provided ad-hoc package info");
             adhoc_package_info
         } else {
-            println!("Fetching update information...");
+            output.print_msg("Fetching update information...");
             let branches = get_game_branches_info(&client, &game_edition)
                 .expect("Failed to get game branches");
             if self.to.is_some() {
@@ -192,7 +160,7 @@ impl UpdateArgs {
             .expect("Failed to get update info");
 
         if diffs_info.tag == self.from {
-            println!("Attempting to update the version to itself, this is a no-op");
+            output.abort_msg("Attempting to update the version to itself, this is a no-op");
             return Ok(());
         }
 
@@ -200,16 +168,7 @@ impl UpdateArgs {
             .manifests
             .retain(|diff| components.contains(&diff.matching_field));
 
-        diffs_info.pretty_print(0);
-        println!();
-
-        if !dialoguer::Confirm::new()
-            .with_prompt("Proceed with update?")
-            .interact()
-            .map_err(|e| e.to_string())?
-        {
-            return Err("Aborted by user".to_owned());
-        }
+        output.update_info(&diffs_info)?;
 
         for update_manifest in diffs_info.manifests {
             let total_download = update_manifest
@@ -218,59 +177,41 @@ impl UpdateArgs {
                 .find(|(k, _)| **k == self.from)
                 .and_then(|(_, v)| v.compressed_size.parse::<u64>().ok())
                 .expect("Failed to find/parse download size");
-            let download_style =
-                ProgressStyle::default_bar()
-                .template("{msg}\n{spinner} [{elapsed_precise}] [{wide_bar}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})")
-                .expect("Template should be valid");
-            let file_check_style = ProgressStyle::default_bar()
-                .template(
-                    "{msg}\n{spinner} [{elapsed_precise}] [{wide_bar}] {pos}/{len} {percent}%",
-                )
-                .expect("Template should be valid");
-
-            let progress_bar = ProgressBar::new(total_download).with_style(download_style.clone());
-            progress_bar.enable_steady_tick(Duration::from_secs_f32(0.25));
 
             let matching_field = update_manifest.matching_field.clone();
 
-            let mut updater =
+            let updater = output
+                .clone()
+                .updater_update(total_download, &matching_field);
+
+            let mut patcher =
                 SophonPatcher::new(client.clone(), &update_manifest, &cache_dir, None)
                     .expect("Failed to construct updater")
                     .with_free_space_check(!self.extra.skip_free_space_check);
-            updater.patches_in_memory = self.extra.chunk_buffer_memory;
-            updater.patch_queue_mem_limit = self.extra.memory_buffer_limit;
+            patcher.patches_in_memory = self.extra.chunk_buffer_memory;
+            patcher.patch_queue_mem_limit = self.extra.memory_buffer_limit;
             let res = if !self.extra.preload_pretend {
-                updater.update(
+                patcher.update(
                     &self.game.game_dir,
                     Version::from_str(&self.from).expect("API must have valid version string"),
                     thread_count,
-                    Self::new_updater(
-                        &progress_bar,
-                        &download_style,
-                        &file_check_style,
-                        &matching_field,
-                    ),
+                    updater,
                 )
             } else {
-                updater.pre_download(
+                patcher.pre_download(
                     Version::from_str(&self.from).expect("API must have valid version string"),
                     thread_count,
-                    Self::new_updater(
-                        &progress_bar,
-                        &download_style,
-                        &file_check_style,
-                        &matching_field,
-                    ),
+                    updater,
                 )
             };
 
             if let Err(why) = res {
-                progress_bar.abandon_with_message(format!(
+                output.abort_msg(&format!(
                     "Failed to update component `{}`: {why:?}",
                     update_manifest.matching_field
                 ));
             } else {
-                progress_bar.finish_with_message(format!(
+                output.abort_msg(&format!(
                     "Done updating component `{}`",
                     update_manifest.matching_field,
                 ));
