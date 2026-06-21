@@ -6,6 +6,7 @@
 
 use std::{error::Error, path::PathBuf};
 
+use serde::Serialize;
 use thiserror::Error;
 
 use crate::prettify_bytes;
@@ -125,5 +126,14 @@ where
             Some(v) => std::fmt::Display::fmt(v, f),
             None => std::fmt::Display::fmt(&self.default, f),
         }
+    }
+}
+
+impl Serialize for SophonError {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        format!("{self:?}").serialize(serializer)
     }
 }
