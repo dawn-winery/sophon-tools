@@ -1,6 +1,6 @@
 [package]
 name = "sophon-cli"
-version = "0.1.7-beta.0"
+version = "0.1.7-beta.1"
 edition = "2024"
 license = "GPL-3.0"
 rust-version = "1.94.1"
