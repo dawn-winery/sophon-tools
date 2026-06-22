@@ -19,11 +19,10 @@ jobs:
       - name: Build
         run: |
           cargo build --release --bin sophon-cli
-          mkdir -p dist/release
-          cp target/release/sophon-cli dist/release/sophon-cli
 
       - name: Upload built binary to the release
-        uses: actions/forgejo-release@v2.13.1
+        uses: https://git.michaelsasser.org/actions/upload-release-assets@v1
         with:
-          direction: upload
-          release-dir: dist/release
+          assets: |
+            target/release/sophon-cli
+          token: ${{ forge.token }}
