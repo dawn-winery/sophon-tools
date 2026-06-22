@@ -7,7 +7,7 @@ jobs:
     runs-on: selfhosted
     steps:
       - uses: actions/checkout@v5
-      - uses: https://codeberg.org/prjunnamed/setup-rust-toolchain@v1
+      - uses: https://codeberg.org/prjunnamed/setup-rust-toolchain@f0e3fff1ca3442708aa9fb8156820eb859d80846
       - run: cargo build --release --bin sophon-cli
       - run: |
           mkdir -p dist/release
