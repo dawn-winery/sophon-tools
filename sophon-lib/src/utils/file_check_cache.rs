@@ -12,6 +12,7 @@ pub(crate) struct FileCheckCache {
 }
 
 impl FileCheckCache {
+    #[allow(dead_code)]
     pub(crate) fn new() -> Self {
         Self {
             cache: HashMap::new(),

@@ -1,6 +1,6 @@
 use std::{
     fs::File,
-    io::{Read, Seek, SeekFrom},
+    io::{BufReader, Read, Seek, SeekFrom},
     num::NonZeroUsize,
     os::unix::fs::PermissionsExt,
     path::Path,
@@ -68,6 +68,7 @@ fn md5_hash_str(data: &[u8]) -> String {
     format!("{:x}", Md5::digest(data))
 }
 
+#[allow(dead_code)]
 fn bytes_check_md5(data: &[u8], expected_hash: &str) -> bool {
     let computed_hash = md5_hash_str(data);
 
@@ -76,7 +77,7 @@ fn bytes_check_md5(data: &[u8], expected_hash: &str) -> bool {
 
 // MD5 hash calculation without reading the whole file contents into RAM
 pub fn file_md5_hash_str(file_path: impl AsRef<Path>) -> std::io::Result<String> {
-    let mut file = File::open(&file_path)?;
+    let mut file = BufReader::new(File::open(&file_path)?);
     let mut md5 = Md5::new();
 
     std::io::copy(&mut file, &mut md5)?;
@@ -126,7 +127,7 @@ fn add_user_write_permission_to_file(path: impl AsRef<Path>) -> std::io::Result<
 fn file_region_hash_md5(file: &mut File, offset: u64, length: u64) -> std::io::Result<String> {
     file.seek(SeekFrom::Start(offset))?;
 
-    let mut region_reader = file.take(length);
+    let mut region_reader = BufReader::new(file.take(length));
     let mut hasher = Md5::new();
 
     std::io::copy(&mut region_reader, &mut hasher)?;
