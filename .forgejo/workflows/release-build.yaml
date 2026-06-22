@@ -7,12 +7,23 @@ jobs:
     runs-on: selfhosted
     steps:
       - uses: actions/checkout@v5
-      - uses: https://codeberg.org/prjunnamed/setup-rust-toolchain@f0e3fff1ca3442708aa9fb8156820eb859d80846
-      - run: cargo build --release --bin sophon-cli
-      - run: |
+
+      - name: Setup rust toolchain and cache
+        uses: https://codeberg.org/prjunnamed/setup-rust-toolchain@f0e3fff1ca3442708aa9fb8156820eb859d80846
+
+      - name: Install build dependencies
+        run: |
+          apt update
+          apt install protobuf-compiler
+
+      - name: Build
+        run: |
+          cargo build --release --bin sophon-cli
           mkdir -p dist/release
           cp target/release/sophon-cli dist/release/sophon-cli
-      - uses: actions/forgejo-release@v2.13.1
+
+      - name: Upload built binary to the release
+        uses: actions/forgejo-release@v2.13.1
         with:
           direction: upload
           release-dir: dist/release
