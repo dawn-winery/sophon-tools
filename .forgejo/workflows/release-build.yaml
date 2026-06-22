@@ -13,8 +13,8 @@ jobs:
 
       - name: Install build dependencies
         run: |
-          apt update
-          apt install protobuf-compiler
+          sudo apt update
+          sudo apt install protobuf-compiler
 
       - name: Build
         run: |
