@@ -1,7 +1,6 @@
 use std::{path::PathBuf, time::Duration};
 
 use clap::Args;
-use indicatif::{ProgressBar, ProgressStyle};
 use sophon_lib::{
     GameEdition,
     api::{get_game_branches_info, get_game_download_sophon_info},
@@ -9,7 +8,7 @@ use sophon_lib::{
 };
 
 use super::GameCommon;
-use crate::{CustomPackageInfo, DownloadParameters, StatusFormat, pretty_print::PrettyPrint};
+use crate::{CustomPackageInfo, DownloadParameters, StatusFormat};
 
 #[derive(Debug, Args)]
 /// Download the game

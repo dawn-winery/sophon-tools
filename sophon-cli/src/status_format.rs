@@ -23,6 +23,7 @@ impl StatusFormat {
         }
     }
 
+    #[allow(dead_code)]
     pub fn print_msg(&self, msg: &str) {
         match self {
             Self::ProgressBar => println!("{msg}"),
