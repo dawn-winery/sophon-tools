@@ -26,3 +26,4 @@ jobs:
           assets: |
             target/release/sophon-cli
           token: ${{ forge.token }}
+          repo_tag: ${{ forge.ref_name }}
