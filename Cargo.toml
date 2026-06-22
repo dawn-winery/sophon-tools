@@ -1,3 +1,7 @@
 [workspace]
 resolver = "3"
 members = ["sophon-cli", "sophon-lib"]
+
+[profile.release]
+strip = true
+lto = true
