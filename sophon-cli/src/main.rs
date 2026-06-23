@@ -139,6 +139,9 @@ enum CliApiCommands {
         #[arg(long)]
         launcher_id: Option<String>,
 
+        #[arg(long)]
+        regex: Option<String>,
+
         #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
         output_format: OutputFormat
     }
@@ -204,6 +207,7 @@ fn main() -> anyhow::Result<()> {
             version,
             region,
             launcher_id,
+            regex,
             output_format
         }) => download_info::run(
             game_id,
@@ -211,6 +215,7 @@ fn main() -> anyhow::Result<()> {
             version,
             region,
             launcher_id,
+            regex,
             output_format,
             cli.ascii
         )

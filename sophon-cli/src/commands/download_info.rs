@@ -17,10 +17,16 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+use regex::Regex;
+
 use sophon_lib::api::SophonApi;
 use sophon_lib::downloader::SophonDownloader;
 
 use super::{SophonRegion, OutputFormat};
+
+fn is_regex_match(regex: Option<&Regex>, path: &str) -> bool {
+    regex.map(|regex| regex.is_match(path)).unwrap_or(true)
+}
 
 fn format_size(size: f64) -> String {
     if size > 1024.0 * 1024.0 * 1024.0 {
@@ -34,18 +40,24 @@ fn format_size(size: f64) -> String {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn run(
     game_id: String,
     component_id: String,
     version: Option<String>,
     region: SophonRegion,
     launcher_id: Option<String>,
+    regex: Option<String>,
     output_format: OutputFormat,
     ascii: bool
 ) -> anyhow::Result<()> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
+
+    let regex = regex.as_deref()
+        .map(regex::Regex::new)
+        .transpose()?;
 
     let api = SophonApi::default();
 
@@ -83,6 +95,9 @@ pub fn run(
                 "size"
             ]);
 
+            let mut filtered_files = 0;
+            let mut filtered_size = 0;
+
             let mut total_files = 0;
             let mut total_size = 0;
 
@@ -91,19 +106,38 @@ pub fn run(
                     total_files += 1;
                     total_size += asset.size;
 
-                    table.add_row([
-                        asset.path,
-                        asset.hash_md5,
-                        format_size(asset.size as f64)
-                    ]);
+                    if is_regex_match(regex.as_ref(), &asset.path) {
+                        filtered_files += 1;
+                        filtered_size += asset.size;
+
+                        table.add_row([
+                            asset.path,
+                            asset.hash_md5,
+                            format_size(asset.size as f64)
+                        ]);
+                    }
                 }
             }
 
-            table.add_row([
-                String::from("Total"),
-                format!("{total_files} files"),
-                format_size(total_size as f64)
-            ]);
+            if regex.is_some() {
+                table.add_row([
+                    String::from("Filtered (Total)"),
+                    format!("{filtered_files} files ({total_files} files)"),
+                    format!(
+                        "{} ({})",
+                        format_size(filtered_size as f64),
+                        format_size(total_size as f64)
+                    )
+                ]);
+            }
+
+            else {
+                table.add_row([
+                    String::from("Total"),
+                    format!("{total_files} files"),
+                    format_size(total_size as f64)
+                ]);
+            }
 
             println!("{table}");
         }
@@ -112,6 +146,9 @@ pub fn run(
             println!("{}", serde_json::to_string(&serde_json::json!(
                 download_info.assets
                     .into_iter()
+                    .filter(|asset| {
+                        is_regex_match(regex.as_ref(), &asset.path)
+                    })
                     .map(|asset| {
                         serde_json::json!({
                             "path": asset.path,
