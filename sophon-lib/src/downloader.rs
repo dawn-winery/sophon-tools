@@ -52,16 +52,20 @@ pub type AssetsSorter = Box<dyn Fn(
     &SophonDownloadAssetsInfoAsset
 ) -> std::cmp::Ordering>;
 
+pub type AssetsFilter = Box<dyn Fn(&SophonDownloadAssetsInfoAsset) -> bool>;
+
 pub struct SophonDownloader {
     client: reqwest::Client,
 
     fetch_manifest_timeout: Duration,
+    fetch_chunk_timeout: Duration,
 
     verify_manifest_hash: bool,
 
     disk_cache_directory: PathBuf,
 
-    assets_sorter: Option<AssetsSorter>
+    assets_sorter: Option<AssetsSorter>,
+    assets_filter: Option<AssetsFilter>
 }
 
 impl Default for SophonDownloader {
@@ -73,12 +77,14 @@ impl Default for SophonDownloader {
                 .expect("failed to build reqwest client"),
 
             fetch_manifest_timeout: Duration::from_secs(5),
+            fetch_chunk_timeout: Duration::from_secs(15),
 
             verify_manifest_hash: true,
 
             disk_cache_directory: PathBuf::from(".cache"),
 
-            assets_sorter: None
+            assets_sorter: None,
+            assets_filter: None
         }
     }
 }
@@ -92,6 +98,12 @@ impl SophonDownloader {
 
     pub fn with_fetch_manifest_timeout(mut self, timeout: Duration) -> Self {
         self.fetch_manifest_timeout = timeout;
+
+        self
+    }
+
+    pub fn with_fetch_chunk_timeout(mut self, timeout: Duration) -> Self {
+        self.fetch_chunk_timeout = timeout;
 
         self
     }
@@ -115,6 +127,14 @@ impl SophonDownloader {
     /// order.
     pub fn with_assets_sorter(mut self, sorter: AssetsSorter) -> Self {
         self.assets_sorter = Some(sorter);
+
+        self
+    }
+
+    /// Callback used to filter the assets before downloading them. It can be
+    /// used to make downloader ignore some files.
+    pub fn with_assets_filter(mut self, filter: AssetsFilter) -> Self {
+        self.assets_filter = Some(filter);
 
         self
     }
@@ -200,35 +220,22 @@ impl SophonDownloader {
 
     pub async fn download(
         self,
-        _download_info: &SophonApiPackageManifest
+        download_info: &SophonApiPackageManifest
     ) -> Result<(), SophonDownloaderError> {
+        let download_manifest = self.fetch_download_info(download_info).await?;
+
+        let mut assets = download_manifest.assets.into_iter()
+            .filter(|asset| {
+                self.assets_filter.as_ref()
+                    .map(|filter| filter(asset))
+                    .unwrap_or(true)
+            })
+            .collect::<Vec<_>>();
+
+        if let Some(sorter) = self.assets_sorter {
+            assets.sort_by(sorter);
+        }
+
         todo!()
     }
-}
-
-#[test]
-fn test() {
-    let runtime = tokio::runtime::Runtime::new()
-        .unwrap();
-
-    let api = crate::api::SophonApi::default();
-
-    runtime.block_on(async move {
-        let game = api.game(
-            crate::region::SophonRegion::Global,
-            None,
-            String::from("U5hbdsT9W7")
-        );
-
-        let package = game.package(None).await.unwrap();
-
-        let manifest = package.find_download_manifest("game").await
-            .unwrap()
-            .unwrap();
-
-        let manifest = SophonDownloader::default()
-            .fetch_download_info(&manifest).await.unwrap();
-
-        dbg!(&manifest.assets[..3]);
-    });
 }

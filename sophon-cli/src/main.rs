@@ -44,7 +44,53 @@ struct Cli {
 enum CliCommands {
     /// Perform Sophon API requests.
     #[command(subcommand)]
-    Api(CliApiCommands)
+    Api(CliApiCommands),
+
+    /// Download game.
+    Download {
+        #[arg(index = 1, required = true)]
+        game: String,
+
+        #[arg(index = 2)]
+        version: Option<String>,
+
+        #[arg(
+            long, value_enum, default_value_t = SophonRegion::Global,
+            alias = "edition"
+        )]
+        region: SophonRegion,
+
+        #[arg(long)]
+        launcher_id: Option<String>,
+
+        #[arg(
+            long, default_value_t = String::from("game"),
+            alias = "component-id",
+            alias = "component-name",
+            alias = "category",
+            alias = "category-id",
+            alias = "category-name"
+        )]
+        component: String,
+
+        /// Download files that match the regex.
+        #[arg(long)]
+        regex: Option<String>,
+
+        /// Amount of threads to use in the tokio runtime. If unset, amount of
+        /// virtual CPU cores will be used.
+        #[arg(
+            long,
+            alias = "workers",
+            default_value_t = std::thread::available_parallelism()
+                .map(|threads| threads.get())
+                .unwrap_or(1)
+        )]
+        threads: usize,
+
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        output_format: OutputFormat
+    }
 }
 
 #[derive(Debug, Subcommand)]
@@ -77,7 +123,7 @@ enum CliApiCommands {
     )]
     ListComponents {
         #[arg(index = 1, required = true)]
-        game_id: String,
+        game: String,
 
         #[arg(
             long, value_enum, default_value_t = SophonRegion::Global,
@@ -99,7 +145,7 @@ enum CliApiCommands {
     #[command(alias = "versions")]
     GameVersions {
         #[arg(index = 1, required = true)]
-        game_id: String,
+        game: String,
 
         #[arg(
             long, value_enum, default_value_t = SophonRegion::Global,
@@ -122,10 +168,10 @@ enum CliApiCommands {
     )]
     GameDownloadInfo {
         #[arg(index = 1, required = true)]
-        game_id: String,
+        game: String,
 
         #[arg(index = 2, default_value_t = String::from("game"))]
-        component_id: String,
+        component: String,
 
         #[arg(index = 3)]
         version: Option<String>,
@@ -139,6 +185,7 @@ enum CliApiCommands {
         #[arg(long)]
         launcher_id: Option<String>,
 
+        /// Show files that match the regex.
         #[arg(long)]
         regex: Option<String>,
 
@@ -174,13 +221,13 @@ fn main() -> anyhow::Result<()> {
         }) => list_games::run(region, launcher_id, output_format, cli.ascii),
 
         CliCommands::Api(CliApiCommands::ListComponents {
-            game_id,
+            game,
             region,
             launcher_id,
             output_format,
             show_all
         }) => list_components::run(
-            game_id,
+            game,
             region,
             launcher_id,
             output_format,
@@ -189,12 +236,12 @@ fn main() -> anyhow::Result<()> {
         ),
 
         CliCommands::Api(CliApiCommands::GameVersions {
-            game_id,
+            game,
             region,
             launcher_id,
             output_format
         }) => game_versions::run(
-            game_id,
+            game,
             region,
             launcher_id,
             output_format,
@@ -202,20 +249,41 @@ fn main() -> anyhow::Result<()> {
         ),
 
         CliCommands::Api(CliApiCommands::GameDownloadInfo {
-            game_id,
-            component_id,
+            game,
+            component,
             version,
             region,
             launcher_id,
             regex,
             output_format
         }) => download_info::run(
-            game_id,
-            component_id,
+            game,
+            component,
             version,
             region,
             launcher_id,
             regex,
+            output_format,
+            cli.ascii
+        ),
+
+        CliCommands::Download {
+            game,
+            version,
+            region,
+            launcher_id,
+            component,
+            regex,
+            threads,
+            output_format
+        } => download_game::run(
+            game,
+            component,
+            version,
+            region,
+            launcher_id,
+            regex,
+            threads,
             output_format,
             cli.ascii
         )

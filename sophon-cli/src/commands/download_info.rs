@@ -56,7 +56,7 @@ pub fn run(
         .build()?;
 
     let regex = regex.as_deref()
-        .map(regex::Regex::new)
+        .map(Regex::new)
         .transpose()?;
 
     let api = SophonApi::default();
