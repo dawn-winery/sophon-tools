@@ -21,8 +21,9 @@
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub mod region;
-pub mod protos;
 pub mod api;
+pub mod protos;
+pub mod downloader;
 
 // pub mod version;
 // pub mod utils;

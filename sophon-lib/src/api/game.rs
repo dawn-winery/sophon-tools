@@ -45,10 +45,10 @@ impl<'api> SophonApiGame<'api> {
     }
 
     /// Try to find branch information about the current game.
-    pub async fn fetch_branch(
+    pub async fn fetch_branch_info(
         &self
     ) -> Result<SophonApiGameBranch, SophonApiError> {
-        let game_branches = self.api.game_branches(
+        let game_branches = self.api.fetch_games_branches_info(
             self.region,
             Some(self.launcher_id.clone())
         ).await?;
@@ -70,7 +70,7 @@ impl<'api> SophonApiGame<'api> {
     pub async fn fetch_versions_info(
         &self
     ) -> Result<SophonApiGameVersionsInfo, SophonApiError> {
-        let versions_info = self.api.game_versions_info(
+        let versions_info = self.api.fetch_games_versions_info(
             self.region,
             Some(self.launcher_id.clone())
         ).await?;
@@ -92,7 +92,7 @@ impl<'api> SophonApiGame<'api> {
     pub async fn fetch_configs(
         &self
     ) -> Result<SophonApiGameConfigs, SophonApiError> {
-        let game_configs = self.api.game_configs(
+        let game_configs = self.api.fetch_games_configs(
             self.region,
             Some(self.launcher_id.clone())
         ).await?;
@@ -116,7 +116,7 @@ impl<'api> SophonApiGame<'api> {
         &self,
         version: Option<String>
     ) -> Result<SophonApiPackage<'api>, SophonApiError> {
-        let branch_info = self.fetch_branch().await?;
+        let branch_info = self.fetch_branch_info().await?;
 
         Ok(SophonApiPackage::new(
             self.api,
@@ -130,7 +130,7 @@ impl<'api> SophonApiGame<'api> {
 
     /// Get latest available game version.
     pub async fn latest_version(&self) -> Result<String, SophonApiError> {
-        Ok(self.fetch_branch().await?.version)
+        Ok(self.fetch_branch_info().await?.version)
     }
 
     /// Get list of versions from which the game can be updated to the latest
@@ -138,6 +138,6 @@ impl<'api> SophonApiGame<'api> {
     pub async fn updatable_versions(
         &self
     ) -> Result<Box<[String]>, SophonApiError> {
-        Ok(self.fetch_branch().await?.diff_versions)
+        Ok(self.fetch_branch_info().await?.diff_versions)
     }
 }

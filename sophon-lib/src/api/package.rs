@@ -49,11 +49,11 @@ impl<'api> SophonApiPackage<'api> {
         }
     }
 
-    /// Fetch patch info for the current game package.
-    pub async fn fetch_patch_info(
+    /// Fetch current game package files download info.
+    pub async fn fetch_download_info(
         &self
-    ) -> Result<SophonApiPackagePatchInfo, SophonApiError> {
-        self.api.package_patch_info(
+    ) -> Result<SophonApiPackageDownloadInfo, SophonApiError> {
+        self.api.fetch_package_download_info(
             self.region,
             self.branch.clone(),
             self.password.clone(),
@@ -62,11 +62,12 @@ impl<'api> SophonApiPackage<'api> {
         ).await
     }
 
-    /// Fetch download info for the current game package.
-    pub async fn fetch_download_info(
+    /// Fetch current game package files update info, from the currently
+    /// selected version to the latest available one.
+    pub async fn fetch_update_info(
         &self
-    ) -> Result<SophonApiPackageDownloadInfo, SophonApiError> {
-        self.api.package_download_info(
+    ) -> Result<SophonApiPackageUpdateInfo, SophonApiError> {
+        self.api.fetch_package_update_info(
             self.region,
             self.branch.clone(),
             self.password.clone(),
@@ -77,11 +78,28 @@ impl<'api> SophonApiPackage<'api> {
 
     /// Try to find download info with given category id, category name or
     /// manifest name, for the current game package.
-    pub async fn find_category_download_info(
+    pub async fn find_download_manifest(
         &self,
         query: &str
     ) -> Result<Option<package_download_info::SophonApiPackageManifest>, SophonApiError> {
         let manifest = self.fetch_download_info().await?.manifests
+            .into_iter()
+            .find(|info| {
+                info.category_id == query
+                    || info.category_name == query
+                    || info.name == query
+            });
+
+        Ok(manifest)
+    }
+
+    /// Try to find patch info with given category id, category name or
+    /// manifest name, for the current game package.
+    pub async fn find_update_manifest(
+        &self,
+        query: &str
+    ) -> Result<Option<package_update_info::SophonApiPackageManifest>, SophonApiError> {
+        let manifest = self.fetch_update_info().await?.manifests
             .into_iter()
             .find(|info| {
                 info.category_id == query

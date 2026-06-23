@@ -26,8 +26,10 @@ use serde_json::Value as Json;
 pub mod game_branch;
 pub mod game_versions_info;
 pub mod game_configs;
-pub mod package_patch_info;
+pub mod sophon_manifest_info;
+pub mod sophon_download_info;
 pub mod package_download_info;
+pub mod package_update_info;
 pub mod game;
 pub mod package;
 
@@ -36,8 +38,8 @@ use crate::region::SophonRegion;
 use game_branch::SophonApiGameBranch;
 use game_versions_info::SophonApiGameVersionsInfo;
 use game_configs::SophonApiGameConfigs;
-use package_patch_info::SophonApiPackagePatchInfo;
 use package_download_info::SophonApiPackageDownloadInfo;
+use package_update_info::SophonApiPackageUpdateInfo;
 use game::SophonApiGame;
 
 #[derive(Debug, thiserror::Error)]
@@ -99,15 +101,15 @@ pub struct SophonApi {
     game_versions_info_timeout: Duration,
     game_configs_timeout: Duration,
 
-    package_patch_info_timeout: Duration,
     package_download_info_timeout: Duration,
+    package_update_info_timeout: Duration,
 
     game_branches_cache: RwLock<Vec<GameCacheSlot<Box<[SophonApiGameBranch]>>>>,
     game_versions_info_cache: RwLock<Vec<GameCacheSlot<Box<[SophonApiGameVersionsInfo]>>>>,
     game_configs_cache: RwLock<Vec<GameCacheSlot<Box<[SophonApiGameConfigs]>>>>,
 
-    package_patch_info_cache: RwLock<Vec<PackageCacheSlot<SophonApiPackagePatchInfo>>>,
-    package_download_info_cache: RwLock<Vec<PackageCacheSlot<SophonApiPackageDownloadInfo>>>
+    package_download_info_cache: RwLock<Vec<PackageCacheSlot<SophonApiPackageDownloadInfo>>>,
+    package_update_info_cache: RwLock<Vec<PackageCacheSlot<SophonApiPackageUpdateInfo>>>
 }
 
 impl Default for SophonApi {
@@ -122,15 +124,15 @@ impl Default for SophonApi {
             game_versions_info_timeout: Duration::from_secs(5),
             game_configs_timeout: Duration::from_secs(5),
 
-            package_patch_info_timeout: Duration::from_secs(7),
             package_download_info_timeout: Duration::from_secs(7),
+            package_update_info_timeout: Duration::from_secs(7),
 
             game_branches_cache: Default::default(),
             game_versions_info_cache: Default::default(),
             game_configs_cache: Default::default(),
 
-            package_patch_info_cache: Default::default(),
-            package_download_info_cache: Default::default()
+            package_download_info_cache: Default::default(),
+            package_update_info_cache: Default::default()
         }
     }
 }
@@ -170,14 +172,14 @@ impl SophonApi {
         self
     }
 
-    pub fn with_package_patch_info_timeout(mut self, timeout: Duration) -> Self {
-        self.package_patch_info_timeout = timeout;
+    pub fn with_package_download_info_timeout(mut self, timeout: Duration) -> Self {
+        self.package_download_info_timeout = timeout;
 
         self
     }
 
-    pub fn with_package_download_info_timeout(mut self, timeout: Duration) -> Self {
-        self.package_download_info_timeout = timeout;
+    pub fn with_package_update_info_timeout(mut self, timeout: Duration) -> Self {
+        self.package_update_info_timeout = timeout;
 
         self
     }
@@ -194,7 +196,7 @@ impl SophonApi {
     /// from another version to it.
     ///
     /// `<game_info_url>/hyp/hyp-connect/api/getGameBranches`.
-    pub async fn game_branches(
+    pub async fn fetch_games_branches_info(
         &self,
         region: SophonRegion,
         launcher_id: Option<String>
@@ -212,7 +214,7 @@ impl SophonApi {
             tracing::trace!(
                 ?region,
                 ?launcher_id,
-                "game_branches API cache read"
+                "games_branches API cache read"
             );
 
             return Ok(slot.value.clone());
@@ -229,7 +231,7 @@ impl SophonApi {
             ?region,
             ?launcher_id,
             ?url,
-            "fetch game_branches from the API"
+            "fetch games_branches from the API"
         );
 
         let response = self.client.get(url)
@@ -275,7 +277,7 @@ impl SophonApi {
     /// This information can be used to detect currently installed game version.
     ///
     /// `<game_info_url>/hyp/hyp-connect/api/getGameScanInfo`.
-    pub async fn game_versions_info(
+    pub async fn fetch_games_versions_info(
         &self,
         region: SophonRegion,
         launcher_id: Option<String>
@@ -293,7 +295,7 @@ impl SophonApi {
             tracing::trace!(
                 ?region,
                 ?launcher_id,
-                "game_versions_info API cache read"
+                "games_versions_info API cache read"
             );
 
             return Ok(slot.value.clone());
@@ -310,7 +312,7 @@ impl SophonApi {
             ?region,
             ?launcher_id,
             ?url,
-            "fetch game_versions_info from the API"
+            "fetch games_versions_info from the API"
         );
 
         let response = self.client.get(url)
@@ -357,7 +359,7 @@ impl SophonApi {
     /// installed game files.
     ///
     /// `<game_info_url>/hyp/hyp-connect/api/getGameConfigs`.
-    pub async fn game_configs(
+    pub async fn fetch_games_configs(
         &self,
         region: SophonRegion,
         launcher_id: Option<String>
@@ -375,7 +377,7 @@ impl SophonApi {
             tracing::trace!(
                 ?region,
                 ?launcher_id,
-                "game_configs API cache read"
+                "games_configs API cache read"
             );
 
             return Ok(slot.value.clone());
@@ -392,7 +394,7 @@ impl SophonApi {
             ?region,
             ?launcher_id,
             ?url,
-            "fetch game_configs from the API"
+            "fetch games_configs from the API"
         );
 
         let response = self.client.get(url)
@@ -433,94 +435,13 @@ impl SophonApi {
         Ok(game_configs)
     }
 
-    /// Try to fetch game files patching information.
-    ///
-    /// `<sophon_data_url>/downloader/sophon_chunk/api/getPatchBuild`.
-    pub async fn package_patch_info(
-        &self,
-        region: SophonRegion,
-        branch: String,
-        password: String,
-        package_id: String,
-        version: String
-    ) -> Result<SophonApiPackagePatchInfo, SophonApiError> {
-        if let Some(slot) = self.package_patch_info_cache.read().await.iter()
-            .find(|slot| {
-                slot.region == region
-                    && slot.branch == branch
-                    && slot.password == password
-                    && slot.package_id == package_id
-                    && slot.version == version
-            })
-        {
-            #[cfg(feature = "tracing")]
-            tracing::trace!(
-                ?region,
-                ?branch,
-                ?password,
-                ?package_id,
-                ?version,
-                "package_patch_info API cache read"
-            );
-
-            return Ok(slot.value.clone());
-        }
-
-        let url = format!(
-            "{}/downloader/sophon_chunk/api/getPatchBuild?branch={}&password={}&package_id={}&tag={}",
-            region.sophon_data_url(),
-            branch,
-            password,
-            package_id,
-            version
-        );
-
-        #[cfg(feature = "tracing")]
-        tracing::debug!(
-            ?region,
-            ?branch,
-            ?password,
-            ?package_id,
-            ?version,
-            ?url,
-            "fetch package_patch_info from the API"
-        );
-
-        let response = self.client.post(url)
-            .timeout(self.package_patch_info_timeout)
-            .send()
-            .await?;
-
-        let response = serde_json::from_slice::<SophonApiResponse<Json>>(
-            &response.bytes().await?
-        )?;
-
-        let Some(response) = response.data else {
-            return Err(SophonApiError::InvalidSophonStatus {
-                code: response.retcode,
-                message: response.message
-            });
-        };
-
-        let package_info = SophonApiPackagePatchInfo::try_from(&response)
-            .map_err(|err| SophonApiError::Other(err.into()))?;
-
-        self.package_patch_info_cache.write().await.push(PackageCacheSlot {
-            region,
-            branch,
-            password,
-            package_id,
-            version,
-            value: package_info.clone()
-        });
-
-        Ok(package_info)
-    }
-
     /// Try to fetch game files downloading information.
     ///
+    /// This information can be used to download game or game components files
+    /// of specific version.
+    ///
     /// `<sophon_data_url>/downloader/sophon_chunk/api/getBuild`.
-    pub async fn package_download_info(
+    pub async fn fetch_package_download_info(
         &self,
         region: SophonRegion,
         branch: String,
@@ -601,6 +522,93 @@ impl SophonApi {
         Ok(download_info)
     }
 
+    /// Try to fetch game files updating information.
+    ///
+    /// This information can be used to update game or game components files
+    /// from the given version to the latest available one.
+    ///
+    /// `<sophon_data_url>/downloader/sophon_chunk/api/getPatchBuild`.
+    pub async fn fetch_package_update_info(
+        &self,
+        region: SophonRegion,
+        branch: String,
+        password: String,
+        package_id: String,
+        version: String
+    ) -> Result<SophonApiPackageUpdateInfo, SophonApiError> {
+        if let Some(slot) = self.package_update_info_cache.read().await.iter()
+            .find(|slot| {
+                slot.region == region
+                    && slot.branch == branch
+                    && slot.password == password
+                    && slot.package_id == package_id
+                    && slot.version == version
+            })
+        {
+            #[cfg(feature = "tracing")]
+            tracing::trace!(
+                ?region,
+                ?branch,
+                ?password,
+                ?package_id,
+                ?version,
+                "package_update_info API cache read"
+            );
+
+            return Ok(slot.value.clone());
+        }
+
+        let url = format!(
+            "{}/downloader/sophon_chunk/api/getPatchBuild?branch={}&password={}&package_id={}&tag={}",
+            region.sophon_data_url(),
+            branch,
+            password,
+            package_id,
+            version
+        );
+
+        #[cfg(feature = "tracing")]
+        tracing::debug!(
+            ?region,
+            ?branch,
+            ?password,
+            ?package_id,
+            ?version,
+            ?url,
+            "fetch package_update_info from the API"
+        );
+
+        let response = self.client.post(url)
+            .timeout(self.package_update_info_timeout)
+            .send()
+            .await?;
+
+        let response = serde_json::from_slice::<SophonApiResponse<Json>>(
+            &response.bytes().await?
+        )?;
+
+        let Some(response) = response.data else {
+            return Err(SophonApiError::InvalidSophonStatus {
+                code: response.retcode,
+                message: response.message
+            });
+        };
+
+        let package_info = SophonApiPackageUpdateInfo::try_from(&response)
+            .map_err(|err| SophonApiError::Other(err.into()))?;
+
+        self.package_update_info_cache.write().await.push(PackageCacheSlot {
+            region,
+            branch,
+            password,
+            package_id,
+            version,
+            value: package_info.clone()
+        });
+
+        Ok(package_info)
+    }
+
     /// Get game info wrapper.
     pub fn game(
         &self,
@@ -671,6 +679,6 @@ fn test() {
 
         let package = game.package(None).await.unwrap();
 
-        dbg!(package.fetch_download_info().await);
+        dbg!(package.find_download_manifest("game").await);
     });
 }

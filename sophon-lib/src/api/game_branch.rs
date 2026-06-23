@@ -42,7 +42,7 @@ pub struct SophonApiGameBranch {
     /// Example: `qsoIbfMm4x`
     pub package_id: String,
 
-    /// `main.branch`
+    /// `main.branch`. Always "main" on the public API endpoint.
     ///
     /// Example: `main`
     pub branch: String,

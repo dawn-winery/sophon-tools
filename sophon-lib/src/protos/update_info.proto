@@ -21,48 +21,53 @@ syntax = "proto3";
 
 package protos;
 
-message SophonDownloadAssetsInfo {
-    repeated SophonDownloadAssetsInfoAsset assets = 1;
+message SophonUpdateAssetsInfo {
+    repeated SophonUpdateAssetsInfoAsset assets = 1;
+
+    map<string, SophonUpdateAssetsInfoUnusedAsset> unused_assets = 2;
 }
 
-message SophonDownloadAssetsInfoAsset {
+message SophonUpdateAssetsInfoAsset {
     // Path to the asset relative to the base game directory.
     string path = 1;
 
-    // Type of the asset.
-    //
-    // [ 0] - file
-    // [64] - directory
-    uint32 type = 3;
-
     // Size of the entire asset in bytes.
-    uint64 size = 4;
+    uint64 size = 2;
 
-    // Hash of the asset.
-    string hash_md5 = 5;
+    // Hash of the patched asset.
+    string hash_md5 = 3;
 
-    // List of asset chunks.
-    repeated SophonDownloadAssetsInfoAssetChunk chunks = 2;
+    map<string, SophonUpdateAssetsInfoAssetChunk> chunks = 4;
 }
 
-message SophonDownloadAssetsInfoAssetChunk {
+message SophonUpdateAssetsInfoAssetChunk {
+    string name = 1;
+    string version = 2;
+    string build_id = 3;
+
+    uint64 chunk_size = 4;
+    string chunk_hash_md5 = 5;
+    uint64 chunk_offset = 6;
+    uint64 chunk_length = 7;
+
+    string asset_name = 8;
+    uint64 asset_size = 9;
+
+    // Hash of the asset before patching.
+    string asset_hash_md5 = 10;
+}
+
+message SophonUpdateAssetsInfoUnusedAsset {
+    repeated SophonUpdateAssetsInfoUnusedAssetFile files = 1;
+}
+
+message SophonUpdateAssetsInfoUnusedAssetFile {
+    // File name.
     string name = 1;
 
-    // Offset in the asset file at which this chunk should be written.
-    uint64 offset = 3;
+    // File size in bytes.
+    uint64 size = 2;
 
-    // Compressed chunk size in bytes.
-    uint64 compressed_size = 4;
-
-    // Hash of the compressed chunk.
-    string compressed_hash_md5 = 7;
-
-    // Decompressed chunk size in bytes.
-    uint64 decompressed_size = 5;
-
-    // Hash of the decompressed chunk.
-    string decompressed_hash_md5 = 2;
-
-    // Unknown. Another hash value?
-    uint64 unspecified = 6;
+    // Hash of the file.
+    string hash_md5 = 3;
 }

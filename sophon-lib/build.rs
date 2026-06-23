@@ -24,7 +24,7 @@ fn main() {
         .compile_protos(
             &[
                 "src/protos/download_info.proto",
-                "src/protos/patch_info.proto",
+                "src/protos/update_info.proto",
             ],
             &["src/protos"],
         )

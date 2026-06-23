@@ -19,14 +19,17 @@
 
 use serde_json::Value as Json;
 
+use super::sophon_manifest_info::SophonApiProtobufManifestInfo;
+use super::sophon_download_info::SophonApiProtobufDownloadInfo;
+
 #[derive(Debug, Clone, thiserror::Error)]
-pub enum SophonApiPackagePatchInfoError {
+pub enum SophonApiPackageUpdateInfoError {
     #[error("field '{0}' is invalid")]
     InvalidField(&'static str)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct SophonApiPackagePatchInfo {
+pub struct SophonApiPackageUpdateInfo {
     /// `build_id`.
     ///
     /// Example: `Ymu2ndDuz0Mj`
@@ -46,33 +49,33 @@ pub struct SophonApiPackagePatchInfo {
     pub manifests: Box<[SophonApiPackageManifest]>
 }
 
-impl TryFrom<&Json> for SophonApiPackagePatchInfo {
-    type Error = SophonApiPackagePatchInfoError;
+impl TryFrom<&Json> for SophonApiPackageUpdateInfo {
+    type Error = SophonApiPackageUpdateInfoError;
 
     fn try_from(value: &Json) -> Result<Self, Self::Error> {
         Ok(Self {
             build_id: value.get("build_id")
                 .and_then(Json::as_str)
                 .map(String::from)
-                .ok_or(SophonApiPackagePatchInfoError::InvalidField("build_id"))?,
+                .ok_or(SophonApiPackageUpdateInfoError::InvalidField("build_id"))?,
 
             patch_id: value.get("patch_id")
                 .and_then(Json::as_str)
                 .map(String::from)
-                .ok_or(SophonApiPackagePatchInfoError::InvalidField("patch_id"))?,
+                .ok_or(SophonApiPackageUpdateInfoError::InvalidField("patch_id"))?,
 
             version: value.get("tag")
                 .and_then(Json::as_str)
                 .map(String::from)
-                .ok_or(SophonApiPackagePatchInfoError::InvalidField("tag"))?,
+                .ok_or(SophonApiPackageUpdateInfoError::InvalidField("tag"))?,
 
             manifests: value.get("manifests")
                 .and_then(Json::as_array)
-                .ok_or(SophonApiPackagePatchInfoError::InvalidField("manifests"))
+                .ok_or(SophonApiPackageUpdateInfoError::InvalidField("manifests"))
                 .and_then(|manifests| {
                     manifests.iter()
                         .map(SophonApiPackageManifest::try_from)
-                        .collect::<Result<Box<[_]>, SophonApiPackagePatchInfoError>>()
+                        .collect::<Result<Box<[_]>, SophonApiPackageUpdateInfoError>>()
                 })?
         })
     }
@@ -95,40 +98,47 @@ pub struct SophonApiPackageManifest {
     /// Example: `口型资源▶English`
     pub category_name: String,
 
-    /// `manifests[].diff_download`
-    pub diff_download: SophonApiPackageManifestDownloadInfo,
+    /// `manifests[].manifest`
+    pub manifest_info: SophonApiProtobufManifestInfo,
 
     /// `manifests[].manifest_download`
-    pub manifest_download: SophonApiPackageManifestDownloadInfo
+    pub manifest_download: SophonApiProtobufDownloadInfo,
+
+    /// `manifests[].diff_download`
+    pub diff_download: SophonApiProtobufDownloadInfo
 }
 
 impl TryFrom<&Json> for SophonApiPackageManifest {
-    type Error = SophonApiPackagePatchInfoError;
+    type Error = SophonApiPackageUpdateInfoError;
 
     fn try_from(value: &Json) -> Result<Self, Self::Error> {
         Ok(Self {
             name: value.get("matching_field")
                 .and_then(Json::as_str)
                 .map(String::from)
-                .ok_or(SophonApiPackagePatchInfoError::InvalidField("manifests[].matching_field"))?,
+                .ok_or(SophonApiPackageUpdateInfoError::InvalidField("manifests[].matching_field"))?,
 
             category_id: value.get("category_id")
                 .and_then(Json::as_str)
                 .map(String::from)
-                .ok_or(SophonApiPackagePatchInfoError::InvalidField("manifests[].category_id"))?,
+                .ok_or(SophonApiPackageUpdateInfoError::InvalidField("manifests[].category_id"))?,
 
             category_name: value.get("category_name")
                 .and_then(Json::as_str)
                 .map(String::from)
-                .ok_or(SophonApiPackagePatchInfoError::InvalidField("manifests[].category_name"))?,
+                .ok_or(SophonApiPackageUpdateInfoError::InvalidField("manifests[].category_name"))?,
 
-            diff_download: value.get("diff_download")
-                .ok_or(SophonApiPackagePatchInfoError::InvalidField("manifests[].diff_download"))
-                .and_then(SophonApiPackageManifestDownloadInfo::try_from)?,
+            manifest_info: value.get("manifest")
+                .and_then(|info| SophonApiProtobufManifestInfo::try_from(info).ok())
+                .ok_or(SophonApiPackageUpdateInfoError::InvalidField("manifests[].manifest"))?,
 
             manifest_download: value.get("manifest_download")
-                .ok_or(SophonApiPackagePatchInfoError::InvalidField("manifests[].manifest_download"))
-                .and_then(SophonApiPackageManifestDownloadInfo::try_from)?
+                .and_then(|info| SophonApiProtobufDownloadInfo::try_from(info).ok())
+                .ok_or(SophonApiPackageUpdateInfoError::InvalidField("manifests[].manifest_download"))?,
+
+            diff_download: value.get("diff_download")
+                .and_then(|info| SophonApiProtobufDownloadInfo::try_from(info).ok())
+                .ok_or(SophonApiPackageUpdateInfoError::InvalidField("manifests[].diff_download"))?
         })
     }
 }
@@ -163,34 +173,34 @@ pub struct SophonApiPackageManifestDownloadInfo {
 }
 
 impl TryFrom<&Json> for SophonApiPackageManifestDownloadInfo {
-    type Error = SophonApiPackagePatchInfoError;
+    type Error = SophonApiPackageUpdateInfoError;
 
     fn try_from(value: &Json) -> Result<Self, Self::Error> {
         Ok(Self {
             compressed: value.get("compression")
                 .and_then(Json::as_i64)
                 .map(|value| value == 1)
-                .ok_or(SophonApiPackagePatchInfoError::InvalidField("compression"))?,
+                .ok_or(SophonApiPackageUpdateInfoError::InvalidField("compression"))?,
 
             encrypted: value.get("encryption")
                 .and_then(Json::as_i64)
                 .map(|value| value == 1)
-                .ok_or(SophonApiPackagePatchInfoError::InvalidField("encryption"))?,
+                .ok_or(SophonApiPackageUpdateInfoError::InvalidField("encryption"))?,
 
             password: value.get("password")
                 .and_then(Json::as_str)
                 .map(String::from)
-                .ok_or(SophonApiPackagePatchInfoError::InvalidField("password"))?,
+                .ok_or(SophonApiPackageUpdateInfoError::InvalidField("password"))?,
 
             url_prefix: value.get("url_prefix")
                 .and_then(Json::as_str)
                 .map(String::from)
-                .ok_or(SophonApiPackagePatchInfoError::InvalidField("url_prefix"))?,
+                .ok_or(SophonApiPackageUpdateInfoError::InvalidField("url_prefix"))?,
 
             url_suffix: value.get("url_suffix")
                 .and_then(Json::as_str)
                 .map(String::from)
-                .ok_or(SophonApiPackagePatchInfoError::InvalidField("url_suffix"))?
+                .ok_or(SophonApiPackageUpdateInfoError::InvalidField("url_suffix"))?
         })
     }
 }
