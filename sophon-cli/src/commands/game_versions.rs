@@ -25,7 +25,8 @@ pub fn run(
     game_id: String,
     region: SophonRegion,
     launcher_id: Option<String>,
-    output_format: OutputFormat
+    output_format: OutputFormat,
+    ascii: bool
 ) -> anyhow::Result<()> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -41,6 +42,12 @@ pub fn run(
     match output_format {
         OutputFormat::Text => {
             let mut table = comfy_table::Table::new();
+
+            if ascii {
+                table.load_preset(comfy_table::presets::ASCII_FULL);
+            } else {
+                table.load_preset(comfy_table::presets::UTF8_FULL);
+            }
 
             table.set_header([
                 "version",

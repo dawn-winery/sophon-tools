@@ -32,6 +32,10 @@ struct Cli {
     #[arg(long, alias = "log", alias = "trace")]
     logs: bool,
 
+    /// Disable unicode output.
+    #[arg(long)]
+    ascii: bool,
+
     #[command(subcommand)]
     command: CliCommands
 }
@@ -46,6 +50,7 @@ enum CliCommands {
 #[derive(Debug, Subcommand)]
 enum CliApiCommands {
     /// List information about available games.
+    #[command(alias = "games")]
     ListGames {
         #[arg(
             long, value_enum, default_value_t = SophonRegion::Global,
@@ -64,7 +69,11 @@ enum CliApiCommands {
     #[command(
         alias = "list-categories",
         alias = "list-game-components",
-        alias = "list-game-categories"
+        alias = "list-game-categories",
+        alias = "game-components",
+        alias = "game-categories",
+        alias = "components",
+        alias = "categories"
     )]
     ListComponents {
         #[arg(index = 1, required = true)]
@@ -87,6 +96,7 @@ enum CliApiCommands {
     },
 
     /// Get list of all the game versions.
+    #[command(alias = "versions")]
     GameVersions {
         #[arg(index = 1, required = true)]
         game_id: String,
@@ -110,6 +120,7 @@ fn main() -> anyhow::Result<()> {
 
     if cli.logs {
         let logger = tracing_subscriber::fmt::layer()
+            .with_ansi(!cli.ascii)
             .with_writer(std::io::stderr)
             .with_filter(tracing_subscriber::filter::filter_fn(|metadata| {
                 !metadata.target().contains("rustls")
@@ -128,7 +139,7 @@ fn main() -> anyhow::Result<()> {
             region,
             launcher_id,
             output_format
-        }) => list_games::run(region, launcher_id, output_format),
+        }) => list_games::run(region, launcher_id, output_format, cli.ascii),
 
         CliCommands::Api(CliApiCommands::ListComponents {
             game_id,
@@ -141,7 +152,8 @@ fn main() -> anyhow::Result<()> {
             region,
             launcher_id,
             output_format,
-            show_all
+            show_all,
+            cli.ascii
         ),
 
         CliCommands::Api(CliApiCommands::GameVersions {
@@ -149,6 +161,12 @@ fn main() -> anyhow::Result<()> {
             region,
             launcher_id,
             output_format
-        }) => game_versions::run(game_id, region, launcher_id, output_format)
+        }) => game_versions::run(
+            game_id,
+            region,
+            launcher_id,
+            output_format,
+            cli.ascii
+        )
     }
 }
