@@ -18,6 +18,7 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use super::*;
+use super::package::SophonApiPackage;
 
 /// Wrapper around the `SophonApi` struct that allows you to easily read
 /// information about the game.
@@ -107,6 +108,24 @@ impl<'api> SophonApiGame<'api> {
         };
 
         Ok(game_config)
+    }
+
+    /// Get package wrapper for the current game. If `version` is not provided,
+    /// then the latest available game version is used.
+    pub async fn package(
+        &self,
+        version: Option<String>
+    ) -> Result<SophonApiPackage<'api>, SophonApiError> {
+        let branch_info = self.fetch_branch().await?;
+
+        Ok(SophonApiPackage::new(
+            self.api,
+            self.region,
+            branch_info.branch,
+            branch_info.password,
+            branch_info.package_id,
+            version.unwrap_or(branch_info.version)
+        ))
     }
 
     /// Get latest available game version.

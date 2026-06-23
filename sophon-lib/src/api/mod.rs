@@ -29,6 +29,7 @@ pub mod game_configs;
 pub mod package_patch_info;
 pub mod package_download_info;
 pub mod game;
+pub mod package;
 
 use crate::region::SophonRegion;
 
@@ -646,7 +647,7 @@ fn test() {
             String::from("U5hbdsT9W7")
         );
 
-        let branch_info = game.fetch_branch().await.unwrap();
+        // let branch_info = game.fetch_branch().await.unwrap();
 
         // let patch_info = api.package_patch_info(
         //     SophonRegion::Global,
@@ -658,14 +659,18 @@ fn test() {
 
         // dbg!(patch_info);
 
-        let download_info = api.package_download_info(
-            SophonRegion::Global,
-            branch_info.branch,
-            branch_info.password,
-            branch_info.package_id,
-            branch_info.version
-        ).await.unwrap();
+        // let download_info = api.package_download_info(
+        //     SophonRegion::Global,
+        //     branch_info.branch,
+        //     branch_info.password,
+        //     branch_info.package_id,
+        //     branch_info.version
+        // ).await.unwrap();
 
-        dbg!(download_info);
+        // dbg!(download_info);
+
+        let package = game.package(None).await.unwrap();
+
+        dbg!(package.fetch_download_info().await);
     });
 }
