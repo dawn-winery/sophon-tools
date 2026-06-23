@@ -69,7 +69,7 @@ pub struct SophonApiGameVersionInfo {
     /// `game_exe_list[].md5` - md5 hash of the game binary.
     ///
     /// Example: `eb8ee0dd5c5a7dd9aec6569182886539`
-    pub md5: String
+    pub hash_md5: String
 }
 
 impl TryFrom<&Json> for SophonApiGameVersionInfo {
@@ -82,7 +82,7 @@ impl TryFrom<&Json> for SophonApiGameVersionInfo {
                 .map(String::from)
                 .ok_or(SophonApiGameVersionsInfoError::InvalidField("game_exe_list[].version"))?,
 
-            md5: value.get("md5")
+            hash_md5: value.get("md5")
                 .and_then(Json::as_str)
                 .map(String::from)
                 .ok_or(SophonApiGameVersionsInfoError::InvalidField("game_exe_list[].md5"))?

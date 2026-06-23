@@ -21,6 +21,7 @@ use clap::ValueEnum;
 
 pub mod list_games;
 pub mod list_components;
+pub mod game_versions;
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 pub enum SophonRegion {

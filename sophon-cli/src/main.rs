@@ -28,6 +28,10 @@ use commands::*;
 #[derive(Debug, Parser)]
 #[command(version, about)]
 struct Cli {
+    /// Enable trace logs in stderr.
+    #[arg(long, alias = "log", alias = "trace")]
+    logs: bool,
+
     #[command(subcommand)]
     command: CliCommands
 }
@@ -80,25 +84,46 @@ enum CliApiCommands {
 
         #[arg(long)]
         show_all: bool
+    },
+
+    /// Get list of all the game versions.
+    GameVersions {
+        #[arg(index = 1, required = true)]
+        game_id: String,
+
+        #[arg(
+            long, value_enum, default_value_t = SophonRegion::Global,
+            alias = "edition"
+        )]
+        region: SophonRegion,
+
+        #[arg(long)]
+        launcher_id: Option<String>,
+
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        output_format: OutputFormat
     }
 }
 
 fn main() -> anyhow::Result<()> {
-    let logger = tracing_subscriber::fmt::layer()
-        .pretty()
-        .with_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .with_filter(tracing_subscriber::filter::filter_fn(|metadata| {
-            !metadata.target().contains("rustls")
-                && !metadata.target().contains("reqwest")
-                && !metadata.target().contains("h2")
-                && !metadata.target().contains("hyper_util")
-        }));
+    let cli = Cli::parse();
 
-    tracing_subscriber::registry()
-        .with(logger)
-        .init();
+    if cli.logs {
+        let logger = tracing_subscriber::fmt::layer()
+            .with_writer(std::io::stderr)
+            .with_filter(tracing_subscriber::filter::filter_fn(|metadata| {
+                !metadata.target().contains("rustls")
+                    && !metadata.target().contains("reqwest")
+                    && !metadata.target().contains("h2")
+                    && !metadata.target().contains("hyper_util")
+            }));
 
-    match Cli::parse().command {
+        tracing_subscriber::registry()
+            .with(logger)
+            .init();
+    }
+
+    match cli.command {
         CliCommands::Api(CliApiCommands::ListGames {
             region,
             launcher_id,
@@ -117,6 +142,13 @@ fn main() -> anyhow::Result<()> {
             launcher_id,
             output_format,
             show_all
-        )
+        ),
+
+        CliCommands::Api(CliApiCommands::GameVersions {
+            game_id,
+            region,
+            launcher_id,
+            output_format
+        }) => game_versions::run(game_id, region, launcher_id, output_format)
     }
 }
