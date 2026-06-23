@@ -54,7 +54,11 @@ impl<'api> SophonApiGame<'api> {
         ).await?;
 
         let Some(game_branch) = game_branches.into_iter()
-            .find(|game_branch| game_branch.game_id == self.game_id)
+            .find(|game_branch| {
+                game_branch.game_id == self.game_id
+                    || game_branch.game_biz == self.game_id
+                    || game_branch.package_id == self.game_id
+            })
         else {
             return Err(SophonApiError::GameNotFound {
                 region: self.region,
@@ -98,7 +102,10 @@ impl<'api> SophonApiGame<'api> {
         ).await?;
 
         let Some(game_config) = game_configs.into_iter()
-            .find(|game_config| game_config.game_id == self.game_id)
+            .find(|game_config| {
+                game_config.game_id == self.game_id
+                || game_config.game_biz == self.game_id
+            })
         else {
             return Err(SophonApiError::GameNotFound {
                 region: self.region,

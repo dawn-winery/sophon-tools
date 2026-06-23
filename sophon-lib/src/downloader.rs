@@ -47,7 +47,10 @@ pub enum SophonDownloaderError {
     }
 }
 
-pub type AssetsSorter = Box<dyn Fn(&SophonDownloadAssetsInfoAsset, &SophonDownloadAssetsInfoAsset) -> std::cmp::Ordering>;
+pub type AssetsSorter = Box<dyn Fn(
+    &SophonDownloadAssetsInfoAsset,
+    &SophonDownloadAssetsInfoAsset
+) -> std::cmp::Ordering>;
 
 pub struct SophonDownloader {
     client: reqwest::Client,
