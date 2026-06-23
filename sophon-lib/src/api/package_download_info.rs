@@ -16,3 +16,229 @@
 //
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+use serde_json::Value as Json;
+
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum SophonApiPackageDownloadInfoError {
+    #[error("field '{0}' is invalid")]
+    InvalidField(&'static str)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SophonApiPackageDownloadInfo {
+    /// `build_id`.
+    ///
+    /// Example: `Ymu2ndDuz0Mj`
+    pub build_id: String,
+
+    /// `tag`.
+    ///
+    /// Example: `3.0.0`
+    pub version: String,
+
+    /// `manifests`.
+    pub manifests: Box<[SophonApiPackageManifest]>
+}
+
+impl TryFrom<&Json> for SophonApiPackageDownloadInfo {
+    type Error = SophonApiPackageDownloadInfoError;
+
+    fn try_from(value: &Json) -> Result<Self, Self::Error> {
+        Ok(Self {
+            build_id: value.get("build_id")
+                .and_then(Json::as_str)
+                .map(String::from)
+                .ok_or(SophonApiPackageDownloadInfoError::InvalidField("build_id"))?,
+
+            version: value.get("tag")
+                .and_then(Json::as_str)
+                .map(String::from)
+                .ok_or(SophonApiPackageDownloadInfoError::InvalidField("tag"))?,
+
+            manifests: value.get("manifests")
+                .and_then(Json::as_array)
+                .ok_or(SophonApiPackageDownloadInfoError::InvalidField("manifests"))
+                .and_then(|manifests| {
+                    manifests.iter()
+                        .map(SophonApiPackageManifest::try_from)
+                        .collect::<Result<Box<[_]>, SophonApiPackageDownloadInfoError>>()
+                })?
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SophonApiPackageManifest {
+    /// `manifests[].matching_field`.
+    ///
+    /// Example: `300002`
+    pub name: String,
+
+    /// `manifests[].category_id`.
+    ///
+    /// Example: `10236`
+    pub category_id: String,
+
+    /// `manifests[].category_name`.
+    ///
+    /// Example: `口型资源▶English`
+    pub category_name: String,
+
+    /// `manifests[].chunk_download`
+    pub chunk_download: SophonApiPackageManifestDownloadInfo,
+
+    /// `manifests[].manifest_download`
+    pub manifest_download: SophonApiPackageManifestDownloadInfo,
+
+    /// `manifests[].stats`
+    pub stats: SophonApiPackageManifestStats
+}
+
+impl TryFrom<&Json> for SophonApiPackageManifest {
+    type Error = SophonApiPackageDownloadInfoError;
+
+    fn try_from(value: &Json) -> Result<Self, Self::Error> {
+        Ok(Self {
+            name: value.get("matching_field")
+                .and_then(Json::as_str)
+                .map(String::from)
+                .ok_or(SophonApiPackageDownloadInfoError::InvalidField("manifests[].matching_field"))?,
+
+            category_id: value.get("category_id")
+                .and_then(Json::as_str)
+                .map(String::from)
+                .ok_or(SophonApiPackageDownloadInfoError::InvalidField("manifests[].category_id"))?,
+
+            category_name: value.get("category_name")
+                .and_then(Json::as_str)
+                .map(String::from)
+                .ok_or(SophonApiPackageDownloadInfoError::InvalidField("manifests[].category_name"))?,
+
+            chunk_download: value.get("chunk_download")
+                .ok_or(SophonApiPackageDownloadInfoError::InvalidField("manifests[].chunk_download"))
+                .and_then(SophonApiPackageManifestDownloadInfo::try_from)?,
+
+            manifest_download: value.get("manifest_download")
+                .ok_or(SophonApiPackageDownloadInfoError::InvalidField("manifests[].manifest_download"))
+                .and_then(SophonApiPackageManifestDownloadInfo::try_from)?,
+
+            stats: value.get("stats")
+                .ok_or(SophonApiPackageDownloadInfoError::InvalidField("manifests[].stats"))
+                .and_then(SophonApiPackageManifestStats::try_from)?
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SophonApiPackageManifestDownloadInfo {
+    /// `compression` - whether the protobuf file is compressed.
+    ///
+    /// Example: `1`
+    pub compressed: bool,
+
+    /// `encryption` - whether the protobuf file is encrypted.
+    ///
+    /// Example: `0`
+    pub encrypted: bool,
+
+    /// `password` - protobuf encryption password. Empty on public API endpoint.
+    ///
+    /// Example: `""`
+    pub password: String,
+
+    /// `url_prefix` - URL to the protobuf.
+    ///
+    /// Example: `https://autopatchos.zenlesszonezero.com/pclauncher/diffs/cxi9qfgtcu0w/20260529/3.0.0/8RuEeohLeVa2/10236`
+    pub url_prefix: String,
+
+    /// `url_suffix` - URL suffix to the protobuf (?). Empty on public API
+    /// endpoint.
+    ///
+    /// Example: `""`
+    pub url_suffix: String
+}
+
+impl TryFrom<&Json> for SophonApiPackageManifestDownloadInfo {
+    type Error = SophonApiPackageDownloadInfoError;
+
+    fn try_from(value: &Json) -> Result<Self, Self::Error> {
+        Ok(Self {
+            compressed: value.get("compression")
+                .and_then(Json::as_i64)
+                .map(|value| value == 1)
+                .ok_or(SophonApiPackageDownloadInfoError::InvalidField("compression"))?,
+
+            encrypted: value.get("encryption")
+                .and_then(Json::as_i64)
+                .map(|value| value == 1)
+                .ok_or(SophonApiPackageDownloadInfoError::InvalidField("encryption"))?,
+
+            password: value.get("password")
+                .and_then(Json::as_str)
+                .map(String::from)
+                .ok_or(SophonApiPackageDownloadInfoError::InvalidField("password"))?,
+
+            url_prefix: value.get("url_prefix")
+                .and_then(Json::as_str)
+                .map(String::from)
+                .ok_or(SophonApiPackageDownloadInfoError::InvalidField("url_prefix"))?,
+
+            url_suffix: value.get("url_suffix")
+                .and_then(Json::as_str)
+                .map(String::from)
+                .ok_or(SophonApiPackageDownloadInfoError::InvalidField("url_suffix"))?
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SophonApiPackageManifestStats {
+    /// `compressed_size` - total chunks download size in bytes.
+    ///
+    /// Example: `55337025812`
+    pub compressed_size: u64,
+
+    /// `uncompressed_size` - total chunks size after decompression in bytes.
+    ///
+    /// Example: `56498483429`
+    pub decompressed_size: u64,
+
+    /// `chunk_count` - amount of chunks.
+    ///
+    /// Example: `53160`
+    pub chunks: u64,
+
+    /// `file_count` - amount of files.
+    ///
+    /// Example: `9789`
+    pub files: u64
+}
+
+impl TryFrom<&Json> for SophonApiPackageManifestStats {
+    type Error = SophonApiPackageDownloadInfoError;
+
+    fn try_from(value: &Json) -> Result<Self, Self::Error> {
+        Ok(Self {
+            compressed_size: value.get("compressed_size")
+                .and_then(Json::as_str)
+                .and_then(|value| value.parse::<u64>().ok())
+                .ok_or(SophonApiPackageDownloadInfoError::InvalidField("compressed_size"))?,
+
+            decompressed_size: value.get("uncompressed_size")
+                .and_then(Json::as_str)
+                .and_then(|value| value.parse::<u64>().ok())
+                .ok_or(SophonApiPackageDownloadInfoError::InvalidField("uncompressed_size"))?,
+
+            chunks: value.get("chunk_count")
+                .and_then(Json::as_str)
+                .and_then(|value| value.parse::<u64>().ok())
+                .ok_or(SophonApiPackageDownloadInfoError::InvalidField("chunk_count"))?,
+
+            files: value.get("file_count")
+                .and_then(Json::as_str)
+                .and_then(|value| value.parse::<u64>().ok())
+                .ok_or(SophonApiPackageDownloadInfoError::InvalidField("file_count"))?
+        })
+    }
+}

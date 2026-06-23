@@ -26,8 +26,8 @@ use serde_json::Value as Json;
 pub mod game_branch;
 pub mod game_versions_info;
 pub mod game_configs;
-// pub mod package_patch_info;
-// pub mod package_download_info;
+pub mod package_patch_info;
+pub mod package_download_info;
 pub mod game;
 
 use crate::region::SophonRegion;
@@ -35,6 +35,8 @@ use crate::region::SophonRegion;
 use game_branch::SophonApiGameBranch;
 use game_versions_info::SophonApiGameVersionsInfo;
 use game_configs::SophonApiGameConfigs;
+use package_patch_info::SophonApiPackagePatchInfo;
+use package_download_info::SophonApiPackageDownloadInfo;
 use game::SophonApiGame;
 
 #[derive(Debug, thiserror::Error)]
@@ -103,15 +105,15 @@ pub struct SophonApi {
     game_versions_info_cache: RwLock<Vec<GameCacheSlot<Box<[SophonApiGameVersionsInfo]>>>>,
     game_configs_cache: RwLock<Vec<GameCacheSlot<Box<[SophonApiGameConfigs]>>>>,
 
-    package_patch_info_cache: RwLock<Vec<PackageCacheSlot<()>>>,
-    package_download_info_cache: RwLock<Vec<PackageCacheSlot<()>>>
+    package_patch_info_cache: RwLock<Vec<PackageCacheSlot<SophonApiPackagePatchInfo>>>,
+    package_download_info_cache: RwLock<Vec<PackageCacheSlot<SophonApiPackageDownloadInfo>>>
 }
 
 impl Default for SophonApi {
     fn default() -> Self {
         Self {
             client: reqwest::Client::builder()
-                .user_agent(format!("sophon-tools/{}", crate::VERSION))
+                .user_agent(format!("sophon-tools/v{}", crate::VERSION))
                 .build()
                 .expect("failed to build reqwest client"),
 
@@ -119,8 +121,8 @@ impl Default for SophonApi {
             game_versions_info_timeout: Duration::from_secs(5),
             game_configs_timeout: Duration::from_secs(5),
 
-            package_patch_info_timeout: Duration::from_secs(5),
-            package_download_info_timeout: Duration::from_secs(5),
+            package_patch_info_timeout: Duration::from_secs(7),
+            package_download_info_timeout: Duration::from_secs(7),
 
             game_branches_cache: Default::default(),
             game_versions_info_cache: Default::default(),
@@ -177,6 +179,11 @@ impl SophonApi {
         self.package_download_info_timeout = timeout;
 
         self
+    }
+
+    #[inline]
+    pub const fn client(&self) -> &reqwest::Client {
+        &self.client
     }
 
     /// Try to fetch list of available games, their versions and components.
@@ -435,7 +442,7 @@ impl SophonApi {
         password: String,
         package_id: String,
         version: String
-    ) -> Result<(), SophonApiError> {
+    ) -> Result<SophonApiPackagePatchInfo, SophonApiError> {
         if let Some(slot) = self.package_patch_info_cache.read().await.iter()
             .find(|slot| {
                 slot.region == region
@@ -474,11 +481,12 @@ impl SophonApi {
             ?password,
             ?package_id,
             ?version,
+            ?url,
             "fetch package_patch_info from the API"
         );
 
         let response = self.client.post(url)
-            .timeout(self.game_configs_timeout)
+            .timeout(self.package_patch_info_timeout)
             .send()
             .await?;
 
@@ -486,41 +494,110 @@ impl SophonApi {
             &response.bytes().await?
         )?;
 
-        std::fs::write("patch_info.json", serde_json::to_vec_pretty(&response.data)?).unwrap();
+        let Some(response) = response.data else {
+            return Err(SophonApiError::InvalidSophonStatus {
+                code: response.retcode,
+                message: response.message
+            });
+        };
 
-        todo!()
+        let package_info = SophonApiPackagePatchInfo::try_from(&response)
+            .map_err(|err| SophonApiError::Other(err.into()))?;
 
-        // let response = serde_json::from_slice::<SophonApiResponse<Json>>(
-        //     &response.bytes().await?
-        // )?;
+        self.package_patch_info_cache.write().await.push(PackageCacheSlot {
+            region,
+            branch,
+            password,
+            package_id,
+            version,
+            value: package_info.clone()
+        });
 
-        // let Some(response) = response.data else {
-        //     return Err(SophonApiError::InvalidSophonStatus {
-        //         code: response.retcode,
-        //         message: response.message
-        //     });
-        // };
+        Ok(package_info)
+    }
 
-        // let Some(game_configs) = response.get("launch_configs")
-        //     .and_then(Json::as_array)
-        // else {
-        //     return Err(SophonApiError::InvalidSophonResponse);
-        // };
+    /// Try to fetch game files downloading information.
+    ///
+    /// `<sophon_data_url>/downloader/sophon_chunk/api/getBuild`.
+    pub async fn package_download_info(
+        &self,
+        region: SophonRegion,
+        branch: String,
+        password: String,
+        package_id: String,
+        version: String
+    ) -> Result<SophonApiPackageDownloadInfo, SophonApiError> {
+        if let Some(slot) = self.package_download_info_cache.read().await.iter()
+            .find(|slot| {
+                slot.region == region
+                    && slot.branch == branch
+                    && slot.password == password
+                    && slot.package_id == package_id
+                    && slot.version == version
+            })
+        {
+            #[cfg(feature = "tracing")]
+            tracing::trace!(
+                ?region,
+                ?branch,
+                ?password,
+                ?package_id,
+                ?version,
+                "package_download_info API cache read"
+            );
 
-        // let game_configs = game_configs.iter()
-        //     .map(|game_config| {
-        //         SophonApiGameConfigs::try_from(game_config)
-        //             .map_err(|err| SophonApiError::Other(err.into()))
-        //     })
-        //     .collect::<Result<Box<[_]>, SophonApiError>>()?;
+            return Ok(slot.value.clone());
+        }
 
-        // self.game_configs_cache.replace(GameCacheSlot {
-        //     region,
-        //     launcher_id,
-        //     value: Some(game_configs.clone())
-        // });
+        let url = format!(
+            "{}/downloader/sophon_chunk/api/getBuild?branch={}&password={}&package_id={}&tag={}",
+            region.sophon_data_url(),
+            branch,
+            password,
+            package_id,
+            version
+        );
 
-        // Ok(game_configs)
+        #[cfg(feature = "tracing")]
+        tracing::debug!(
+            ?region,
+            ?branch,
+            ?password,
+            ?package_id,
+            ?version,
+            ?url,
+            "fetch package_download_info from the API"
+        );
+
+        let response = self.client.get(url)
+            .timeout(self.package_download_info_timeout)
+            .send()
+            .await?;
+
+        let response = serde_json::from_slice::<SophonApiResponse<Json>>(
+            &response.bytes().await?
+        )?;
+
+        let Some(response) = response.data else {
+            return Err(SophonApiError::InvalidSophonStatus {
+                code: response.retcode,
+                message: response.message
+            });
+        };
+
+        let download_info = SophonApiPackageDownloadInfo::try_from(&response)
+            .map_err(|err| SophonApiError::Other(err.into()))?;
+
+        self.package_download_info_cache.write().await.push(PackageCacheSlot {
+            region,
+            branch,
+            password,
+            package_id,
+            version,
+            value: download_info.clone()
+        });
+
+        Ok(download_info)
     }
 
     /// Get game info wrapper.
@@ -569,14 +646,26 @@ fn test() {
             String::from("U5hbdsT9W7")
         );
 
-        let branch = game.fetch_branch().await.unwrap();
+        let branch_info = game.fetch_branch().await.unwrap();
 
-        api.package_patch_info(
+        // let patch_info = api.package_patch_info(
+        //     SophonRegion::Global,
+        //     branch_info.branch,
+        //     branch_info.password,
+        //     branch_info.package_id,
+        //     branch_info.version
+        // ).await.unwrap();
+
+        // dbg!(patch_info);
+
+        let download_info = api.package_download_info(
             SophonRegion::Global,
-            branch.branch,
-            branch.password,
-            branch.package_id,
-            branch.version
-        ).await;
+            branch_info.branch,
+            branch_info.password,
+            branch_info.package_id,
+            branch_info.version
+        ).await.unwrap();
+
+        dbg!(download_info);
     });
 }

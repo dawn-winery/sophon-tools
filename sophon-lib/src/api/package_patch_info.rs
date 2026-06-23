@@ -43,7 +43,7 @@ pub struct SophonApiPackagePatchInfo {
     pub version: String,
 
     /// `manifests`.
-    pub manifests: Box<[SophonApiPackagePatchInfoManifest]>
+    pub manifests: Box<[SophonApiPackageManifest]>
 }
 
 impl TryFrom<&Json> for SophonApiPackagePatchInfo {
@@ -71,7 +71,7 @@ impl TryFrom<&Json> for SophonApiPackagePatchInfo {
                 .ok_or(SophonApiPackagePatchInfoError::InvalidField("manifests"))
                 .and_then(|manifests| {
                     manifests.iter()
-                        .map(SophonApiPackagePatchInfoManifest::try_from)
+                        .map(SophonApiPackageManifest::try_from)
                         .collect::<Result<Box<[_]>, SophonApiPackagePatchInfoError>>()
                 })?
         })
@@ -79,7 +79,7 @@ impl TryFrom<&Json> for SophonApiPackagePatchInfo {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct SophonApiPackagePatchInfoManifest {
+pub struct SophonApiPackageManifest {
     /// `manifests[].matching_field`.
     ///
     /// Example: `300002`
@@ -93,23 +93,104 @@ pub struct SophonApiPackagePatchInfoManifest {
     /// `manifests[].category_name`.
     ///
     /// Example: `口型资源▶English`
-    pub category_name: String
+    pub category_name: String,
+
+    /// `manifests[].diff_download`
+    pub diff_download: SophonApiPackageManifestDownloadInfo,
+
+    /// `manifests[].manifest_download`
+    pub manifest_download: SophonApiPackageManifestDownloadInfo
 }
 
-impl TryFrom<&Json> for SophonApiPackagePatchInfoManifest {
+impl TryFrom<&Json> for SophonApiPackageManifest {
     type Error = SophonApiPackagePatchInfoError;
 
     fn try_from(value: &Json) -> Result<Self, Self::Error> {
         Ok(Self {
-            id: value.get("category_id")
-                .and_then(Json::as_str)
-                .map(String::from)
-                .ok_or(SophonApiPackagePatchInfoError::InvalidField("main.categories[].category_id"))?,
-
             name: value.get("matching_field")
                 .and_then(Json::as_str)
                 .map(String::from)
-                .ok_or(SophonApiPackagePatchInfoError::InvalidField("main.categories[].matching_field"))?
+                .ok_or(SophonApiPackagePatchInfoError::InvalidField("manifests[].matching_field"))?,
+
+            category_id: value.get("category_id")
+                .and_then(Json::as_str)
+                .map(String::from)
+                .ok_or(SophonApiPackagePatchInfoError::InvalidField("manifests[].category_id"))?,
+
+            category_name: value.get("category_name")
+                .and_then(Json::as_str)
+                .map(String::from)
+                .ok_or(SophonApiPackagePatchInfoError::InvalidField("manifests[].category_name"))?,
+
+            diff_download: value.get("diff_download")
+                .ok_or(SophonApiPackagePatchInfoError::InvalidField("manifests[].diff_download"))
+                .and_then(SophonApiPackageManifestDownloadInfo::try_from)?,
+
+            manifest_download: value.get("manifest_download")
+                .ok_or(SophonApiPackagePatchInfoError::InvalidField("manifests[].manifest_download"))
+                .and_then(SophonApiPackageManifestDownloadInfo::try_from)?
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SophonApiPackageManifestDownloadInfo {
+    /// `compression` - whether the protobuf file is compressed.
+    ///
+    /// Example: `1`
+    pub compressed: bool,
+
+    /// `encryption` - whether the protobuf file is encrypted.
+    ///
+    /// Example: `0`
+    pub encrypted: bool,
+
+    /// `password` - protobuf encryption password. Empty on public API endpoint.
+    ///
+    /// Example: `""`
+    pub password: String,
+
+    /// `url_prefix` - URL to the protobuf.
+    ///
+    /// Example: `https://autopatchos.zenlesszonezero.com/pclauncher/diffs/cxi9qfgtcu0w/20260529/3.0.0/8RuEeohLeVa2/10236`
+    pub url_prefix: String,
+
+    /// `url_suffix` - URL suffix to the protobuf (?). Empty on public API
+    /// endpoint.
+    ///
+    /// Example: `""`
+    pub url_suffix: String
+}
+
+impl TryFrom<&Json> for SophonApiPackageManifestDownloadInfo {
+    type Error = SophonApiPackagePatchInfoError;
+
+    fn try_from(value: &Json) -> Result<Self, Self::Error> {
+        Ok(Self {
+            compressed: value.get("compression")
+                .and_then(Json::as_i64)
+                .map(|value| value == 1)
+                .ok_or(SophonApiPackagePatchInfoError::InvalidField("compression"))?,
+
+            encrypted: value.get("encryption")
+                .and_then(Json::as_i64)
+                .map(|value| value == 1)
+                .ok_or(SophonApiPackagePatchInfoError::InvalidField("encryption"))?,
+
+            password: value.get("password")
+                .and_then(Json::as_str)
+                .map(String::from)
+                .ok_or(SophonApiPackagePatchInfoError::InvalidField("password"))?,
+
+            url_prefix: value.get("url_prefix")
+                .and_then(Json::as_str)
+                .map(String::from)
+                .ok_or(SophonApiPackagePatchInfoError::InvalidField("url_prefix"))?,
+
+            url_suffix: value.get("url_suffix")
+                .and_then(Json::as_str)
+                .map(String::from)
+                .ok_or(SophonApiPackagePatchInfoError::InvalidField("url_suffix"))?
         })
     }
 }
