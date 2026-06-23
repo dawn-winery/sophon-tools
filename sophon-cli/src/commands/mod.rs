@@ -23,6 +23,7 @@ pub mod list_games;
 pub mod list_components;
 pub mod game_versions;
 pub mod download_info;
+pub mod verify_game;
 pub mod download_game;
 
 #[derive(Debug, Clone, Copy, ValueEnum)]

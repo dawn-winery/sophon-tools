@@ -17,6 +17,8 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+use std::path::PathBuf;
+
 use tracing_subscriber::prelude::*;
 
 use clap::{Parser, Subcommand};
@@ -45,6 +47,48 @@ enum CliCommands {
     /// Perform Sophon API requests.
     #[command(subcommand)]
     Api(CliApiCommands),
+
+    /// Verify game.
+    Verify {
+        #[arg(index = 1, required = true)]
+        game: String,
+
+        #[arg(index = 2, required = true)]
+        path: PathBuf,
+
+        #[arg(
+            long, value_enum, default_value_t = SophonRegion::Global,
+            alias = "edition"
+        )]
+        region: SophonRegion,
+
+        #[arg(long)]
+        launcher_id: Option<String>,
+
+        #[arg(long)]
+        version: Option<String>,
+
+        #[arg(
+            long, default_value_t = String::from("game"),
+            alias = "component-id",
+            alias = "component-name",
+            alias = "category",
+            alias = "category-id",
+            alias = "category-name"
+        )]
+        component: String,
+
+        /// Verify files that match the regex.
+        #[arg(long)]
+        regex: Option<String>,
+
+        /// Use files sizes for verification instead of calculating md5 hashes.
+        #[arg(long, alias = "fast")]
+        fast_verify: bool,
+
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        output_format: OutputFormat
+    },
 
     /// Download game.
     Download {
@@ -160,6 +204,7 @@ enum CliApiCommands {
         output_format: OutputFormat
     },
 
+    /// Get download information of the given game version and component.
     #[command(
         alias = "game-info",
         alias = "package-info",
@@ -265,6 +310,28 @@ fn main() -> anyhow::Result<()> {
             regex,
             output_format,
             cli.ascii
+        ),
+
+        CliCommands::Verify {
+            game,
+            path,
+            region,
+            launcher_id,
+            version,
+            component,
+            regex,
+            fast_verify,
+            output_format
+        } => verify_game::run(
+            game,
+            component,
+            version,
+            path,
+            region,
+            launcher_id,
+            regex,
+            fast_verify,
+            output_format
         ),
 
         CliCommands::Download {
