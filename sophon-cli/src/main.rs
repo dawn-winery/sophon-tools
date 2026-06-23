@@ -112,6 +112,35 @@ enum CliApiCommands {
 
         #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
         output_format: OutputFormat
+    },
+
+    #[command(
+        alias = "game-info",
+        alias = "package-info",
+        alias = "package-download-info",
+        alias = "download-info"
+    )]
+    GameDownloadInfo {
+        #[arg(index = 1, required = true)]
+        game_id: String,
+
+        #[arg(index = 2, default_value_t = String::from("game"))]
+        component_id: String,
+
+        #[arg(index = 3)]
+        version: Option<String>,
+
+        #[arg(
+            long, value_enum, default_value_t = SophonRegion::Global,
+            alias = "edition"
+        )]
+        region: SophonRegion,
+
+        #[arg(long)]
+        launcher_id: Option<String>,
+
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        output_format: OutputFormat
     }
 }
 
@@ -163,6 +192,23 @@ fn main() -> anyhow::Result<()> {
             output_format
         }) => game_versions::run(
             game_id,
+            region,
+            launcher_id,
+            output_format,
+            cli.ascii
+        ),
+
+        CliCommands::Api(CliApiCommands::GameDownloadInfo {
+            game_id,
+            component_id,
+            version,
+            region,
+            launcher_id,
+            output_format
+        }) => download_info::run(
+            game_id,
+            component_id,
+            version,
             region,
             launcher_id,
             output_format,

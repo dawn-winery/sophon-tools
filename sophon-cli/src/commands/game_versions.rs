@@ -49,6 +49,10 @@ pub fn run(
                 table.load_preset(comfy_table::presets::UTF8_FULL);
             }
 
+            table.set_content_arrangement(
+                comfy_table::ContentArrangement::Dynamic
+            );
+
             table.set_header([
                 "version",
                 "md5"
