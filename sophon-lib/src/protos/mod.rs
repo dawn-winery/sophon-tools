@@ -18,3 +18,15 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 include!(concat!(env!("OUT_DIR"), "/protos.rs"));
+
+impl SophonDownloadAssetsInfoAsset {
+    #[inline]
+    pub const fn is_file(&self) -> bool {
+        self.r#type == 0
+    }
+
+    #[inline]
+    pub const fn is_directory(&self) -> bool {
+        self.r#type == 64
+    }
+}

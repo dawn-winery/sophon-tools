@@ -17,10 +17,6 @@ fn main() {
     // }
 
     prost_build::Config::new()
-        .message_attribute(".", r#"
-            #[derive(serde::Serialize)]
-            #[serde(rename_all="snake_case")]
-        "#)
         .compile_protos(
             &[
                 "src/protos/download_info.proto",

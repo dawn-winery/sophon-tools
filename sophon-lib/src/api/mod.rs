@@ -52,7 +52,7 @@ pub enum SophonApiError {
 
     #[error("sophon API returned invalid status: {code} {message}")]
     InvalidSophonStatus {
-        code: i32,
+        code: i64,
         message: String
     },
 
@@ -70,11 +70,30 @@ pub enum SophonApiError {
     Other(Box<dyn std::error::Error>)
 }
 
-#[derive(Debug, serde::Deserialize)]
-struct SophonApiResponse<T> {
-    pub retcode: i32,
+#[derive(Debug)]
+struct SophonApiResponse<'response> {
+    pub code: i64,
     pub message: String,
-    pub data: Option<T>
+    pub data: Option<&'response Json>
+}
+
+impl<'response> TryFrom<&'response Json> for SophonApiResponse<'response> {
+    type Error = SophonApiError;
+
+    fn try_from(value: &'response Json) -> Result<Self, Self::Error> {
+        Ok(Self {
+            code: value.get("retcode")
+                .and_then(Json::as_i64)
+                .ok_or(SophonApiError::InvalidSophonResponse)?,
+
+            message: value.get("message")
+                .and_then(Json::as_str)
+                .map(String::from)
+                .ok_or(SophonApiError::InvalidSophonResponse)?,
+
+            data: value.get("data")
+        })
+    }
 }
 
 #[derive(Default)]
@@ -239,13 +258,15 @@ impl SophonApi {
             .send()
             .await?;
 
-        let response = serde_json::from_slice::<SophonApiResponse<Json>>(
+        let response = serde_json::from_slice::<Json>(
             &response.bytes().await?
         )?;
 
+        let response = SophonApiResponse::try_from(&response)?;
+
         let Some(response) = response.data else {
             return Err(SophonApiError::InvalidSophonStatus {
-                code: response.retcode,
+                code: response.code,
                 message: response.message
             });
         };
@@ -320,13 +341,15 @@ impl SophonApi {
             .send()
             .await?;
 
-        let response = serde_json::from_slice::<SophonApiResponse<Json>>(
+        let response = serde_json::from_slice::<Json>(
             &response.bytes().await?
         )?;
 
+        let response = SophonApiResponse::try_from(&response)?;
+
         let Some(response) = response.data else {
             return Err(SophonApiError::InvalidSophonStatus {
-                code: response.retcode,
+                code: response.code,
                 message: response.message
             });
         };
@@ -402,13 +425,15 @@ impl SophonApi {
             .send()
             .await?;
 
-        let response = serde_json::from_slice::<SophonApiResponse<Json>>(
+        let response = serde_json::from_slice::<Json>(
             &response.bytes().await?
         )?;
 
+        let response = SophonApiResponse::try_from(&response)?;
+
         let Some(response) = response.data else {
             return Err(SophonApiError::InvalidSophonStatus {
-                code: response.retcode,
+                code: response.code,
                 message: response.message
             });
         };
@@ -496,18 +521,20 @@ impl SophonApi {
             .send()
             .await?;
 
-        let response = serde_json::from_slice::<SophonApiResponse<Json>>(
+        let response = serde_json::from_slice::<Json>(
             &response.bytes().await?
         )?;
 
+        let response = SophonApiResponse::try_from(&response)?;
+
         let Some(response) = response.data else {
             return Err(SophonApiError::InvalidSophonStatus {
-                code: response.retcode,
+                code: response.code,
                 message: response.message
             });
         };
 
-        let download_info = SophonApiPackageDownloadInfo::try_from(&response)
+        let download_info = SophonApiPackageDownloadInfo::try_from(response)
             .map_err(|err| SophonApiError::Other(err.into()))?;
 
         self.package_download_info_cache.write().await.push(PackageCacheSlot {
@@ -583,18 +610,20 @@ impl SophonApi {
             .send()
             .await?;
 
-        let response = serde_json::from_slice::<SophonApiResponse<Json>>(
+        let response = serde_json::from_slice::<Json>(
             &response.bytes().await?
         )?;
 
+        let response = SophonApiResponse::try_from(&response)?;
+
         let Some(response) = response.data else {
             return Err(SophonApiError::InvalidSophonStatus {
-                code: response.retcode,
+                code: response.code,
                 message: response.message
             });
         };
 
-        let package_info = SophonApiPackageUpdateInfo::try_from(&response)
+        let package_info = SophonApiPackageUpdateInfo::try_from(response)
             .map_err(|err| SophonApiError::Other(err.into()))?;
 
         self.package_update_info_cache.write().await.push(PackageCacheSlot {
@@ -627,58 +656,4 @@ impl SophonApi {
             game_id
         )
     }
-}
-
-#[test]
-fn test() {
-    let runtime = tokio::runtime::Runtime::new()
-        .unwrap();
-
-    let api = SophonApi::default();
-
-    runtime.block_on(async move {
-        // let branches = api.game_branches(SophonRegion::Global, None).await;
-
-        // dbg!(branches);
-
-        // let versions = api.game_versions_info(SophonRegion::Global, None).await;
-
-        // dbg!(versions);
-
-        // let configs = api.game_configs(SophonRegion::Global, None).await;
-
-        // dbg!(configs);
-
-        let game = api.game(
-            SophonRegion::Global,
-            None,
-            String::from("U5hbdsT9W7")
-        );
-
-        // let branch_info = game.fetch_branch().await.unwrap();
-
-        // let patch_info = api.package_patch_info(
-        //     SophonRegion::Global,
-        //     branch_info.branch,
-        //     branch_info.password,
-        //     branch_info.package_id,
-        //     branch_info.version
-        // ).await.unwrap();
-
-        // dbg!(patch_info);
-
-        // let download_info = api.package_download_info(
-        //     SophonRegion::Global,
-        //     branch_info.branch,
-        //     branch_info.password,
-        //     branch_info.package_id,
-        //     branch_info.version
-        // ).await.unwrap();
-
-        // dbg!(download_info);
-
-        let package = game.package(None).await.unwrap();
-
-        dbg!(package.find_download_manifest("game").await);
-    });
 }
