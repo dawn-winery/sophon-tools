@@ -36,11 +36,11 @@ struct Cli {
 enum CliCommands {
     /// Perform Sophon API requests.
     #[command(subcommand)]
-    Api(CliCommandList)
+    Api(CliApiCommands)
 }
 
 #[derive(Debug, Subcommand)]
-enum CliCommandList {
+enum CliApiCommands {
     /// List information about available games.
     ListGames {
         #[arg(
@@ -54,6 +54,32 @@ enum CliCommandList {
 
         #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
         output_format: OutputFormat
+    },
+
+    /// List information about game components.
+    #[command(
+        alias = "list-categories",
+        alias = "list-game-components",
+        alias = "list-game-categories"
+    )]
+    ListComponents {
+        #[arg(index = 1, required = true)]
+        game_id: String,
+
+        #[arg(
+            long, value_enum, default_value_t = SophonRegion::Global,
+            alias = "edition"
+        )]
+        region: SophonRegion,
+
+        #[arg(long)]
+        launcher_id: Option<String>,
+
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        output_format: OutputFormat,
+
+        #[arg(long)]
+        show_all: bool
     }
 }
 
@@ -73,10 +99,24 @@ fn main() -> anyhow::Result<()> {
         .init();
 
     match Cli::parse().command {
-        CliCommands::Api(CliCommandList::ListGames {
+        CliCommands::Api(CliApiCommands::ListGames {
             region,
             launcher_id,
             output_format
-        }) => list_games::run(region, launcher_id, output_format)
+        }) => list_games::run(region, launcher_id, output_format),
+
+        CliCommands::Api(CliApiCommands::ListComponents {
+            game_id,
+            region,
+            launcher_id,
+            output_format,
+            show_all
+        }) => list_components::run(
+            game_id,
+            region,
+            launcher_id,
+            output_format,
+            show_all
+        )
     }
 }
