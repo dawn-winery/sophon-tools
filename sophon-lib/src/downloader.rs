@@ -18,12 +18,12 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use std::sync::Arc;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Duration;
 use std::fs::File;
 use std::io::{BufWriter, Read, Seek, SeekFrom, Write};
 
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 
 use md5::{Md5, Digest};
 use prost::{Message, DecodeError};
@@ -72,6 +72,11 @@ pub type AssetsSorter = Box<dyn Fn(
 
 pub type AssetsFilter = Box<dyn Fn(&SophonDownloadAssetsInfoAsset) -> bool>;
 
+struct CacheSlot {
+    pub url: String,
+    pub value: SophonDownloadAssetsInfo
+}
+
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SophonDownloaderVerifyMethod {
     /// Verify both file size and its hash.
@@ -95,12 +100,12 @@ pub struct SophonDownloader {
     verify_manifest: SophonDownloaderVerifyMethod,
     verify_before_downloading: SophonDownloaderVerifyMethod,
 
-    disk_cache_directory: PathBuf,
-
     target_memory_usage: u64,
 
     assets_sorter: Option<AssetsSorter>,
-    assets_filter: Option<AssetsFilter>
+    assets_filter: Option<AssetsFilter>,
+
+    download_manifest_cache: RwLock<Vec<CacheSlot>>
 }
 
 impl Default for SophonDownloader {
@@ -119,12 +124,12 @@ impl Default for SophonDownloader {
             verify_manifest: SophonDownloaderVerifyMethod::default(),
             verify_before_downloading: SophonDownloaderVerifyMethod::default(),
 
-            disk_cache_directory: PathBuf::from(".cache"),
-
             target_memory_usage: 256 * 1024 * 1024,
 
             assets_sorter: None,
-            assets_filter: None
+            assets_filter: None,
+
+            download_manifest_cache: RwLock::const_new(Vec::with_capacity(1))
         }
     }
 }
@@ -186,15 +191,6 @@ impl SophonDownloader {
         self
     }
 
-    /// Path to the directory in which temporary data is stored.
-    ///
-    /// Default: `.cache`
-    pub fn with_disk_cache_directory(mut self, path: PathBuf) -> Self {
-        self.disk_cache_directory = path;
-
-        self
-    }
-
     /// Target memory usage is the amount of system memory downloader will try
     /// to use for downloading files' chunks. The actual usage may be higher,
     /// but should not be lower if there's enough chunks to download.
@@ -245,24 +241,16 @@ impl SophonDownloader {
             download_info.manifest_info.id
         );
 
-        let cache_entry = self.disk_cache_directory
-            .join("download_manifests")
-            .join(format!("{:0x}", seahash::hash(url.as_bytes())));
-
-        if cache_entry.exists() {
+        if let Some(slot) = self.download_manifest_cache.read().await.iter()
+            .find(|slot| slot.url == url)
+        {
             #[cfg(feature = "tracing")]
             tracing::trace!(
                 ?url,
-                "read cached sophon download assets manifest"
+                "read download assets manifest from cache"
             );
 
-            let cache_entry = std::fs::read(cache_entry)?;
-
-            return Ok(SophonDownloadAssetsInfo::decode(cache_entry.as_slice())?);
-        }
-
-        if let Some(cache_dir) = cache_entry.parent() && !cache_dir.exists() {
-            std::fs::create_dir_all(cache_dir)?;
+            return Ok(slot.value.clone());
         }
 
         #[cfg(feature = "tracing")]
@@ -314,7 +302,10 @@ impl SophonDownloader {
 
             Ok(decoded_manifest) => {
                 // Cache the manifest only if it can be decoded successfully.
-                std::fs::write(cache_entry, &manifest)?;
+                self.download_manifest_cache.write().await.push(CacheSlot {
+                    url,
+                    value: decoded_manifest.clone()
+                });
 
                 Ok(decoded_manifest)
             }
