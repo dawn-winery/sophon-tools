@@ -26,7 +26,8 @@ use md5::{Md5, Digest};
 
 use crate::protos::SophonDownloadAssetsInfoAsset;
 
-struct Asset {
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SophonVerifierAsset {
     pub path: String,
     pub size: u64,
     pub hash_md5: String
@@ -44,8 +45,12 @@ pub enum VerifyResult {
     Unknown
 }
 
+// TODO: I don't actually need to know PathBuf so I could use hashes of
+//       paths to save up space. I could also use specialized HashMap
+//       library for faster u64-indexed maps lookups.
+
 pub struct SophonVerifier {
-    assets: Box<[Asset]>,
+    assets: Box<[SophonVerifierAsset]>,
     cache: HashMap<PathBuf, bool>,
     fast_verify: bool
 }
@@ -55,12 +60,12 @@ impl SophonVerifier {
         assets: impl IntoIterator<Item = SophonDownloadAssetsInfoAsset>
     ) -> Self {
         let assets = assets.into_iter()
-            .map(|asset| Asset {
+            .map(|asset| SophonVerifierAsset {
                 path: asset.path,
                 size: asset.size,
                 hash_md5: asset.hash_md5
             })
-            .collect::<Box<[Asset]>>();
+            .collect::<Box<[_]>>();
 
         Self {
             cache: HashMap::with_capacity(assets.len()),
@@ -76,6 +81,24 @@ impl SophonVerifier {
         self.fast_verify = fast_verify;
 
         self
+    }
+
+    /// Get list of assets info stored in the verifier.
+    #[inline]
+    pub fn assets(&self) -> impl Iterator<Item = &'_ SophonVerifierAsset> {
+        self.assets.iter()
+    }
+
+    /// Clear verifications results cache.
+    #[inline]
+    pub fn clear(&mut self) {
+        #[cfg(feature = "tracing")]
+        tracing::debug!(
+            entries = self.cache.len(),
+            "clear assets verifier cache"
+        );
+
+        self.cache.clear();
     }
 
     /// Verify given file. If it's not a part of the game, then `false` is

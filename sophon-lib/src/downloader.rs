@@ -17,14 +17,20 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-use std::path::PathBuf;
+use std::sync::Arc;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
+use std::fs::File;
+use std::io::{BufWriter, Seek, SeekFrom, Write};
+
+use tokio::sync::Mutex;
 
 use md5::{Md5, Digest};
 use prost::{Message, DecodeError};
 
 use crate::api::package_download_info::SophonApiPackageManifest;
 use crate::protos::{SophonDownloadAssetsInfo, SophonDownloadAssetsInfoAsset};
+use crate::verifier::{SophonVerifier, VerifyResult};
 
 #[derive(Debug, thiserror::Error)]
 pub enum SophonDownloaderError {
@@ -37,8 +43,17 @@ pub enum SophonDownloaderError {
     #[error("failed to decode protobuf: {0}")]
     Protobuf(#[from] DecodeError),
 
+    #[error("failed to await async task: {0}")]
+    Tokio(#[from] tokio::task::JoinError),
+
     #[error("encrypted files are not supported")]
     EncryptionNotSupported,
+
+    #[error("expected '{expected}' manifest size, got '{actual}'")]
+    ManifestSizeMismatch {
+        actual: u64,
+        expected: u64
+    },
 
     #[error("expected '{expected}' manifest hash, got '{actual}'")]
     ManifestHashMismatch {
@@ -54,15 +69,32 @@ pub type AssetsSorter = Box<dyn Fn(
 
 pub type AssetsFilter = Box<dyn Fn(&SophonDownloadAssetsInfoAsset) -> bool>;
 
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SophonDownloaderVerifyMethod {
+    /// Verify both file size and its hash.
+    #[default]
+    Full,
+
+    /// Verify only file size.
+    Fast,
+
+    /// Do not verify files.
+    None
+}
+
 pub struct SophonDownloader {
     client: reqwest::Client,
+    runtime: Option<tokio::runtime::Handle>,
 
     fetch_manifest_timeout: Duration,
-    fetch_chunk_timeout: Duration,
+    fetch_chunk_timeout_per_mb: Duration,
 
-    verify_manifest_hash: bool,
+    verify_manifest: SophonDownloaderVerifyMethod,
+    verify_before_downloading: SophonDownloaderVerifyMethod,
 
     disk_cache_directory: PathBuf,
+
+    target_memory_usage: u64,
 
     assets_sorter: Option<AssetsSorter>,
     assets_filter: Option<AssetsFilter>
@@ -76,12 +108,17 @@ impl Default for SophonDownloader {
                 .build()
                 .expect("failed to build reqwest client"),
 
-            fetch_manifest_timeout: Duration::from_secs(5),
-            fetch_chunk_timeout: Duration::from_secs(15),
+            runtime: None,
 
-            verify_manifest_hash: true,
+            fetch_manifest_timeout: Duration::from_secs(5),
+            fetch_chunk_timeout_per_mb: Duration::from_secs(5),
+
+            verify_manifest: SophonDownloaderVerifyMethod::default(),
+            verify_before_downloading: SophonDownloaderVerifyMethod::default(),
 
             disk_cache_directory: PathBuf::from(".cache"),
+
+            target_memory_usage: 256 * 1024 * 1024,
 
             assets_sorter: None,
             assets_filter: None
@@ -96,28 +133,70 @@ impl SophonDownloader {
         self
     }
 
+    /// Tokio runtime handle to use for async operations.
+    ///
+    /// If unset, then `tokio::spawn` function will be used to schedule tasks.
+    pub fn with_runtime(mut self, runtime: tokio::runtime::Handle) -> Self {
+        self.runtime = Some(runtime);
+
+        self
+    }
+
+    /// Default: `5 sec`
     pub fn with_fetch_manifest_timeout(mut self, timeout: Duration) -> Self {
         self.fetch_manifest_timeout = timeout;
 
         self
     }
 
-    pub fn with_fetch_chunk_timeout(mut self, timeout: Duration) -> Self {
-        self.fetch_chunk_timeout = timeout;
+    /// Chunk downloading timeout per MB of data. In other words, for 6.37 MB
+    /// chunk downloader will wait for `ceil(6.47) * timeout = 7 * timeout`.
+    ///
+    /// Default: `5 sec` (~204.8 KB/s)
+    pub fn with_fetch_chunk_timeout_per_mb(mut self, timeout: Duration) -> Self {
+        self.fetch_chunk_timeout_per_mb = timeout;
 
         self
     }
 
     /// Verify downloaded manifests hashes before trying to decode them.
-    pub fn with_verify_manifest_hash(mut self, verify_hash: bool) -> Self {
-        self.verify_manifest_hash = verify_hash;
+    pub fn with_verify_manifest_hash(
+        mut self,
+        method: SophonDownloaderVerifyMethod
+    ) -> Self {
+        self.verify_manifest = method;
+
+        self
+    }
+
+    /// Verify files if they're already available on disk before downloading
+    /// them. If disabled, the algorithm will not spend time on verifying files
+    /// and will overwrite them instead.
+    pub fn with_verify_before_downloading(
+        mut self,
+        method: SophonDownloaderVerifyMethod
+    ) -> Self {
+        self.verify_before_downloading = method;
 
         self
     }
 
     /// Path to the directory in which temporary data is stored.
+    ///
+    /// Default: `.cache`
     pub fn with_disk_cache_directory(mut self, path: PathBuf) -> Self {
         self.disk_cache_directory = path;
+
+        self
+    }
+
+    /// Target memory usage is the amount of system memory downloader will try
+    /// to use for downloading files' chunks. The actual usage may be higher,
+    /// but should not be lower if there's enough chunks to download.
+    ///
+    /// Default: `256 MB`
+    pub fn with_target_memory_usage(mut self, size: u64) -> Self {
+        self.target_memory_usage = size;
 
         self
     }
@@ -194,15 +273,24 @@ impl SophonDownloader {
             manifest = zstd::decode_all(manifest.as_slice())?;
         }
 
-        // Verify downloaded manifest hash.
-        if self.verify_manifest_hash {
-            let hash = hex::encode(Md5::digest(&manifest));
-
-            if hash != download_info.manifest_info.hash_md5 {
-                return Err(SophonDownloaderError::ManifestHashMismatch {
-                    actual: hash,
-                    expected: download_info.manifest_info.hash_md5.clone()
+        // Verify downloaded manifest.
+        if self.verify_manifest != SophonDownloaderVerifyMethod::None {
+            if manifest.len() as u64 != download_info.manifest_info.decompressed_size {
+                return Err(SophonDownloaderError::ManifestSizeMismatch {
+                    actual: manifest.len() as u64,
+                    expected: download_info.manifest_info.decompressed_size
                 });
+            }
+
+            else if self.verify_manifest == SophonDownloaderVerifyMethod::Full {
+                let hash = hex::encode(Md5::digest(&manifest));
+
+                if hash != download_info.manifest_info.hash_md5 {
+                    return Err(SophonDownloaderError::ManifestHashMismatch {
+                        actual: hash,
+                        expected: download_info.manifest_info.hash_md5.clone()
+                    });
+                }
             }
         }
 
@@ -218,12 +306,72 @@ impl SophonDownloader {
         }
     }
 
+    /// Download files (assets) to the given directory.
+    ///
+    /// The downloader will skip already downloaded files.
+    ///
+    /// ## Downloader strategy
+    ///
+    /// 1. Prepare list of assets with applied filter function provided by user.
+    /// 2. Sort every asset by their total chunks decompressed size in ascending
+    ///    order (so smaller assets are placed first).
+    /// 3. If user provided a sort function, then apply it to the assets list.
+    ///
+    /// Then, the user provides us with the `target_memory_usage` property. It
+    /// should indicate how much memory *in average* we want to spend on
+    /// assembling assets.
+    ///
+    /// Since we know each asset's decompressed chunks size - we can try to fit
+    /// as many full assets assembling to the async runtime as possible, until
+    /// we reach the `target_memory_usage` memory usage level.
+    ///
+    /// 4. Start iterating over the assets list.
+    /// 5. While current asset with all its chunks' decompressed size can fit
+    ///    inside of the async runtime - create async tasks to download the
+    ///    chunks and write their content to a shared buffered file mutex.
+    ///
+    /// Once we fill the runtime with assets assembling tasks up to the
+    /// `target_memory_usage` level - next assets won't fit precisely to the
+    /// given target level. In that case, we will wait until enough space in
+    /// the runtime frees up.
+    ///
+    /// 6. While there are tasks in the runtime and not enough space to fit
+    ///    a new one - iterate over the tasks and wait until they finish.
+    ///    When enough space for a new asset appears - return to step 4.
+    ///
+    /// If user set the `target_memory_usage` level too low and some assets
+    /// won't fit into it at all (which will happen more frequently at the end
+    /// of the download procedure since the ordering of the assets list) - then
+    /// we will wait until all the tasks finish.
+    ///
+    /// 7. If after waiting until all the tasks finish there's still not enough
+    ///    space to fit the asset - create new task for it and only it anyway.
     pub async fn download(
         self,
-        download_info: &SophonApiPackageManifest
+        download_info: &SophonApiPackageManifest,
+        download_dir: &Path
     ) -> Result<(), SophonDownloaderError> {
-        let download_manifest = self.fetch_download_info(download_info).await?;
+        if download_info.chunk_download.encrypted {
+            return Err(SophonDownloaderError::EncryptionNotSupported);
+        }
 
+        // Fetch list of assets to download.
+        let mut download_manifest = self.fetch_download_info(download_info).await?;
+
+        // Skip assets downloading that are valid.
+        if self.verify_before_downloading != SophonDownloaderVerifyMethod::None {
+            let mut verifier = SophonVerifier::new(download_manifest.assets.clone());
+
+            if self.verify_before_downloading == SophonDownloaderVerifyMethod::Fast {
+                verifier = verifier.with_fast_verify(true);
+            }
+
+            download_manifest.assets.retain(move |asset| {
+                !matches!(verifier.verify_file(download_dir.join(&asset.path)), Ok(VerifyResult::Valid))
+            });
+        }
+
+        // Apply filter function to the list.
         let mut assets = download_manifest.assets.into_iter()
             .filter(|asset| {
                 self.assets_filter.as_ref()
@@ -232,10 +380,154 @@ impl SophonDownloader {
             })
             .collect::<Vec<_>>();
 
+        // Sort assets by their total chunks size in ascending order, so the
+        // first assets will have smallest total decompressed size.
+        assets.sort_by(|a, b| {
+            let a_size = a.chunks.iter()
+                .map(|chunk| chunk.decompressed_size)
+                .sum::<u64>();
+
+            let b_size = b.chunks.iter()
+                .map(|chunk| chunk.decompressed_size)
+                .sum::<u64>();
+
+            a_size.cmp(&b_size)
+        });
+
+        // If assets sorter function is provided, then apply it as well.
         if let Some(sorter) = self.assets_sorter {
             assets.sort_by(sorter);
         }
 
-        todo!()
+        // TODO: the average capacity can be precalculated.
+        let mut tasks = Vec::<tokio::task::JoinHandle<Result<(), SophonDownloaderError>>>::new();
+        let mut occupied_memory = 0;
+
+        async fn flatten(
+            task: tokio::task::JoinHandle<Result<(), SophonDownloaderError>>
+        ) -> Result<(), SophonDownloaderError> {
+            match task.await {
+                Ok(result) => result,
+                Err(err) => Err(SophonDownloaderError::Tokio(err))
+            }
+        }
+
+        while let Some(asset) = assets.pop() {
+            // Create file's parent folder if it doesn't exist.
+            let asset_path = download_dir.join(&asset.path);
+
+            if let Some(parent) = asset_path.parent() && !parent.is_dir() {
+                std::fs::create_dir_all(parent)?;
+            }
+
+            // Create new file or open existing one. Pre-allocate space for
+            // the file chunks on disk.
+            let file = File::options()
+                .create(true)
+                .truncate(true)
+                .write(true)
+                .open(asset_path)?;
+
+            file.set_len(asset.size)?;
+
+            let file = Arc::new(Mutex::new(BufWriter::new(file)));
+
+            // Calculate memory needed to store all file chunks.
+            let download_size = asset.chunks.iter()
+                .map(|chunk| chunk.decompressed_size)
+                .sum::<u64>();
+
+            // If we cannot fit all the file chunks in memory yet AND the tasks
+            // queue is not empty - then we wait until already scheduled files
+            // finish writing.
+            if occupied_memory + download_size > self.target_memory_usage
+                && !tasks.is_empty()
+            {
+                #[cfg(feature = "tracing")]
+                tracing::debug!(
+                    tasks = tasks.len(),
+                    ?occupied_memory,
+                    "wait for scheduled download tasks"
+                );
+
+                futures::future::try_join_all(tasks.drain(..).map(flatten)).await?;
+
+                occupied_memory = 0;
+            }
+
+            // Schedule all the chunks of the file.
+            for chunk in asset.chunks {
+                let file = file.clone();
+
+                let url = format!(
+                    "{}{}/{}",
+                    download_info.chunk_download.url_prefix,
+                    download_info.chunk_download.url_suffix,
+                    chunk.name
+                );
+
+                #[cfg(feature = "tracing")]
+                tracing::trace!(
+                    asset = ?asset.path,
+                    offset = ?chunk.offset,
+                    size = ?chunk.decompressed_size,
+                    ?url,
+                    "schedule chunk download"
+                );
+
+                let decompress_chunk = download_info.chunk_download.compressed;
+
+                let request = self.client.get(&url)
+                    .timeout({
+                        (chunk.compressed_size as f64 / 1024.0 / 1024.0).ceil() as u32
+                            * self.fetch_chunk_timeout_per_mb
+                    });
+
+                occupied_memory += chunk.decompressed_size;
+
+                // Start chunk downloading task.
+                let future = async move {
+                    let response = request.send().await?;
+
+                    let mut chunk_body = response.bytes().await?.to_vec();
+
+                    if decompress_chunk {
+                        chunk_body = zstd::decode_all(chunk_body.as_slice())?;
+                    }
+
+                    let mut lock = file.lock().await;
+
+                    #[cfg(feature = "tracing")]
+                    tracing::trace!(
+                        offset = ?chunk.offset,
+                        size = ?chunk.decompressed_size,
+                        ?url,
+                        "write chunk to disk"
+                    );
+
+                    lock.seek(SeekFrom::Start(chunk.offset))?;
+                    lock.write_all(&chunk_body)?;
+                    lock.flush()?;
+
+                    drop(lock);
+
+                    Ok::<_, SophonDownloaderError>(())
+                };
+
+                let task = match &self.runtime {
+                    Some(runtime) => runtime.spawn(future),
+                    None => tokio::spawn(future)
+                };
+
+                tasks.push(task);
+            }
+
+            drop(file);
+        }
+
+        // Wait for all the remaining tasks to finish.
+        futures::future::try_join_all(tasks.into_iter().map(flatten)).await?;
+
+        Ok(())
     }
 }

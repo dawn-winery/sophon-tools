@@ -95,8 +95,8 @@ enum CliCommands {
         #[arg(index = 1, required = true)]
         game: String,
 
-        #[arg(index = 2)]
-        version: Option<String>,
+        #[arg(index = 2, required = true)]
+        path: PathBuf,
 
         #[arg(
             long, value_enum, default_value_t = SophonRegion::Global,
@@ -106,6 +106,9 @@ enum CliCommands {
 
         #[arg(long)]
         launcher_id: Option<String>,
+
+        #[arg(long)]
+        version: Option<String>,
 
         #[arg(
             long, default_value_t = String::from("game"),
@@ -121,16 +124,39 @@ enum CliCommands {
         #[arg(long)]
         regex: Option<String>,
 
-        /// Amount of threads to use in the tokio runtime. If unset, amount of
-        /// virtual CPU cores will be used.
+        /// Amount of threads to use in the tokio async runtime. If unset,
+        /// amount of virtual CPU cores will be used.
         #[arg(
-            long,
+            long, short('t'),
             alias = "workers",
             default_value_t = std::thread::available_parallelism()
                 .map(|threads| threads.get())
                 .unwrap_or(1)
         )]
         threads: usize,
+
+        /// Amount of system memory downloader will try to utilize. Higher value
+        /// will allow downloader to download more files in parallel.
+        #[arg(
+            long, short('m'), default_value_t = 256 * 1024 * 1024,
+            alias = "target-memory",
+            alias = "memory-usage",
+            alias = "target-memory-buffer",
+            alias = "target-memory-buf",
+            alias = "memory-buffer",
+            alias = "memory-buf",
+            alias = "memory",
+            alias = "mem"
+        )]
+        target_memory_usage: u64,
+
+        /// Use files sizes for verification instead of calculating md5 hashes.
+        #[arg(long, alias = "fast")]
+        fast_verify: bool,
+
+        /// Do not verify files before downloading.
+        #[arg(long, alias = "no-verify-before-downloading")]
+        no_verify_before_download: bool,
 
         #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
         output_format: OutputFormat
@@ -336,21 +362,29 @@ fn main() -> anyhow::Result<()> {
 
         CliCommands::Download {
             game,
-            version,
+            path,
             region,
             launcher_id,
+            version,
             component,
             regex,
             threads,
+            target_memory_usage,
+            fast_verify,
+            no_verify_before_download,
             output_format
         } => download_game::run(
             game,
             component,
             version,
+            path,
             region,
             launcher_id,
             regex,
             threads,
+            target_memory_usage,
+            fast_verify,
+            no_verify_before_download,
             output_format,
             cli.ascii
         )

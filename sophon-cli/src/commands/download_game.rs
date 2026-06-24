@@ -17,10 +17,12 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+use std::path::PathBuf;
+
 use regex::Regex;
 
 use sophon_lib::api::SophonApi;
-use sophon_lib::downloader::SophonDownloader;
+use sophon_lib::downloader::{SophonDownloader, SophonDownloaderVerifyMethod};
 
 use super::{SophonRegion, OutputFormat};
 
@@ -29,10 +31,14 @@ pub fn run(
     game_id: String,
     component_id: String,
     version: Option<String>,
+    path: PathBuf,
     region: SophonRegion,
     launcher_id: Option<String>,
     regex: Option<String>,
     threads: usize,
+    target_memory_usage: u64,
+    fast_verify: bool,
+    no_verify_before_download: bool,
     _output_format: OutputFormat,
     _ascii: bool
 ) -> anyhow::Result<()> {
@@ -58,7 +64,18 @@ pub fn run(
         return Ok(());
     };
 
-    let mut downloader = SophonDownloader::default();
+    let mut downloader = SophonDownloader::default()
+        .with_runtime(runtime.handle().clone())
+        .with_target_memory_usage(target_memory_usage)
+        .with_verify_before_downloading({
+            if no_verify_before_download {
+                SophonDownloaderVerifyMethod::None
+            } else if fast_verify {
+                SophonDownloaderVerifyMethod::Fast
+            } else {
+                SophonDownloaderVerifyMethod::Full
+            }
+        });
 
     if let Some(regex) = regex {
         downloader = downloader.with_assets_filter(Box::new(move |asset| {
@@ -66,7 +83,10 @@ pub fn run(
         }));
     }
 
-    runtime.block_on(downloader.download(&download_manifest))?;
+    runtime.block_on(downloader.download(
+        &download_manifest,
+        &path
+    ))?;
 
     // match output_format {
     //     OutputFormat::Text => {
