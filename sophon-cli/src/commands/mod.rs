@@ -23,6 +23,8 @@ pub mod list_games;
 pub mod list_components;
 pub mod game_versions;
 pub mod download_info;
+
+pub mod detect_game;
 pub mod verify_game;
 pub mod download_game;
 
@@ -51,6 +53,47 @@ pub enum OutputFormat {
 
     #[value(name = "json")]
     Json
+}
+
+const GAMES: &[(&str, &str, &str)] = &[
+    // Global
+    ("gopR6Cufr3", "hk4e_global",  "Genshin Impact"),
+    ("U5hbdsT9W7", "nap_global",   "Zenless Zone Zero"),
+    ("4ziysqXOQ8", "hkrpg_global", "Honkai: Star Rail"),
+    ("5TIVvvcwtM", "bh3_global",   "Honkai Impact 3rd"),
+    ("g0mMIvshDb", "bh3_global",   "Honkai Impact 3rd"),
+    ("uxB4MC7nzC", "bh3_global",   "Honkai Impact 3rd"),
+    ("bxPTXSET5t", "bh3_global",   "Honkai Impact 3rd"),
+    ("wkE5P5WsIf", "bh3_global",   "Honkai Impact 3rd"),
+
+    // China
+    ("1Z8W5NHUQb", "hk4e_cn",  "Genshin Impact"),
+    ("x6znKlJ0xK", "nap_cn",   "Zenless Zone Zero"),
+    ("64kMb5iAWu", "hkrpg_cn", "Honkai: Star Rail"),
+    ("osvnlOc0S8", "bh3_cn",   "Honkai Impact 3rd")
+];
+
+pub fn find_game_name(id: &str, biz: &str) -> Option<&'static str> {
+    for (game_id, game_biz, game_name) in GAMES.iter().copied() {
+        if game_id == id || game_biz == biz {
+            return Some(game_name);
+        }
+    }
+
+    None
+}
+
+/// Format bytes string.
+pub fn format_size(size: f64) -> String {
+    if size > 1024.0 * 1024.0 * 1024.0 {
+        format!("{:.2} GB", size / 1024.0 / 1024.0 / 1024.0)
+    } else if size > 1024.0 * 1024.0 {
+        format!("{:.2} MB", size / 1024.0 / 1024.0)
+    } else if size > 1024.0 {
+        format!("{:.2} KB", size / 1024.0)
+    } else {
+        format!("{} B", size)
+    }
 }
 
 #[derive(Default)]
@@ -83,18 +126,5 @@ impl nutmeg::Model for ProgressBar {
         let pb_suffix = " ".repeat(pb_suffix_width);
 
         format!("{current} / {total} [{pb_prefix}{pb_suffix}]")
-    }
-}
-
-/// Format bytes string.
-pub fn format_size(size: f64) -> String {
-    if size > 1024.0 * 1024.0 * 1024.0 {
-        format!("{:.2} GB", size / 1024.0 / 1024.0 / 1024.0)
-    } else if size > 1024.0 * 1024.0 {
-        format!("{:.2} MB", size / 1024.0 / 1024.0)
-    } else if size > 1024.0 {
-        format!("{:.2} KB", size / 1024.0)
-    } else {
-        format!("{} B", size)
     }
 }

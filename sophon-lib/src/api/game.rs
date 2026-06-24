@@ -17,6 +17,12 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+use std::path::Path;
+use std::fs::File;
+use std::io::{BufReader, Read};
+
+use md5::{Md5, Digest};
+
 use super::*;
 use super::package::SophonApiPackage;
 
@@ -42,6 +48,26 @@ impl<'api> SophonApiGame<'api> {
             launcher_id,
             game_id
         }
+    }
+
+    #[inline]
+    pub const fn api(&self) -> &'api SophonApi {
+        self.api
+    }
+
+    #[inline]
+    pub const fn region(&self) -> &SophonRegion {
+        &self.region
+    }
+
+    #[inline]
+    pub fn launcher_id(&self) -> &str {
+        &self.launcher_id
+    }
+
+    #[inline]
+    pub fn game_id(&self) -> &str {
+        &self.game_id
     }
 
     /// Try to find branch information about the current game.
@@ -146,5 +172,50 @@ impl<'api> SophonApiGame<'api> {
         &self
     ) -> Result<Box<[String]>, SophonApiError> {
         Ok(self.fetch_branch_info().await?.diff_versions)
+    }
+
+    /// Try to detect downloaded game version. The algorithm will fetch expected
+    /// game binary hashes and compare them against the available binary hash.
+    ///
+    /// If there's no game binary in the provided game folder or none of
+    /// expected hashes matched - then `Ok(None)` is returned.
+    pub async fn detect_version(
+        &self,
+        game_dir: &Path
+    ) -> Result<Option<String>, SophonApiError> {
+        let game_configs = self.fetch_configs().await?;
+
+        let binary_path = game_dir.join(&game_configs.binary_name);
+
+        if !binary_path.is_file() {
+            return Ok(None);
+        }
+
+        let mut file = BufReader::new(File::open(&binary_path)?);
+        let mut hasher = Md5::default();
+
+        let mut buf = [0; 1024];
+
+        loop {
+            let n = file.read(&mut buf)?;
+
+            if n == 0 {
+                break;
+            }
+
+            hasher.update(&buf[..n]);
+        }
+
+        let binary_hash = hex::encode(hasher.finalize());
+
+        let versions_info = self.fetch_versions_info().await?;
+
+        for version_info in versions_info.versions {
+            if version_info.hash_md5 == binary_hash {
+                return Ok(Some(version_info.version));
+            }
+        }
+
+        Ok(None)
     }
 }

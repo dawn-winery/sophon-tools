@@ -50,6 +50,9 @@ pub enum SophonApiError {
     #[error("failed to deserialize json response: {0}")]
     Deserialize(#[from] serde_json::Error),
 
+    #[error("failed to perform io operation: {0}")]
+    Io(#[from] std::io::Error),
+
     #[error("sophon API returned invalid status: {code} {message}")]
     InvalidSophonStatus {
         code: i64,

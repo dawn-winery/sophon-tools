@@ -48,6 +48,15 @@ enum CliCommands {
     #[command(subcommand)]
     Api(CliApiCommands),
 
+    /// Detect installed game.
+    Detect {
+        #[arg(index = 1, required = true)]
+        path: PathBuf,
+
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        output_format: OutputFormat
+    },
+
     /// Verify game.
     Verify {
         #[arg(index = 1, required = true)]
@@ -354,6 +363,11 @@ fn main() -> anyhow::Result<()> {
             output_format,
             cli.ascii
         ),
+
+        CliCommands::Detect {
+            path,
+            output_format
+        } => detect_game::run(path, output_format, cli.ascii),
 
         CliCommands::Verify {
             game,

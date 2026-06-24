@@ -49,6 +49,36 @@ impl<'api> SophonApiPackage<'api> {
         }
     }
 
+    #[inline]
+    pub const fn api(&self) -> &'api SophonApi {
+        self.api
+    }
+
+    #[inline]
+    pub const fn region(&self) -> &SophonRegion {
+        &self.region
+    }
+
+    #[inline]
+    pub fn branch(&self) -> &str {
+        &self.branch
+    }
+
+    #[inline]
+    pub fn password(&self) -> &str {
+        &self.password
+    }
+
+    #[inline]
+    pub fn package_id(&self) -> &str {
+        &self.package_id
+    }
+
+    #[inline]
+    pub fn version(&self) -> &str {
+        &self.version
+    }
+
     /// Fetch current game package files download info.
     pub async fn fetch_download_info(
         &self
