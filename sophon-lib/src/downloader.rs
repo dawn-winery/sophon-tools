@@ -454,7 +454,10 @@ impl SophonDownloader {
 
             file.set_len(asset.size)?;
 
-            let file = Arc::new(Mutex::new(BufWriter::new(file)));
+            let file = Arc::new(Mutex::new(
+                // Increase default buffer to 64 KB because chunks are large.
+                BufWriter::with_capacity(64 * 1024, file)
+            ));
 
             // Calculate memory needed to store all file chunks.
             let download_size = asset.chunks.iter()
@@ -474,7 +477,10 @@ impl SophonDownloader {
                     "wait for scheduled download tasks"
                 );
 
-                futures::future::try_join_all(tasks.drain(..).map(flatten)).await?;
+                futures::future::try_join_all(
+                    tasks.drain(..)
+                        .map(flatten)
+                ).await?;
 
                 occupied_memory = 0;
             }
