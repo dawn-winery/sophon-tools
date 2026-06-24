@@ -21,7 +21,7 @@ use std::sync::Arc;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use std::fs::File;
-use std::io::{BufWriter, Seek, SeekFrom, Write};
+use std::io::{BufWriter, Read, Seek, SeekFrom, Write};
 
 use tokio::sync::Mutex;
 
@@ -39,6 +39,9 @@ pub enum SophonDownloaderError {
 
     #[error("failed to perform io operation: {0}")]
     Io(#[from] std::io::Error),
+
+    #[error("failed to open zstd decoder: {0}")]
+    Zstd(#[from] ruzstd::decoding::errors::FrameDecoderError),
 
     #[error("failed to decode protobuf: {0}")]
     Protobuf(#[from] DecodeError),
@@ -270,7 +273,12 @@ impl SophonDownloader {
         let mut manifest = response.bytes().await?.to_vec();
 
         if download_info.manifest_download.compressed {
-            manifest = zstd::decode_all(manifest.as_slice())?;
+            let mut decoder = ruzstd::decoding::StreamingDecoder::new(manifest.as_slice())?;
+            let mut buf = Vec::with_capacity(manifest.len());
+
+            decoder.read_to_end(&mut buf)?;
+
+            manifest = buf;
         }
 
         // Verify downloaded manifest.
@@ -492,7 +500,12 @@ impl SophonDownloader {
                     let mut chunk_body = response.bytes().await?.to_vec();
 
                     if decompress_chunk {
-                        chunk_body = zstd::decode_all(chunk_body.as_slice())?;
+                        let mut decoder = ruzstd::decoding::StreamingDecoder::new(chunk_body.as_slice())?;
+                        let mut buf = Vec::with_capacity(chunk_body.len());
+
+                        decoder.read_to_end(&mut buf)?;
+
+                        chunk_body = buf;
                     }
 
                     let mut lock = file.lock().await;
