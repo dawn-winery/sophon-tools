@@ -45,7 +45,7 @@ pub fn run(
     no_verify_before_download: bool,
     user_agent: Option<String>,
     proxy: Option<String>,
-    _output_format: OutputFormat,
+    output_format: OutputFormat,
     _ascii: bool
 ) -> anyhow::Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -119,126 +119,36 @@ pub fn run(
         }));
     }
 
-    runtime.block_on(downloader.download(
-        &download_manifest,
-        &path,
-        Box::new(|current, total| {
-            println!(
-                "{:.2} MB / {:.2} MB",
-                current as f64 / 1024.0 / 1024.0,
-                total as f64 / 1024.0 / 1024.0
-            );
-        })
-    ))?;
+    match output_format {
+        OutputFormat::Text => {
+            runtime.block_on(downloader.download(
+                &download_manifest,
+                &path,
+                Box::new(|current, total| {
+                    println!(
+                        "{:.2} MB / {:.2} MB",
+                        current as f64 / 1024.0 / 1024.0,
+                        total as f64 / 1024.0 / 1024.0
+                    );
+                })
+            ))?;
+        }
 
-    // match output_format {
-    //     OutputFormat::Text => {
-    //         let mut table = comfy_table::Table::new();
-
-    //         if ascii {
-    //             table.load_preset(comfy_table::presets::ASCII_FULL);
-    //         } else {
-    //             table.load_preset(comfy_table::presets::UTF8_FULL);
-    //         }
-
-    //         table.set_content_arrangement(
-    //             comfy_table::ContentArrangement::Dynamic
-    //         );
-
-    //         table.set_header([
-    //             "path",
-    //             "md5",
-    //             "size"
-    //         ]);
-
-    //         let mut filtered_files = 0;
-    //         let mut filtered_size = 0;
-
-    //         let mut total_files = 0;
-    //         let mut total_size = 0;
-
-    //         for asset in download_info.assets {
-    //             if asset.is_file() {
-    //                 total_files += 1;
-    //                 total_size += asset.size;
-
-    //                 if is_regex_match(regex.as_ref(), &asset.path) {
-    //                     filtered_files += 1;
-    //                     filtered_size += asset.size;
-
-    //                     table.add_row([
-    //                         asset.path,
-    //                         asset.hash_md5,
-    //                         format_size(asset.size as f64)
-    //                     ]);
-    //                 }
-    //             }
-    //         }
-
-    //         if regex.is_some() {
-    //             table.add_row([
-    //                 String::from("Filtered (Total)"),
-    //                 format!("{filtered_files} files ({total_files} files)"),
-    //                 format!(
-    //                     "{} ({})",
-    //                     format_size(filtered_size as f64),
-    //                     format_size(total_size as f64)
-    //                 )
-    //             ]);
-    //         }
-
-    //         else {
-    //             table.add_row([
-    //                 String::from("Total"),
-    //                 format!("{total_files} files"),
-    //                 format_size(total_size as f64)
-    //             ]);
-    //         }
-
-    //         println!("{table}");
-    //     }
-
-    //     OutputFormat::Json => {
-    //         println!("{}", serde_json::to_string(&serde_json::json!(
-    //             download_info.assets
-    //                 .into_iter()
-    //                 .filter(|asset| {
-    //                     is_regex_match(regex.as_ref(), &asset.path)
-    //                 })
-    //                 .map(|asset| {
-    //                     serde_json::json!({
-    //                         "path": asset.path,
-    //                         "type": if asset.is_file() {
-    //                             Some("file")
-    //                         } else if asset.is_directory() {
-    //                             Some("directory")
-    //                         } else {
-    //                             None
-    //                         },
-    //                         "size": asset.size,
-    //                         "hash_md5": asset.hash_md5,
-    //                         "chunks": asset.chunks.into_iter()
-    //                             .map(|chunk| {
-    //                                 serde_json::json!({
-    //                                     "name": chunk.name,
-    //                                     "offset": chunk.offset,
-    //                                     "compressed": {
-    //                                         "size": chunk.compressed_size,
-    //                                         "hash_md5": chunk.compressed_hash_md5
-    //                                     },
-    //                                     "decompressed": {
-    //                                         "size": chunk.decompressed_size,
-    //                                         "hash_md5": chunk.decompressed_hash_md5
-    //                                     }
-    //                                 })
-    //                             })
-    //                             .collect::<Vec<_>>()
-    //                     })
-    //                 })
-    //                 .collect::<Vec<_>>()
-    //         ))?);
-    //     }
-    // }
+        OutputFormat::Json => {
+            runtime.block_on(downloader.download(
+                &download_manifest,
+                &path,
+                Box::new(|current, total| {
+                    if let Ok(msg) = serde_json::to_string(&serde_json::json!({
+                        "current": current,
+                        "total": total
+                    })) {
+                        println!("{msg}");
+                    }
+                })
+            ))?;
+        }
+    }
 
     Ok(())
 }
