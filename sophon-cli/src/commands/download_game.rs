@@ -21,6 +21,10 @@ use std::path::PathBuf;
 
 use regex::Regex;
 
+use sophon_lib::export::reqwest::{
+    Client as ReqwestClient,
+    Proxy as ReqwestProxy
+};
 use sophon_lib::api::SophonApi;
 use sophon_lib::downloader::{SophonDownloader, SophonDownloaderVerifyMethod};
 
@@ -39,6 +43,8 @@ pub fn run(
     target_memory_usage: u64,
     fast_verify: bool,
     no_verify_before_download: bool,
+    user_agent: Option<String>,
+    proxy: Option<String>,
     _output_format: OutputFormat,
     _ascii: bool
 ) -> anyhow::Result<()> {
@@ -76,6 +82,36 @@ pub fn run(
                 SophonDownloaderVerifyMethod::Full
             }
         });
+
+    match (user_agent, proxy) {
+        (Some(user_agent), Some(proxy)) => {
+            downloader = downloader.with_client(
+                ReqwestClient::builder()
+                    .user_agent(user_agent)
+                    .proxy(ReqwestProxy::all(proxy)?)
+                    .build()?
+            );
+        }
+
+        (Some(user_agent), None) => {
+            downloader = downloader.with_client(
+                ReqwestClient::builder()
+                    .user_agent(user_agent)
+                    .build()?
+            );
+        }
+
+        (None, Some(proxy)) => {
+            downloader = downloader.with_client(
+                ReqwestClient::builder()
+                    .user_agent(format!("sophon-tools/v{}", sophon_lib::VERSION))
+                    .proxy(ReqwestProxy::all(proxy)?)
+                    .build()?
+            );
+        }
+
+        (None, None) => ()
+    }
 
     if let Some(regex) = regex {
         downloader = downloader.with_assets_filter(Box::new(move |asset| {

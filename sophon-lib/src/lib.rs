@@ -20,6 +20,12 @@
 /// `sophon-tools` version.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+pub mod export {
+    pub use reqwest;
+    pub use tokio;
+    pub use futures;
+}
+
 pub mod region;
 pub mod api;
 pub mod protos;

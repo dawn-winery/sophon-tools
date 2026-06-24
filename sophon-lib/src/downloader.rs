@@ -223,6 +223,11 @@ impl SophonDownloader {
         self
     }
 
+    #[inline]
+    pub const fn client(&self) -> &reqwest::Client {
+        &self.client
+    }
+
     /// Fetch information about the assets and chunks that the downloader will
     /// need to download.
     pub async fn fetch_download_info(

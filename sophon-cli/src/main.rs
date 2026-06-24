@@ -155,8 +155,25 @@ enum CliCommands {
         fast_verify: bool,
 
         /// Do not verify files before downloading.
-        #[arg(long, alias = "no-verify-before-downloading")]
+        #[arg(
+            long,
+            alias = "no-verify-before-downloading",
+            alias = "no-verifying-before-download",
+            alias = "no-verifying-before-downloading",
+            alias = "skip-verify-before-download",
+            alias = "skip-verify-before-downloading",
+            alias = "skip-verifying-before-download",
+            alias = "skip-verifying-before-downloading"
+        )]
         no_verify_before_download: bool,
+
+        /// Downloader user agent string.
+        #[arg(long)]
+        user_agent: Option<String>,
+
+        /// Downloader proxy.
+        #[arg(long)]
+        proxy: Option<String>,
 
         #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
         output_format: OutputFormat
@@ -372,6 +389,8 @@ fn main() -> anyhow::Result<()> {
             target_memory_usage,
             fast_verify,
             no_verify_before_download,
+            user_agent,
+            proxy,
             output_format
         } => download_game::run(
             game,
@@ -385,6 +404,8 @@ fn main() -> anyhow::Result<()> {
             target_memory_usage,
             fast_verify,
             no_verify_before_download,
+            user_agent,
+            proxy,
             output_format,
             cli.ascii
         )
