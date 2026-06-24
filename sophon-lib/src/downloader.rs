@@ -89,8 +89,8 @@ pub struct SophonDownloader {
     client: reqwest::Client,
     runtime: Option<tokio::runtime::Handle>,
 
-    fetch_manifest_timeout: Duration,
-    fetch_chunk_timeout_per_mb: Duration,
+    fetch_manifest_timeout: Option<Duration>,
+    fetch_chunk_timeout_per_mb: Option<Duration>,
 
     verify_manifest: SophonDownloaderVerifyMethod,
     verify_before_downloading: SophonDownloaderVerifyMethod,
@@ -113,8 +113,8 @@ impl Default for SophonDownloader {
 
             runtime: None,
 
-            fetch_manifest_timeout: Duration::from_secs(5),
-            fetch_chunk_timeout_per_mb: Duration::from_secs(5),
+            fetch_manifest_timeout: None,
+            fetch_chunk_timeout_per_mb: None,
 
             verify_manifest: SophonDownloaderVerifyMethod::default(),
             verify_before_downloading: SophonDownloaderVerifyMethod::default(),
@@ -145,9 +145,11 @@ impl SophonDownloader {
         self
     }
 
-    /// Default: `5 sec`
+    /// Manifest downloading timeout.
+    ///
+    /// Unset by default.
     pub fn with_fetch_manifest_timeout(mut self, timeout: Duration) -> Self {
-        self.fetch_manifest_timeout = timeout;
+        self.fetch_manifest_timeout = Some(timeout);
 
         self
     }
@@ -155,9 +157,9 @@ impl SophonDownloader {
     /// Chunk downloading timeout per MB of data. In other words, for 6.37 MB
     /// chunk downloader will wait for `ceil(6.47) * timeout = 7 * timeout`.
     ///
-    /// Default: `5 sec` (~204.8 KB/s)
+    /// Unset by default.
     pub fn with_fetch_chunk_timeout_per_mb(mut self, timeout: Duration) -> Self {
-        self.fetch_chunk_timeout_per_mb = timeout;
+        self.fetch_chunk_timeout_per_mb = Some(timeout);
 
         self
     }
@@ -266,7 +268,7 @@ impl SophonDownloader {
 
         // Download the manifest.
         let response = self.client.get(&url)
-            .timeout(self.fetch_manifest_timeout)
+            .timeout(self.fetch_manifest_timeout.unwrap_or(Duration::MAX))
             .send()
             .await?;
 
@@ -485,11 +487,14 @@ impl SophonDownloader {
 
                 let decompress_chunk = download_info.chunk_download.compressed;
 
-                let request = self.client.get(&url)
-                    .timeout({
+                let mut request = self.client.get(&url);
+
+                if let Some(timeout_per_mb) = self.fetch_chunk_timeout_per_mb {
+                    request = request.timeout({
                         (chunk.compressed_size as f64 / 1024.0 / 1024.0).ceil() as u32
-                            * self.fetch_chunk_timeout_per_mb
+                            * timeout_per_mb
                     });
+                }
 
                 occupied_memory += chunk.decompressed_size;
 

@@ -22,7 +22,6 @@ default = ["tracing", "vendored-hpatchz"]
 version = "0.13"
 features = [
     "rustls",
-    "charset",
     "http2",
     "socks",
     "system-proxy"
