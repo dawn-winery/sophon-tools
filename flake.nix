@@ -22,9 +22,12 @@
                 devShells.default = pkgs.mkShell {
                     nativeBuildInputs = with pkgs; [
                         (rust-bin.stable.latest.default.override {
+                            targets = [ "x86_64-unknown-linux-musl" ];
                             extensions = [ "rust-src" ];
                         })
-                        gcc
+
+                        pkgs.pkgsCross.musl64.buildPackages.gcc
+
                         protobuf
                     ];
                 };
