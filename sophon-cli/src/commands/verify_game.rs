@@ -19,6 +19,7 @@
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
+use std::io::Write;
 
 use regex::Regex;
 
@@ -26,7 +27,7 @@ use sophon_lib::api::SophonApi;
 use sophon_lib::downloader::SophonDownloader;
 use sophon_lib::verifier::{SophonVerifier, VerifyResult};
 
-use super::{SophonRegion, OutputFormat};
+use super::{SophonRegion, OutputFormat, ProgressBar};
 
 fn is_regex_match(regex: Option<&Regex>, path: &str) -> bool {
     regex.map(|regex| regex.is_match(path)).unwrap_or(true)
@@ -105,12 +106,24 @@ pub fn run(
         OutputFormat::Text => {
             let total = entries.len();
 
-            for (i, path) in entries.into_iter().enumerate() {
+            let mut view = nutmeg::View::new(
+                ProgressBar {
+                    current: 0,
+                    total: total as u64,
+                    format_bytes: false
+                },
+                nutmeg::Options::new()
+                    .print_holdoff(std::time::Duration::ZERO)
+            );
+
+            for path in entries.into_iter() {
                 match verifier.verify_file(path.clone())? {
-                    VerifyResult::Valid   => println!("{:6} / {total}    valid  {path:#?}", i + 1),
-                    VerifyResult::Invalid => println!("{:6} / {total}  invalid  {path:#?}", i + 1),
-                    VerifyResult::Unknown => println!("{:6} / {total}  unknown  {path:#?}", i + 1)
+                    VerifyResult::Valid   => writeln!(view, "      valid  {path:#?}")?,
+                    VerifyResult::Invalid => writeln!(view, "[!] invalid  {path:#?}")?,
+                    VerifyResult::Unknown => writeln!(view, "[?] unknown  {path:#?}")?
                 }
+
+                view.update(|model| model.current += 1);
             }
         }
 

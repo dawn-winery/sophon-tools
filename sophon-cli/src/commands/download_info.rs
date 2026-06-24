@@ -22,22 +22,10 @@ use regex::Regex;
 use sophon_lib::api::SophonApi;
 use sophon_lib::downloader::SophonDownloader;
 
-use super::{SophonRegion, OutputFormat};
+use super::{SophonRegion, OutputFormat, format_size};
 
 fn is_regex_match(regex: Option<&Regex>, path: &str) -> bool {
     regex.map(|regex| regex.is_match(path)).unwrap_or(true)
-}
-
-fn format_size(size: f64) -> String {
-    if size > 1024.0 * 1024.0 * 1024.0 {
-        format!("{:.2} GB", size / 1024.0 / 1024.0 / 1024.0)
-    } else if size > 1024.0 * 1024.0 {
-        format!("{:.2} MB", size / 1024.0 / 1024.0)
-    } else if size > 1024.0 {
-        format!("{:.2} KB", size / 1024.0)
-    } else {
-        format!("{} B", size)
-    }
 }
 
 #[allow(clippy::too_many_arguments)]

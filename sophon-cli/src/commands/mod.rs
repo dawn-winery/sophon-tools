@@ -52,3 +52,49 @@ pub enum OutputFormat {
     #[value(name = "json")]
     Json
 }
+
+#[derive(Default)]
+pub struct ProgressBar {
+    pub current: u64,
+    pub total: u64,
+
+    /// Format current and total as bytes.
+    pub format_bytes: bool
+}
+
+impl nutmeg::Model for ProgressBar {
+    fn render(&mut self, width: usize) -> String {
+        let (current, total) = if self.format_bytes {
+            (format_size(self.current as f64), format_size(self.total as f64))
+        } else {
+            (self.current.to_string(), self.total.to_string())
+        };
+
+        if current.len() + total.len() + 6 > width {
+            return String::new();
+        }
+
+        let pb_width = width - current.len() - total.len() - 6;
+
+        let pb_prefix_width = (self.current as f64 * pb_width as f64 / self.total as f64).round() as usize;
+        let pb_suffix_width = pb_width - pb_prefix_width;
+
+        let pb_prefix = "#".repeat(pb_prefix_width);
+        let pb_suffix = " ".repeat(pb_suffix_width);
+
+        format!("{current} / {total} [{pb_prefix}{pb_suffix}]")
+    }
+}
+
+/// Format bytes string.
+pub fn format_size(size: f64) -> String {
+    if size > 1024.0 * 1024.0 * 1024.0 {
+        format!("{:.2} GB", size / 1024.0 / 1024.0 / 1024.0)
+    } else if size > 1024.0 * 1024.0 {
+        format!("{:.2} MB", size / 1024.0 / 1024.0)
+    } else if size > 1024.0 {
+        format!("{:.2} KB", size / 1024.0)
+    } else {
+        format!("{} B", size)
+    }
+}

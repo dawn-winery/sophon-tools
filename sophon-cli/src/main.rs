@@ -83,7 +83,7 @@ enum CliCommands {
         regex: Option<String>,
 
         /// Use files sizes for verification instead of calculating md5 hashes.
-        #[arg(long, alias = "fast")]
+        #[arg(long, alias = "fast", alias = "fast-verifying")]
         fast_verify: bool,
 
         #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
@@ -151,7 +151,7 @@ enum CliCommands {
         target_memory_usage: String,
 
         /// Use files sizes for verification instead of calculating md5 hashes.
-        #[arg(long, alias = "fast")]
+        #[arg(long, alias = "fast", alias = "fast-verifying")]
         fast_verify: bool,
 
         /// Do not verify files before downloading.

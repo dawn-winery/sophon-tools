@@ -28,7 +28,7 @@ use sophon_lib::export::reqwest::{
 use sophon_lib::api::SophonApi;
 use sophon_lib::downloader::{SophonDownloader, SophonDownloaderVerifyMethod};
 
-use super::{SophonRegion, OutputFormat};
+use super::{SophonRegion, OutputFormat, ProgressBar};
 
 #[allow(clippy::too_many_arguments)]
 pub fn run(
@@ -121,15 +121,23 @@ pub fn run(
 
     match output_format {
         OutputFormat::Text => {
+            let view = nutmeg::View::new(
+                ProgressBar {
+                    current: 0,
+                    total: 0,
+                    format_bytes: true
+                },
+                nutmeg::Options::default()
+            );
+
             runtime.block_on(downloader.download(
                 &download_manifest,
                 &path,
-                Box::new(|current, total| {
-                    println!(
-                        "{:.2} MB / {:.2} MB",
-                        current as f64 / 1024.0 / 1024.0,
-                        total as f64 / 1024.0 / 1024.0
-                    );
+                Box::new(move |current, total| {
+                    view.update(move |model| {
+                        model.current = current;
+                        model.total = total
+                    })
                 })
             ))?;
         }
