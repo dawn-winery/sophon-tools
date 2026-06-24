@@ -18,7 +18,7 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 const HPATCHZ: &[u8] = include_bytes!("../../external/hpatchz/hpatchz");
 
@@ -49,25 +49,36 @@ impl HdiffPatcher {
             .join(format!("hpatchz-{hash:0x}"));
 
         if !path.is_file() {
+            #[cfg(feature = "tracing")]
+            tracing::debug!(?path, "export bundled hpatchz binary");
+
             std::fs::write(&path, HPATCHZ)?;
         }
 
         Ok(Self(path))
     }
 
-    /// Apply patch to the input file and save it under the output path.
+    /// Apply patch to the input file and save it under the output path. If
+    /// `Ok(false)` is returned, then the patch was not applied.
+    #[cfg_attr(
+        feature = "tracing",
+        tracing::instrument(level = tracing::Level::DEBUG, skip(self), ret)
+    )]
     pub fn patch(
         &self,
         input: &Path,
         patch: &Path,
         output: &Path
-    ) -> std::io::Result<()> {
-        Command::new(&self.0)
+    ) -> std::io::Result<bool> {
+        let output = Command::new(&self.0)
+            .arg("-f")
             .arg(input)
             .arg(patch)
             .arg(output)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
             .output()?;
 
-        Ok(())
+        Ok(String::from_utf8_lossy(&output.stdout).contains("patch ok!"))
     }
 }

@@ -103,7 +103,10 @@ impl SophonVerifier {
 
     /// Verify given file. If it's not a part of the game, then `false` is
     /// returned.
-    #[tracing::instrument(level = tracing::Level::DEBUG, skip(self), ret)]
+    #[cfg_attr(
+        feature = "tracing",
+        tracing::instrument(level = tracing::Level::DEBUG, skip(self), ret)
+    )]
     pub fn verify_file(&mut self, path: PathBuf) -> std::io::Result<VerifyResult> {
         if let Some(is_valid) = self.cache.get(&path) {
             match is_valid {
