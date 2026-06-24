@@ -376,7 +376,10 @@ impl SophonDownloader {
             }
 
             download_manifest.assets.retain(move |asset| {
-                !matches!(verifier.verify_file(download_dir.join(&asset.path)), Ok(VerifyResult::Valid))
+                !matches!(
+                    verifier.verify_file(download_dir.join(&asset.path)),
+                    Ok(VerifyResult::Valid)
+                )
             });
         }
 
@@ -408,8 +411,19 @@ impl SophonDownloader {
             assets.sort_by(sorter);
         }
 
-        // TODO: the average capacity can be precalculated.
-        let mut tasks = Vec::<tokio::task::JoinHandle<Result<(), SophonDownloaderError>>>::new();
+        // Pre-calculate tasks queue capacity.
+        let median_task_size = assets.get(assets.len() / 3)
+            .map(|asset| {
+                asset.chunks.iter()
+                    .map(|chunk| chunk.decompressed_size)
+                    .sum::<u64>()
+            })
+            .unwrap_or(u64::MAX);
+
+        let mut tasks = Vec::with_capacity(
+            (self.target_memory_usage / median_task_size) as usize
+        );
+
         let mut occupied_memory = 0;
 
         async fn flatten(
@@ -421,6 +435,7 @@ impl SophonDownloader {
             }
         }
 
+        // Iterate over all the assets we need to download.
         while let Some(asset) = assets.pop() {
             // Create file's parent folder if it doesn't exist.
             let asset_path = download_dir.join(&asset.path);
