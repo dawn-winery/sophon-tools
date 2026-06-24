@@ -84,7 +84,11 @@ pub fn run(
 
             table.add_row(["id", game.game_id()]);
             table.add_row(["biz", &game_configs.game_biz]);
-            table.add_row(["name", find_game_name(game.game_id(), "").unwrap_or("-")]);
+            table.add_row([
+                "name",
+                find_game_name(game.game_id(), &game_configs.game_biz)
+                    .unwrap_or("-")
+            ]);
             table.add_row(["version", &version]);
             table.add_row(["binary", &game_configs.binary_name]);
 
