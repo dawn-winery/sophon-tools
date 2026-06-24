@@ -18,18 +18,35 @@
                     overlays = [ rust-overlay.overlays.default ];
                 };
 
+                muslPkgs = pkgs.pkgsCross.musl64;
             in {
                 devShells.default = pkgs.mkShell {
                     nativeBuildInputs = with pkgs; [
-                        (rust-bin.stable.latest.default.override {
+                        (pkgs.pkgs.rust-bin.stable.latest.default.override {
                             targets = [ "x86_64-unknown-linux-musl" ];
                             extensions = [ "rust-src" ];
                         })
-
-                        pkgs.pkgsCross.musl64.buildPackages.gcc
-
+                        muslPkgs.buildPackages.gcc
                         protobuf
                     ];
+                };
+
+                packages.default = muslPkgs.rustPlatform.buildRustPackage {
+                    pname = "sophon";
+                    version = "0.2.0";
+
+                    src = ./.;
+                    cargoLock.lockFile = ./Cargo.lock;
+
+                    nativeBuildInputs = with pkgs; [
+                        protobuf
+                    ];
+
+                    doCheck = false;
+
+                    postInstall = ''
+                        mv $out/bin/sophon-cli $out/bin/sophon
+                    '';
                 };
             });
 }
