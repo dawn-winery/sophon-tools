@@ -138,7 +138,7 @@ enum CliCommands {
         /// Amount of system memory downloader will try to utilize. Higher value
         /// will allow downloader to download more files in parallel.
         #[arg(
-            long, short('m'), default_value_t = 256 * 1024 * 1024,
+            long, short('m'), default_value_t = String::from("256mb"),
             alias = "target-memory",
             alias = "memory-usage",
             alias = "target-memory-buffer",
@@ -148,7 +148,7 @@ enum CliCommands {
             alias = "memory",
             alias = "mem"
         )]
-        target_memory_usage: u64,
+        target_memory_usage: String,
 
         /// Use files sizes for verification instead of calculating md5 hashes.
         #[arg(long, alias = "fast")]
@@ -386,28 +386,58 @@ fn main() -> anyhow::Result<()> {
             component,
             regex,
             threads,
-            target_memory_usage,
+            target_memory_usage: target_memory_usage_str,
             fast_verify,
             no_verify_before_download,
             user_agent,
             proxy,
             output_format
-        } => download_game::run(
-            game,
-            component,
-            version,
-            path,
-            region,
-            launcher_id,
-            regex,
-            threads,
-            target_memory_usage,
-            fast_verify,
-            no_verify_before_download,
-            user_agent,
-            proxy,
-            output_format,
-            cli.ascii
-        )
+        } => {
+            const MULTIPLIERS: &[(&str, f64)] = &[
+                ("tb", 1024.0 * 1024.0 * 1024.0),
+                ("t",  1024.0 * 1024.0 * 1024.0),
+                ("gb", 1024.0 * 1024.0 * 1024.0),
+                ("g",  1024.0 * 1024.0 * 1024.0),
+                ("mb", 1024.0 * 1024.0),
+                ("m",  1024.0 * 1024.0),
+                ("kb", 1024.0),
+                ("k",  1024.0)
+            ];
+
+            let target_memory_usage_str = target_memory_usage_str.to_lowercase();
+            let mut target_memory_usage = None;
+
+            for (suffix, multiplier) in MULTIPLIERS {
+                if let Some(prefix) = target_memory_usage_str.strip_suffix(suffix)
+                    && let Ok(value) = prefix.trim().parse::<f64>()
+                {
+                    target_memory_usage = Some((value * multiplier).round() as u64);
+
+                    break;
+                }
+            }
+
+            let Some(target_memory_usage) = target_memory_usage else {
+                anyhow::bail!("invalid target_memory_usage value");
+            };
+
+            download_game::run(
+                game,
+                component,
+                version,
+                path,
+                region,
+                launcher_id,
+                regex,
+                threads,
+                target_memory_usage,
+                fast_verify,
+                no_verify_before_download,
+                user_agent,
+                proxy,
+                output_format,
+                cli.ascii
+            )
+        }
     }
 }
