@@ -146,12 +146,12 @@ impl Default for SophonApi {
             package_download_info_timeout: Duration::from_secs(7),
             package_update_info_timeout: Duration::from_secs(7),
 
-            game_branches_cache: Default::default(),
-            game_versions_info_cache: Default::default(),
-            game_configs_cache: Default::default(),
+            game_branches_cache: RwLock::const_new(Vec::with_capacity(1)),
+            game_versions_info_cache: RwLock::const_new(Vec::with_capacity(1)),
+            game_configs_cache: RwLock::const_new(Vec::with_capacity(1)),
 
-            package_download_info_cache: Default::default(),
-            package_update_info_cache: Default::default()
+            package_download_info_cache: RwLock::const_new(Vec::with_capacity(1)),
+            package_update_info_cache: RwLock::const_new(Vec::with_capacity(1))
         }
     }
 }
