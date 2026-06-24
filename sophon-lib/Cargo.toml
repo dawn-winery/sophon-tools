@@ -14,9 +14,7 @@ publish = false
 
 [features]
 tracing = ["dep:tracing"]
-vendored-hpatchz = []
-
-default = ["tracing", "vendored-hpatchz"]
+default = ["tracing"]
 
 [dependencies.reqwest]
 version = "0.13"

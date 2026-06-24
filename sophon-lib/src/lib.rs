@@ -30,6 +30,7 @@ pub mod region;
 pub mod api;
 pub mod protos;
 pub mod verifier;
+pub mod patcher;
 pub mod downloader;
 
 // pub mod utils;
