@@ -121,7 +121,14 @@ pub fn run(
 
     runtime.block_on(downloader.download(
         &download_manifest,
-        &path
+        &path,
+        Box::new(|current, total| {
+            println!(
+                "{:.2} MB / {:.2} MB",
+                current as f64 / 1024.0 / 1024.0,
+                total as f64 / 1024.0 / 1024.0
+            );
+        })
     ))?;
 
     // match output_format {

@@ -18,6 +18,7 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::path::Path;
 use std::time::Duration;
 use std::fs::File;
@@ -355,7 +356,8 @@ impl SophonDownloader {
     pub async fn download(
         self,
         download_info: &SophonApiPackageManifest,
-        download_dir: &Path
+        download_dir: &Path,
+        progress_updater: Box<dyn Fn(u64, u64) + Send + Sync>
     ) -> Result<(), SophonDownloaderError> {
         if download_info.chunk_download.encrypted {
             return Err(SophonDownloaderError::EncryptionNotSupported);
@@ -426,6 +428,17 @@ impl SophonDownloader {
 
         let mut occupied_memory = 0;
 
+        // Calculate total download assets for progress reporting.
+        let progress_total = assets.iter()
+            .flat_map(|asset| {
+                asset.chunks.iter()
+                    .map(|chunk| chunk.decompressed_size)
+            })
+            .sum::<u64>();
+
+        let progress_current = Arc::new(AtomicU64::new(0));
+        let progress_updater = Arc::new(RwLock::new(progress_updater));
+
         async fn flatten(
             task: tokio::task::JoinHandle<Result<(), SophonDownloaderError>>
         ) -> Result<(), SophonDownloaderError> {
@@ -489,6 +502,9 @@ impl SophonDownloader {
             for chunk in asset.chunks {
                 let file = file.clone();
 
+                let progress_current = progress_current.clone();
+                let progress_updater = progress_updater.clone();
+
                 let url = format!(
                     "{}{}/{}",
                     download_info.chunk_download.url_prefix,
@@ -549,6 +565,16 @@ impl SophonDownloader {
 
                     drop(lock);
 
+                    let prev_curr = progress_current.fetch_add(
+                        chunk.decompressed_size,
+                        Ordering::Relaxed
+                    );
+
+                    (progress_updater.read().await)(
+                        prev_curr + chunk.decompressed_size,
+                        progress_total
+                    );
+
                     Ok::<_, SophonDownloaderError>(())
                 };
 
@@ -564,7 +590,10 @@ impl SophonDownloader {
         }
 
         // Wait for all the remaining tasks to finish.
-        futures::future::try_join_all(tasks.into_iter().map(flatten)).await?;
+        futures::future::try_join_all(
+            tasks.into_iter()
+                .map(flatten)
+        ).await?;
 
         Ok(())
     }
