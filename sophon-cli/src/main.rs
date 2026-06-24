@@ -401,19 +401,23 @@ fn main() -> anyhow::Result<()> {
                 ("mb", 1024.0 * 1024.0),
                 ("m",  1024.0 * 1024.0),
                 ("kb", 1024.0),
-                ("k",  1024.0)
+                ("k",  1024.0),
+                ("b", 1.0)
             ];
 
             let target_memory_usage_str = target_memory_usage_str.to_lowercase();
-            let mut target_memory_usage = None;
 
-            for (suffix, multiplier) in MULTIPLIERS {
-                if let Some(prefix) = target_memory_usage_str.strip_suffix(suffix)
-                    && let Ok(value) = prefix.trim().parse::<f64>()
-                {
-                    target_memory_usage = Some((value * multiplier).round() as u64);
+            let mut target_memory_usage = target_memory_usage_str.parse::<u64>().ok();
 
-                    break;
+            if target_memory_usage.is_none() {
+                for (suffix, multiplier) in MULTIPLIERS {
+                    if let Some(prefix) = target_memory_usage_str.strip_suffix(suffix)
+                        && let Ok(value) = prefix.trim().parse::<f64>()
+                    {
+                        target_memory_usage = Some((value * multiplier).round() as u64);
+
+                        break;
+                    }
                 }
             }
 
