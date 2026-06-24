@@ -364,6 +364,9 @@ impl SophonDownloader {
         // Fetch list of assets to download.
         let mut download_manifest = self.fetch_download_info(download_info).await?;
 
+        // Clear the cache since it won't be used anymore.
+        self.download_manifest_cache.write().await.clear();
+
         // Skip assets downloading that are valid.
         if self.verify_before_downloading != SophonDownloaderVerifyMethod::None {
             let mut verifier = SophonVerifier::new(download_manifest.assets.clone());
