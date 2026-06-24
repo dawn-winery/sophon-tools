@@ -4,12 +4,12 @@ High-performance async sophon downloader implementation written in Rust.
 
 <table>
     <tr>
-        <td><img src="repository/list-games.png" height="384px" /></td>
-        <td><img src="repository/list-game-components.png" height="384px" /></td>
+        <td><img src="repository/list-games.png" /></td>
+        <td><img src="repository/list-game-components.png" /></td>
     </tr>
     <tr>
-        <td><img src="repository/game-versions.png" height="384px" /></td>
-        <td><img src="repository/game-download-info.png" height="384px" /></td>
+        <td><img src="repository/game-versions.png" /></td>
+        <td><img src="repository/game-download-info.png" /></td>
     </tr>
 </table>
 
