@@ -50,9 +50,6 @@ pub enum SophonUpdaterError {
     #[error("encrypted files are not supported")]
     EncryptionNotSupported,
 
-    #[error("no update available from version '{0}'")]
-    NoUpdateAvailable(String),
-
     #[error("expected '{expected}' manifest size, got '{actual}', url: '{url}'")]
     ManifestSizeMismatch {
         url: String,
@@ -406,14 +403,17 @@ impl SophonUpdater {
     /// `update_version` indicates the version of the game in the `update_dir`
     /// directory.
     ///
+    /// Some files cannot be updated from one version to another. You will
+    /// likely need to run a separate downloader tasks after the update to
+    /// re-download these files.
+    ///
     /// ## Updater strategy
     ///
-    /// Updater works in 4 main stages:
+    /// Updater works in 3 main stages:
     ///
     /// - Removing unused assets to free up disk space;
     /// - Downloading assets' chunks (patches);
-    /// - Applying patches to the game assets;
-    /// - Repairing broken files (assets that weren't patched successfully).
+    /// - Applying patches to the game assets.
     ///
     /// The chunks downloading and applying stages were intentionally separated
     /// for different reasons. This can change in future.
@@ -466,8 +466,13 @@ impl SophonUpdater {
     /// files.
     ///
     /// 11. Start iterating over the assets' chunks (patches).
-    ///
-    /// TBD
+    /// 12. If current patch can fit inside of the async runtime - create
+    ///     async task to apply the patch.
+    /// 13. While there are tasks in the runtime and not enough space to fit
+    ///     a new one - iterate over the tasks and wait until they finish.
+    ///     When enough space for a new patch appears - return to step 11.
+    /// 14. If after waiting until all the tasks finish there's still not enough
+    ///     space to fit the patch - create new task for it and only it anyway.
     pub async fn update(
         self,
         update_info: &SophonApiPackageManifest,
@@ -484,15 +489,6 @@ impl SophonUpdater {
 
         // Clear the cache since it won't be used anymore.
         self.manifest_cache.write().await.clear();
-
-        // Check if the game can be updated.
-        if update_manifest.assets.iter()
-            .any(|asset| !asset.chunks.contains_key(update_version))
-        {
-            return Err(SophonUpdaterError::NoUpdateAvailable(
-                update_version.to_string()
-            ));
-        }
 
         // Skip assets downloading that are valid.
         if self.verify_before_updating != SophonUpdaterVerifyMethod::None {
@@ -547,31 +543,18 @@ impl SophonUpdater {
             }
         }
 
-        // --------- Stage 1: delete unused files.
-
-        // Take list of unused assets and clear all the other variants because
-        // they won't be used anymore.
-
-        let Some(unused_assets) = update_manifest.unused_assets.remove(
-            update_version
-        ) else {
-            return Err(SophonUpdaterError::NoUpdateAvailable(
-                update_version.to_string()
-            ));
-        };
-
-        update_manifest.unused_assets.clear();
-
-        // Delete unused assets.
-        if self.delete_unused_files {
-            // TODO: remove empty folders
+        // If update has unused assets then delete them.
+        if let Some(unused_assets) = update_manifest.unused_assets.remove(update_version)
+            && self.delete_unused_files
+        {
+            // TODO: delete empty folders
             let tasks = unused_assets.files.into_iter()
                 .map(|asset| update_dir.join(asset.name))
                 .filter(|path| path.exists())
                 .map(|path| {
                     let future = async move {
                         #[cfg(feature = "tracing")]
-                        tracing::trace!(?path, "remove unused asset");
+                        tracing::trace!(?path, "delete unused asset");
 
                         tokio::fs::remove_file(path).await
                             .map_err(SophonUpdaterError::Io)
@@ -588,7 +571,8 @@ impl SophonUpdater {
             futures::future::try_join_all(tasks).await?;
         }
 
-        // --------- Stage 2: download game patches.
+        // Clear the rest of unused assets.
+        update_manifest.unused_assets.clear();
 
         #[derive(Debug, Clone, PartialEq, Eq, Hash)]
         struct PatchInfo {
@@ -626,10 +610,10 @@ impl SophonUpdater {
 
         // Iterate over all the assets we need to update.
         while let Some(mut asset) = assets.pop() {
+            // Skip assets that cannot be updated from the given version. These
+            // should be handled separately using downloader as files repairer.
             let Some(chunk) = asset.chunks.remove(update_version) else {
-                return Err(SophonUpdaterError::NoUpdateAvailable(
-                    update_version.to_string()
-                ));
+                continue;
             };
 
             let chunk_download_url = format!(
@@ -865,8 +849,6 @@ impl SophonUpdater {
         );
 
         // --------- Stage 3: patch game files.
-
-        // --------- Stage 4: repair broken game files.
 
         Ok(())
     }
