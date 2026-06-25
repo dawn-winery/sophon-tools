@@ -17,6 +17,8 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+use std::time::Duration;
+
 use regex::Regex;
 
 use sophon_lib::api::SophonApi;
@@ -38,6 +40,7 @@ pub fn run(
     regex: Option<String>,
     user_agent: Option<String>,
     proxy: Option<String>,
+    timeout: Option<Duration>,
     output_format: OutputFormat,
     ascii: bool
 ) -> anyhow::Result<()> {
@@ -49,7 +52,8 @@ pub fn run(
         .map(Regex::new)
         .transpose()?;
 
-    let api = SophonApi::from(reqwest_client(user_agent, proxy)?.build()?);
+    let api = SophonApi::from(reqwest_client(user_agent, proxy)?.build()?)
+        .with_timeout_all(timeout.unwrap_or(Duration::MAX));
 
     let game = api.game(region.into(), launcher_id, game_id);
 

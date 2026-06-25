@@ -17,6 +17,8 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+use std::time::Duration;
+
 use sophon_lib::api::SophonApi;
 
 use super::{SophonRegion, OutputFormat, reqwest_client, find_game_name};
@@ -26,6 +28,7 @@ pub fn run(
     launcher_id: Option<String>,
     user_agent: Option<String>,
     proxy: Option<String>,
+    timeout: Option<Duration>,
     output_format: OutputFormat,
     ascii: bool
 ) -> anyhow::Result<()> {
@@ -33,7 +36,8 @@ pub fn run(
         .enable_all()
         .build()?;
 
-    let api = SophonApi::from(reqwest_client(user_agent, proxy)?.build()?);
+    let api = SophonApi::from(reqwest_client(user_agent, proxy)?.build()?)
+        .with_timeout_all(timeout.unwrap_or(Duration::MAX));
 
     let future = api.fetch_games_branches_info(
         region.into(),

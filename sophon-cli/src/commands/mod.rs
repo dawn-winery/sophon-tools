@@ -17,6 +17,8 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+use std::time::Duration;
+
 use clap::ValueEnum;
 
 use sophon_lib::export::reqwest::{
@@ -152,25 +154,25 @@ impl nutmeg::Model for ProgressBar {
     }
 }
 
-const MEMORY_MULTIPLIERS: &[(&str, f64)] = &[
-    ("tb", 1024.0 * 1024.0 * 1024.0),
-    ("t",  1024.0 * 1024.0 * 1024.0),
-    ("gb", 1024.0 * 1024.0 * 1024.0),
-    ("g",  1024.0 * 1024.0 * 1024.0),
-    ("mb", 1024.0 * 1024.0),
-    ("m",  1024.0 * 1024.0),
-    ("kb", 1024.0),
-    ("k",  1024.0),
-    ("b", 1.0)
-];
-
 pub fn parse_memory_str(value: &str) -> Option<u64> {
-    let value = value.to_lowercase();
+    const MULTIPLIERS: &[(&str, f64)] = &[
+        ("tb", 1024.0 * 1024.0 * 1024.0),
+        ("t",  1024.0 * 1024.0 * 1024.0),
+        ("gb", 1024.0 * 1024.0 * 1024.0),
+        ("g",  1024.0 * 1024.0 * 1024.0),
+        ("mb", 1024.0 * 1024.0),
+        ("m",  1024.0 * 1024.0),
+        ("kb", 1024.0),
+        ("k",  1024.0),
+        ("b",  1.0)
+    ];
+
+    let value = value.trim().to_lowercase();
 
     let mut memory = value.parse::<u64>().ok();
 
     if memory.is_none() {
-        for (suffix, multiplier) in MEMORY_MULTIPLIERS {
+        for (suffix, multiplier) in MULTIPLIERS {
             if let Some(prefix) = value.strip_suffix(suffix)
                 && let Ok(value) = prefix.trim().parse::<f64>()
             {
@@ -182,6 +184,25 @@ pub fn parse_memory_str(value: &str) -> Option<u64> {
     }
 
     memory
+}
+
+pub fn parse_time_str(value: &str) -> Option<Duration> {
+    let value = value.trim().to_lowercase();
+
+    if let Ok(value) = value.parse::<f32>() {
+        Some(Duration::from_secs_f32(value))
+    } else if let Some(value) = value.strip_suffix("h") {
+        value.trim().parse::<u64>().ok()
+            .map(Duration::from_hours)
+    } else if let Some(value) = value.strip_suffix("m") {
+        value.trim().parse::<u64>().ok()
+            .map(Duration::from_mins)
+    } else if let Some(value) = value.strip_suffix("s") {
+        value.trim().parse::<f32>().ok()
+            .map(Duration::from_secs_f32)
+    } else {
+        None
+    }
 }
 
 const GAMES: &[(&str, &str, &str)] = &[

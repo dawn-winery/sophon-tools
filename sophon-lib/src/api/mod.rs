@@ -178,6 +178,16 @@ impl From<SophonApi> for reqwest::Client {
 }
 
 impl SophonApi {
+    pub fn with_timeout_all(mut self, timeout: Duration) -> Self {
+        self.game_branches_timeout = Some(timeout);
+        self.game_versions_info_timeout = Some(timeout);
+        self.game_configs_timeout = Some(timeout);
+        self.package_download_info_timeout = Some(timeout);
+        self.package_update_info_timeout = Some(timeout);
+
+        self
+    }
+
     pub fn with_game_branches_timeout(mut self, timeout: Duration) -> Self {
         self.game_branches_timeout = Some(timeout);
 

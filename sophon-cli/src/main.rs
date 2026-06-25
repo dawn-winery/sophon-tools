@@ -365,6 +365,10 @@ enum CliApiCommands {
         #[arg(long)]
         proxy: Option<String>,
 
+        /// API request timeout in seconds.
+        #[arg(long)]
+        timeout: Option<String>,
+
         #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
         output_format: OutputFormat
     },
@@ -404,6 +408,10 @@ enum CliApiCommands {
         #[arg(long)]
         proxy: Option<String>,
 
+        /// API request timeout in seconds.
+        #[arg(long)]
+        timeout: Option<String>,
+
         #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
         output_format: OutputFormat
     },
@@ -433,6 +441,10 @@ enum CliApiCommands {
         /// API request proxy.
         #[arg(long)]
         proxy: Option<String>,
+
+        /// API request timeout in seconds.
+        #[arg(long)]
+        timeout: Option<String>,
 
         #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
         output_format: OutputFormat
@@ -476,6 +488,10 @@ enum CliApiCommands {
         #[arg(long)]
         proxy: Option<String>,
 
+        /// API request timeout in seconds.
+        #[arg(long)]
+        timeout: Option<String>,
+
         #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
         output_format: OutputFormat
     }
@@ -506,15 +522,26 @@ fn main() -> anyhow::Result<()> {
             launcher_id,
             user_agent,
             proxy,
+            timeout,
             output_format
-        }) => list_games::run(
-            region,
-            launcher_id,
-            user_agent,
-            proxy,
-            output_format,
-            cli.ascii
-        ),
+        }) => {
+            let timeout = timeout.as_deref()
+                .map(|timeout| {
+                    parse_time_str(timeout)
+                        .ok_or_else(|| anyhow::anyhow!("invalid timeout value"))
+                })
+                .transpose()?;
+
+            list_games::run(
+                region,
+                launcher_id,
+                user_agent,
+                proxy,
+                timeout,
+                output_format,
+                cli.ascii
+            )
+        }
 
         CliCommands::Api(CliApiCommands::ListComponents {
             game,
@@ -523,17 +550,28 @@ fn main() -> anyhow::Result<()> {
             show_all,
             user_agent,
             proxy,
+            timeout,
             output_format
-        }) => list_components::run(
-            game,
-            region,
-            launcher_id,
-            show_all,
-            user_agent,
-            proxy,
-            output_format,
-            cli.ascii
-        ),
+        }) => {
+            let timeout = timeout.as_deref()
+                .map(|timeout| {
+                    parse_time_str(timeout)
+                        .ok_or_else(|| anyhow::anyhow!("invalid timeout value"))
+                })
+                .transpose()?;
+
+            list_components::run(
+                game,
+                region,
+                launcher_id,
+                show_all,
+                user_agent,
+                proxy,
+                timeout,
+                output_format,
+                cli.ascii
+            )
+        }
 
         CliCommands::Api(CliApiCommands::GameVersions {
             game,
@@ -541,16 +579,27 @@ fn main() -> anyhow::Result<()> {
             launcher_id,
             user_agent,
             proxy,
+            timeout,
             output_format
-        }) => game_versions::run(
-            game,
-            region,
-            launcher_id,
-            user_agent,
-            proxy,
-            output_format,
-            cli.ascii
-        ),
+        }) => {
+            let timeout = timeout.as_deref()
+                .map(|timeout| {
+                    parse_time_str(timeout)
+                        .ok_or_else(|| anyhow::anyhow!("invalid timeout value"))
+                })
+                .transpose()?;
+
+            game_versions::run(
+                game,
+                region,
+                launcher_id,
+                user_agent,
+                proxy,
+                timeout,
+                output_format,
+                cli.ascii
+            )
+        }
 
         CliCommands::Api(CliApiCommands::GameDownloadInfo {
             game,
@@ -561,19 +610,30 @@ fn main() -> anyhow::Result<()> {
             regex,
             user_agent,
             proxy,
+            timeout,
             output_format
-        }) => download_info::run(
-            game,
-            component,
-            version,
-            region,
-            launcher_id,
-            regex,
-            user_agent,
-            proxy,
-            output_format,
-            cli.ascii
-        ),
+        }) => {
+            let timeout = timeout.as_deref()
+                .map(|timeout| {
+                    parse_time_str(timeout)
+                        .ok_or_else(|| anyhow::anyhow!("invalid timeout value"))
+                })
+                .transpose()?;
+
+            download_info::run(
+                game,
+                component,
+                version,
+                region,
+                launcher_id,
+                regex,
+                user_agent,
+                proxy,
+                timeout,
+                output_format,
+                cli.ascii
+            )
+        }
 
         CliCommands::Detect {
             path,
@@ -652,7 +712,7 @@ fn main() -> anyhow::Result<()> {
                 output_format,
                 cli.ascii
             )
-        },
+        }
 
         CliCommands::Update {
             game,
