@@ -64,18 +64,22 @@ pub enum SophonUpdaterError {
         expected: String
     },
 
-    #[error("expected '{expected}' chunk size, got '{actual}', url: '{url}'")]
+    #[error("expected '{expected}' chunk size, got '{actual}', url: '{url}' (offset: '{offset}', length: '{length}')")]
     ChunkSizeMismatch {
         url: String,
         actual: u64,
-        expected: u64
+        expected: u64,
+        offset: u64,
+        length: u64
     },
 
-    #[error("expected '{expected}' chunk hash, got '{actual}', url: '{url}'")]
+    #[error("expected '{expected}' chunk hash, got '{actual}', url: '{url}' (offset: '{offset}', length: '{length}')")]
     ChunkHashMismatch {
         url: String,
         actual: String,
-        expected: String
+        expected: String,
+        offset: u64,
+        length: u64
     }
 }
 
@@ -770,7 +774,9 @@ impl SophonUpdater {
                     return Err(SophonUpdaterError::ChunkSizeMismatch {
                         url: chunk_download_url,
                         actual: content_length,
-                        expected: patch_info.patch_size
+                        expected: patch_info.patch_size,
+                        offset: chunk_download_offset,
+                        length: patch_info.patch_size
                     });
                 }
 
@@ -809,7 +815,9 @@ impl SophonUpdater {
                         return Err(SophonUpdaterError::ChunkSizeMismatch {
                             url: chunk_download_url,
                             actual: chunk_body.len() as u64,
-                            expected: patch_info.patch_size
+                            expected: patch_info.patch_size,
+                            offset: chunk_download_offset,
+                            length: patch_info.patch_size
                         });
                     }
 
@@ -820,7 +828,9 @@ impl SophonUpdater {
                             return Err(SophonUpdaterError::ChunkHashMismatch {
                                 url: chunk_download_url,
                                 actual: hash,
-                                expected: patch_info.patch_hash_md5
+                                expected: patch_info.patch_hash_md5,
+                                offset: chunk_download_offset,
+                                length: patch_info.patch_size
                             });
                         }
                     }
