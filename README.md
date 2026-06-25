@@ -51,6 +51,41 @@ Some files cannot be updated between different versions, some updates may fail,
 some files may become missing. You can mix these tools together to maintain your
 game installation at the state you want it to be.
 
+## Examples
+
+Download Zenless Zone Zero's 2.8.0 English voiceover:
+
+```bash
+./sophon-tools download U5hbdsT9W7 ./zzz_en_280 --component en-us --version 2.8.0
+```
+
+Verify downloaded voiceover:
+
+```bash
+./sophon-tools verify U5hbdsT9W7 ./zzz_en_280 --component en-us --version 2.8.0
+```
+
+Pre-download 3.0.0 voiceover update:
+
+```bash
+./sophon-tools update U5hbdsT9W7 ./zzz_en_280 \
+    --component en-us \
+    --from-version 2.8.0 \
+    --to-version 3.0.0 \
+    --delete-unused false \
+    --patch-files false \
+    --delete-chunks false
+```
+
+Update voiceover to 3.0.0 version:
+
+```bash
+./sophon-tools update U5hbdsT9W7 ./zzz_en_280 \
+    --component en-us \
+    --from-version 2.8.0 \
+    --to-version 3.0.0
+```
+
 ## NixOS support
 
 To use the sophon-tools CLI you can run the following command:
