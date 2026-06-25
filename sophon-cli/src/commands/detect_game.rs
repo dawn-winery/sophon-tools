@@ -22,7 +22,7 @@ use std::path::PathBuf;
 use sophon_lib::region::SophonRegion;
 use sophon_lib::api::{SophonApi, SophonApiError};
 
-use super::{OutputFormat, reqwest_client, find_game_name};
+use super::*;
 
 pub fn run(
     path: PathBuf,

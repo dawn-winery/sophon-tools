@@ -21,7 +21,7 @@ use std::time::Duration;
 
 use sophon_lib::api::SophonApi;
 
-use super::{SophonRegion, OutputFormat, reqwest_client};
+use super::*;
 
 fn is_category_known(name: &str) -> bool {
     name.chars().any(|c| !c.is_numeric()) && name != "null"
@@ -67,14 +67,16 @@ pub fn run(
 
             table.set_header([
                 "id",
-                "name"
+                "name",
+                "title"
             ]);
 
             for category in game_branch.categories {
                 if show_all || is_category_known(&category.name) {
                     table.add_row([
-                        category.id,
-                        category.name
+                        &category.id,
+                        &category.name,
+                        find_component_title(&category.name).unwrap_or("-")
                     ]);
                 }
             }

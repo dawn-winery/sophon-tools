@@ -167,9 +167,11 @@ enum CliCommands {
             long, short('m'), default_value_t = String::from("256mb"),
             alias = "target-memory",
             alias = "memory-usage",
+            alias = "target-memory-size",
             alias = "target-memory-buffer",
             alias = "target-memory-buf",
             alias = "memory-buffer",
+            alias = "memory-size",
             alias = "memory-buf",
             alias = "memory",
             alias = "mem"
@@ -276,9 +278,11 @@ enum CliCommands {
             long, short('m'), default_value_t = String::from("256mb"),
             alias = "target-memory",
             alias = "memory-usage",
+            alias = "target-memory-size",
             alias = "target-memory-buffer",
             alias = "target-memory-buf",
             alias = "memory-buffer",
+            alias = "memory-size",
             alias = "memory-buf",
             alias = "memory",
             alias = "mem"

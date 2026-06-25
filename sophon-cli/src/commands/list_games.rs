@@ -21,7 +21,7 @@ use std::time::Duration;
 
 use sophon_lib::api::SophonApi;
 
-use super::{SophonRegion, OutputFormat, reqwest_client, find_game_name};
+use super::*;
 
 pub fn run(
     region: SophonRegion,

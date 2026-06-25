@@ -27,7 +27,7 @@ use sophon_lib::api::SophonApi;
 use sophon_lib::downloader::SophonDownloader;
 use sophon_lib::verifier::{SophonVerifier, VerifyResult};
 
-use super::{SophonRegion, OutputFormat, ProgressBar, reqwest_client};
+use super::*;
 
 fn is_regex_match(regex: Option<&Regex>, path: &str) -> bool {
     regex.map(|regex| regex.is_match(path)).unwrap_or(true)

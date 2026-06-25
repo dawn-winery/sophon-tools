@@ -24,9 +24,7 @@ use regex::Regex;
 use sophon_lib::api::SophonApi;
 use sophon_lib::updater::SophonUpdater;
 
-use super::{
-    SophonRegion, VerifyMethod, OutputFormat, reqwest_client
-};
+use super::*;
 
 #[allow(clippy::too_many_arguments)]
 pub fn run(

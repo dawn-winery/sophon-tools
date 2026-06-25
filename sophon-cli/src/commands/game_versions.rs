@@ -21,7 +21,7 @@ use std::time::Duration;
 
 use sophon_lib::api::SophonApi;
 
-use super::{SophonRegion, OutputFormat, reqwest_client};
+use super::*;
 
 #[allow(clippy::too_many_arguments)]
 pub fn run(
