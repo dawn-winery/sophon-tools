@@ -32,7 +32,7 @@
                 };
 
                 packages.default = muslPkgs.rustPlatform.buildRustPackage {
-                    pname = "sophon";
+                    pname = "sophon-tools";
                     version = "0.2.0";
 
                     src = ./.;
@@ -45,7 +45,7 @@
                     doCheck = false;
 
                     postInstall = ''
-                        mv $out/bin/sophon-cli $out/bin/sophon
+                        mv $out/bin/sophon-cli $out/bin/sophon-tools
                     '';
                 };
             });
