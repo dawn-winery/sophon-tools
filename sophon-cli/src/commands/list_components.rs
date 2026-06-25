@@ -19,25 +19,28 @@
 
 use sophon_lib::api::SophonApi;
 
-use super::{SophonRegion, OutputFormat};
+use super::{SophonRegion, OutputFormat, reqwest_client};
 
 fn is_category_known(name: &str) -> bool {
     name.chars().any(|c| !c.is_numeric()) && name != "null"
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn run(
     game_id: String,
     region: SophonRegion,
     launcher_id: Option<String>,
-    output_format: OutputFormat,
     show_all: bool,
+    user_agent: Option<String>,
+    proxy: Option<String>,
+    output_format: OutputFormat,
     ascii: bool
 ) -> anyhow::Result<()> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
 
-    let api = SophonApi::default();
+    let api = SophonApi::from(reqwest_client(user_agent, proxy)?.build()?);
 
     let game = api.game(region.into(), launcher_id, game_id);
 

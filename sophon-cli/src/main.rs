@@ -53,6 +53,14 @@ enum CliCommands {
         #[arg(index = 1, required = true)]
         path: PathBuf,
 
+        /// API requests user agent string.
+        #[arg(long)]
+        user_agent: Option<String>,
+
+        /// API requests proxy.
+        #[arg(long)]
+        proxy: Option<String>,
+
         #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
         output_format: OutputFormat
     },
@@ -94,6 +102,14 @@ enum CliCommands {
         /// Use files sizes for verification instead of calculating md5 hashes.
         #[arg(long, alias = "fast", alias = "fast-verifying")]
         fast_verify: bool,
+
+        /// API requests user agent string.
+        #[arg(long)]
+        user_agent: Option<String>,
+
+        /// API requests proxy.
+        #[arg(long)]
+        proxy: Option<String>,
 
         #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
         output_format: OutputFormat
@@ -338,6 +354,14 @@ enum CliApiCommands {
         #[arg(long)]
         launcher_id: Option<String>,
 
+        /// API request user agent string.
+        #[arg(long)]
+        user_agent: Option<String>,
+
+        /// API request proxy.
+        #[arg(long)]
+        proxy: Option<String>,
+
         #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
         output_format: OutputFormat
     },
@@ -365,11 +389,20 @@ enum CliApiCommands {
         #[arg(long)]
         launcher_id: Option<String>,
 
-        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
-        output_format: OutputFormat,
-
+        /// Show all non-standard components.
         #[arg(long)]
-        show_all: bool
+        show_all: bool,
+
+        /// API request user agent string.
+        #[arg(long)]
+        user_agent: Option<String>,
+
+        /// API request proxy.
+        #[arg(long)]
+        proxy: Option<String>,
+
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        output_format: OutputFormat
     },
 
     /// Get list of all the game versions.
@@ -389,6 +422,14 @@ enum CliApiCommands {
 
         #[arg(long)]
         launcher_id: Option<String>,
+
+        /// API request user agent string.
+        #[arg(long)]
+        user_agent: Option<String>,
+
+        /// API request proxy.
+        #[arg(long)]
+        proxy: Option<String>,
 
         #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
         output_format: OutputFormat
@@ -424,6 +465,14 @@ enum CliApiCommands {
         #[arg(long)]
         regex: Option<String>,
 
+        /// API request user agent string.
+        #[arg(long)]
+        user_agent: Option<String>,
+
+        /// API request proxy.
+        #[arg(long)]
+        proxy: Option<String>,
+
         #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
         output_format: OutputFormat
     }
@@ -452,21 +501,34 @@ fn main() -> anyhow::Result<()> {
         CliCommands::Api(CliApiCommands::ListGames {
             region,
             launcher_id,
+            user_agent,
+            proxy,
             output_format
-        }) => list_games::run(region, launcher_id, output_format, cli.ascii),
+        }) => list_games::run(
+            region,
+            launcher_id,
+            user_agent,
+            proxy,
+            output_format,
+            cli.ascii
+        ),
 
         CliCommands::Api(CliApiCommands::ListComponents {
             game,
             region,
             launcher_id,
-            output_format,
-            show_all
+            show_all,
+            user_agent,
+            proxy,
+            output_format
         }) => list_components::run(
             game,
             region,
             launcher_id,
-            output_format,
             show_all,
+            user_agent,
+            proxy,
+            output_format,
             cli.ascii
         ),
 
@@ -474,11 +536,15 @@ fn main() -> anyhow::Result<()> {
             game,
             region,
             launcher_id,
+            user_agent,
+            proxy,
             output_format
         }) => game_versions::run(
             game,
             region,
             launcher_id,
+            user_agent,
+            proxy,
             output_format,
             cli.ascii
         ),
@@ -490,6 +556,8 @@ fn main() -> anyhow::Result<()> {
             region,
             launcher_id,
             regex,
+            user_agent,
+            proxy,
             output_format
         }) => download_info::run(
             game,
@@ -498,14 +566,24 @@ fn main() -> anyhow::Result<()> {
             region,
             launcher_id,
             regex,
+            user_agent,
+            proxy,
             output_format,
             cli.ascii
         ),
 
         CliCommands::Detect {
             path,
+            user_agent,
+            proxy,
             output_format
-        } => detect_game::run(path, output_format, cli.ascii),
+        } => detect_game::run(
+            path,
+            user_agent,
+            proxy,
+            output_format,
+            cli.ascii
+        ),
 
         CliCommands::Verify {
             game,
@@ -516,6 +594,8 @@ fn main() -> anyhow::Result<()> {
             component,
             regex,
             fast_verify,
+            user_agent,
+            proxy,
             output_format
         } => verify_game::run(
             game,
@@ -526,6 +606,8 @@ fn main() -> anyhow::Result<()> {
             launcher_id,
             regex,
             fast_verify,
+            user_agent,
+            proxy,
             output_format
         ),
 

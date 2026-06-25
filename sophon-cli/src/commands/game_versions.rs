@@ -19,12 +19,14 @@
 
 use sophon_lib::api::SophonApi;
 
-use super::{SophonRegion, OutputFormat};
+use super::{SophonRegion, OutputFormat, reqwest_client};
 
 pub fn run(
     game_id: String,
     region: SophonRegion,
     launcher_id: Option<String>,
+    user_agent: Option<String>,
+    proxy: Option<String>,
     output_format: OutputFormat,
     ascii: bool
 ) -> anyhow::Result<()> {
@@ -32,7 +34,7 @@ pub fn run(
         .enable_all()
         .build()?;
 
-    let api = SophonApi::default();
+    let api = SophonApi::from(reqwest_client(user_agent, proxy)?.build()?);
 
     let game = api.game(region.into(), launcher_id, game_id);
 

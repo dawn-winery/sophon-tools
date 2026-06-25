@@ -22,7 +22,7 @@ use regex::Regex;
 use sophon_lib::api::SophonApi;
 use sophon_lib::downloader::SophonDownloader;
 
-use super::{SophonRegion, OutputFormat, format_size};
+use super::{SophonRegion, OutputFormat, reqwest_client, format_size};
 
 fn is_regex_match(regex: Option<&Regex>, path: &str) -> bool {
     regex.map(|regex| regex.is_match(path)).unwrap_or(true)
@@ -36,6 +36,8 @@ pub fn run(
     region: SophonRegion,
     launcher_id: Option<String>,
     regex: Option<String>,
+    user_agent: Option<String>,
+    proxy: Option<String>,
     output_format: OutputFormat,
     ascii: bool
 ) -> anyhow::Result<()> {
@@ -47,7 +49,7 @@ pub fn run(
         .map(Regex::new)
         .transpose()?;
 
-    let api = SophonApi::default();
+    let api = SophonApi::from(reqwest_client(user_agent, proxy)?.build()?);
 
     let game = api.game(region.into(), launcher_id, game_id);
 

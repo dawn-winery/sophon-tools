@@ -22,12 +22,12 @@ use std::path::PathBuf;
 use sophon_lib::region::SophonRegion;
 use sophon_lib::api::SophonApi;
 
-use crate::commands::find_game_name;
-
-use super::OutputFormat;
+use super::{OutputFormat, reqwest_client, find_game_name};
 
 pub fn run(
     path: PathBuf,
+    user_agent: Option<String>,
+    proxy: Option<String>,
     output_format: OutputFormat,
     ascii: bool
 ) -> anyhow::Result<()> {
@@ -35,7 +35,7 @@ pub fn run(
         .enable_all()
         .build()?;
 
-    let api = SophonApi::default();
+    let api = SophonApi::from(reqwest_client(user_agent, proxy)?.build()?);
 
     let mut detected_game = None;
 

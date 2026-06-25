@@ -19,11 +19,13 @@
 
 use sophon_lib::api::SophonApi;
 
-use super::{SophonRegion, OutputFormat, find_game_name};
+use super::{SophonRegion, OutputFormat, reqwest_client, find_game_name};
 
 pub fn run(
     region: SophonRegion,
     launcher_id: Option<String>,
+    user_agent: Option<String>,
+    proxy: Option<String>,
     output_format: OutputFormat,
     ascii: bool
 ) -> anyhow::Result<()> {
@@ -31,7 +33,7 @@ pub fn run(
         .enable_all()
         .build()?;
 
-    let api = SophonApi::default();
+    let api = SophonApi::from(reqwest_client(user_agent, proxy)?.build()?);
 
     let future = api.fetch_games_branches_info(
         region.into(),
