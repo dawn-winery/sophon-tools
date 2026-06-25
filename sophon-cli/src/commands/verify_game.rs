@@ -98,8 +98,11 @@ pub fn run(
         return Ok(());
     };
 
-    let download_info = runtime.block_on(SophonDownloader::default()
-        .fetch_download_info(&download_manifest))?;
+    let download_info = runtime.block_on(
+        SophonDownloader::default()
+            .with_client(api.into())
+            .fetch_download_info(&download_manifest)
+    )?;
 
     let mut verifier = SophonVerifier::from(download_info.assets)
         .with_fast_verify(fast_verify);
