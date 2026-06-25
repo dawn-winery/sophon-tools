@@ -365,7 +365,10 @@ enum CliApiCommands {
     },
 
     /// Get list of all the game versions.
-    #[command(alias = "versions")]
+    #[command(
+        alias = "versions",
+        alias = "list-game-versions"
+    )]
     GameVersions {
         #[arg(index = 1, required = true)]
         game: String,
