@@ -521,8 +521,8 @@ impl SophonUpdater {
             })
             .collect::<Vec<_>>();
 
-        // Sort assets by their total chunks size in ascending order, so the
-        // first assets will have smallest total decompressed size.
+        // Sort assets by their total chunks size in descending order, so the
+        // first assets will have largest total size.
         assets.sort_by(|a, b| {
             let a_size = a.chunks.get(update_version)
                 .map(|chunk| chunk.chunk_length);
@@ -530,7 +530,7 @@ impl SophonUpdater {
             let b_size = b.chunks.get(update_version)
                 .map(|chunk| chunk.chunk_length);
 
-            a_size.cmp(&b_size)
+            b_size.cmp(&a_size)
         });
 
         // If assets sorter function is provided, then apply it as well.
