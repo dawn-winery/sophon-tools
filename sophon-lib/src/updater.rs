@@ -912,11 +912,19 @@ impl SophonUpdater {
 
             let patcher = patcher.clone();
 
+            let output_asset_path = chunks_dir.join({
+                patch_info.asset_path.file_name()
+                    .unwrap_or_else(|| {
+                        std::ffi::OsStr::new(&patch_info.output_asset_hash_md5)
+                    })
+            });
+
             // Start asset patching task.
             let future = async move {
                 // If patch is a new file then extract it.
                 if patch_info.input_asset_size == 0 {
-                    HdiffPatcher::extract(
+                    patcher.patch(
+                        None,
                         &patch_info.patch_path,
                         &patch_info.asset_path
                     ).await?;
@@ -962,10 +970,30 @@ impl SophonUpdater {
                         }
                     }
 
-                    // patcher.patch(&patch_info.asset_path, , output)
+                    // Try to apply the patch.
+                    let result = patcher.patch(
+                        Some(&patch_info.asset_path),
+                        &patch_info.patch_path,
+                        &output_asset_path
+                    ).await?;
 
-                    // // Write downloaded chunk to disk.
-                    // tokio::fs::write(&patch_info.patch_path, chunk_body).await?;
+                    // If patched successfully - replace old asset by a new one.
+                    if result {
+                        tokio::fs::rename(
+                            output_asset_path,
+                            patch_info.asset_path
+                        ).await?;
+                    }
+
+                    // Otherwise remove the output asset.
+                    else if output_asset_path.is_file() {
+                        tokio::fs::remove_file(output_asset_path).await?;
+                    }
+
+                    // Delete patch if it's configured to.
+                    if self.delete_chunks {
+                        tokio::fs::remove_file(patch_info.patch_path).await?;
+                    }
                 }
 
                 Ok::<_, SophonUpdaterError>(())
@@ -978,6 +1006,11 @@ impl SophonUpdater {
 
             tasks.push(task);
         }
+
+        futures::future::try_join_all(
+            tasks.drain(..)
+                .map(flatten)
+        ).await?;
 
         Ok(())
     }
