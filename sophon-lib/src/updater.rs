@@ -595,7 +595,7 @@ impl SophonUpdater {
         // Pre-calculate tasks queue capacity.
         let median_task_size = assets.get(assets.len() / 3)
             .and_then(|asset| asset.chunks.get(update_version))
-            .map(|chunk| chunk.chunk_size)
+            .map(|chunk| chunk.chunk_length)
             .unwrap_or(u64::MAX);
 
         let mut tasks = Vec::with_capacity(
