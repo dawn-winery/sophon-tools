@@ -132,8 +132,6 @@ impl Default for SophonDownloader {
         Self {
             client: reqwest::Client::builder()
                 .user_agent(format!("sophon-tools/v{}", crate::VERSION))
-                .deflate(true)
-                .gzip(true)
                 .build()
                 .expect("failed to build reqwest client"),
 
