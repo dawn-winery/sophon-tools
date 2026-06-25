@@ -44,7 +44,7 @@ pub fn run(
     verify_manifest: VerifyMethod,
     verify_chunks: VerifyMethod,
     verify_before_updating: VerifyMethod,
-    delete_unused: bool,
+    delete_unused_files: bool,
     patch_files: bool,
     delete_chunks: bool,
     user_agent: Option<String>,
@@ -93,7 +93,7 @@ pub fn run(
         .with_verify_manifest(verify_manifest.into())
         .with_verify_chunks(verify_chunks.into())
         .with_verify_before_updating(verify_before_updating.into())
-        .with_delete_unused(delete_unused)
+        .with_delete_unused_files(delete_unused_files)
         .with_patch_files(patch_files)
         .with_delete_chunks(delete_chunks);
 

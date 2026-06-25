@@ -118,7 +118,7 @@ pub struct SophonUpdater {
     verify_chunks: SophonUpdaterVerifyMethod,
     verify_before_updating: SophonUpdaterVerifyMethod,
 
-    delete_unused: bool,
+    delete_unused_files: bool,
     patch_files: bool,
     delete_chunks: bool,
 
@@ -147,7 +147,7 @@ impl Default for SophonUpdater {
             verify_chunks: SophonUpdaterVerifyMethod::Fast,
             verify_before_updating: SophonUpdaterVerifyMethod::Full,
 
-            delete_unused: true,
+            delete_unused_files: true,
             patch_files: true,
             delete_chunks: true,
 
@@ -236,8 +236,8 @@ impl SophonUpdater {
     /// Delete game files that were marked as unused.
     ///
     /// Default: `true`
-    pub fn with_delete_unused(mut self, delete_unused: bool) -> Self {
-        self.delete_unused = delete_unused;
+    pub fn with_delete_unused_files(mut self, delete_unused: bool) -> Self {
+        self.delete_unused_files = delete_unused;
 
         self
     }
@@ -535,6 +535,9 @@ impl SophonUpdater {
 
         // --------- Stage 1: delete unused files.
 
+        // Take list of unused assets and clear all the other variants because
+        // they won't be used anymore.
+
         let Some(unused_assets) = update_manifest.unused_assets.remove(
             update_version
         ) else {
@@ -545,28 +548,31 @@ impl SophonUpdater {
 
         update_manifest.unused_assets.clear();
 
-        // TODO: remove empty folders
-        let tasks = unused_assets.files.into_iter()
-            .map(|asset| update_dir.join(asset.name))
-            .filter(|path| path.exists())
-            .map(|path| {
-                let future = async move {
-                    #[cfg(feature = "tracing")]
-                    tracing::trace!(?path, "remove unused asset");
+        // Delete unused assets.
+        if self.delete_unused_files {
+            // TODO: remove empty folders
+            let tasks = unused_assets.files.into_iter()
+                .map(|asset| update_dir.join(asset.name))
+                .filter(|path| path.exists())
+                .map(|path| {
+                    let future = async move {
+                        #[cfg(feature = "tracing")]
+                        tracing::trace!(?path, "remove unused asset");
 
-                    tokio::fs::remove_file(path).await
-                        .map_err(SophonUpdaterError::Io)
-                };
+                        tokio::fs::remove_file(path).await
+                            .map_err(SophonUpdaterError::Io)
+                    };
 
-                if let Some(runtime) = &self.runtime {
-                    runtime.spawn(future)
-                } else {
-                    tokio::spawn(future)
-                }
-            })
-            .map(flatten);
+                    if let Some(runtime) = &self.runtime {
+                        runtime.spawn(future)
+                    } else {
+                        tokio::spawn(future)
+                    }
+                })
+                .map(flatten);
 
-        futures::future::try_join_all(tasks).await?;
+            futures::future::try_join_all(tasks).await?;
+        }
 
         // --------- Stage 2: download game patches.
 

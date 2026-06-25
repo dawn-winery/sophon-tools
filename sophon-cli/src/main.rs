@@ -307,15 +307,18 @@ enum CliCommands {
         #[arg(
             long, default_value_t = true,
             value_parser = clap::value_parser!(bool),
-            action = ArgAction::Set
+            action = ArgAction::Set,
+            alias = "delete-unused"
         )]
-        delete_unused: bool,
+        delete_unused_files: bool,
 
         /// Patch game files.
         #[arg(
             long, default_value_t = true,
             value_parser = clap::value_parser!(bool),
-            action = ArgAction::Set
+            action = ArgAction::Set,
+            alias = "apply-patches",
+            alias = "apply-chunks"
         )]
         patch_files: bool,
 
@@ -666,7 +669,7 @@ fn main() -> anyhow::Result<()> {
             verify_manifest,
             verify_chunks,
             verify_before_updating,
-            delete_unused,
+            delete_unused_files,
             patch_files,
             delete_chunks,
             user_agent,
@@ -691,7 +694,7 @@ fn main() -> anyhow::Result<()> {
                 verify_manifest,
                 verify_chunks,
                 verify_before_updating,
-                delete_unused,
+                delete_unused_files,
                 patch_files,
                 delete_chunks,
                 user_agent,
