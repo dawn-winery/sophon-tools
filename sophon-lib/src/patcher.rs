@@ -18,7 +18,9 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
+
+use tokio::process::Command;
 
 const HPATCHZ: &[u8] = include_bytes!("../external/hpatchz/hpatchz");
 
@@ -64,7 +66,7 @@ impl HdiffPatcher {
         feature = "tracing",
         tracing::instrument(level = tracing::Level::DEBUG, skip(self), ret)
     )]
-    pub fn patch(
+    pub async fn patch(
         &self,
         input: &Path,
         patch: &Path,
@@ -77,7 +79,8 @@ impl HdiffPatcher {
             .arg(output)
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
-            .output()?;
+            .output()
+            .await?;
 
         Ok(String::from_utf8_lossy(&output.stdout).contains("patch ok!"))
     }
