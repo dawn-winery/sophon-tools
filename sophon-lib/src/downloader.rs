@@ -53,14 +53,30 @@ pub enum SophonDownloaderError {
     #[error("encrypted files are not supported")]
     EncryptionNotSupported,
 
-    #[error("expected '{expected}' manifest size, got '{actual}'")]
+    #[error("expected '{expected}' manifest size, got '{actual}', url: '{url}'")]
     ManifestSizeMismatch {
+        url: String,
         actual: u64,
         expected: u64
     },
 
-    #[error("expected '{expected}' manifest hash, got '{actual}'")]
+    #[error("expected '{expected}' manifest hash, got '{actual}', url: '{url}'")]
     ManifestHashMismatch {
+        url: String,
+        actual: String,
+        expected: String
+    },
+
+    #[error("expected '{expected}' chunk size, got '{actual}', url: '{url}'")]
+    ChunkSizeMismatch {
+        url: String,
+        actual: u64,
+        expected: u64
+    },
+
+    #[error("expected '{expected}' chunk hash, got '{actual}', url: '{url}'")]
+    ChunkHashMismatch {
+        url: String,
         actual: String,
         expected: String
     }
@@ -99,6 +115,7 @@ pub struct SophonDownloader {
     fetch_chunk_timeout_per_mb: Option<Duration>,
 
     verify_manifest: SophonDownloaderVerifyMethod,
+    verify_chunks: SophonDownloaderVerifyMethod,
     verify_before_downloading: SophonDownloaderVerifyMethod,
 
     target_memory_usage: u64,
@@ -106,7 +123,7 @@ pub struct SophonDownloader {
     assets_sorter: Option<AssetsSorter>,
     assets_filter: Option<AssetsFilter>,
 
-    download_manifest_cache: RwLock<Vec<CacheSlot>>
+    manifest_cache: RwLock<Vec<CacheSlot>>
 }
 
 impl Default for SophonDownloader {
@@ -122,15 +139,16 @@ impl Default for SophonDownloader {
             fetch_manifest_timeout: None,
             fetch_chunk_timeout_per_mb: None,
 
-            verify_manifest: SophonDownloaderVerifyMethod::default(),
-            verify_before_downloading: SophonDownloaderVerifyMethod::default(),
+            verify_manifest: SophonDownloaderVerifyMethod::Full,
+            verify_chunks: SophonDownloaderVerifyMethod::Fast,
+            verify_before_downloading: SophonDownloaderVerifyMethod::Full,
 
             target_memory_usage: 256 * 1024 * 1024,
 
             assets_sorter: None,
             assets_filter: None,
 
-            download_manifest_cache: RwLock::const_new(Vec::with_capacity(1))
+            manifest_cache: RwLock::const_new(Vec::with_capacity(1))
         }
     }
 }
@@ -161,7 +179,7 @@ impl SophonDownloader {
     }
 
     /// Chunk downloading timeout per MB of data. In other words, for 6.37 MB
-    /// chunk downloader will wait for `ceil(6.47) * timeout = 7 * timeout`.
+    /// chunk downloader will wait for `ceil(6.37) * timeout = 7 * timeout`.
     ///
     /// Unset by default.
     pub fn with_fetch_chunk_timeout_per_mb(mut self, timeout: Duration) -> Self {
@@ -170,8 +188,10 @@ impl SophonDownloader {
         self
     }
 
-    /// Verify downloaded manifests hashes before trying to decode them.
-    pub fn with_verify_manifest_hash(
+    /// Verify downloaded manifest before trying to decode it.
+    ///
+    /// Default: `Full` (size + hash)
+    pub fn with_verify_manifest(
         mut self,
         method: SophonDownloaderVerifyMethod
     ) -> Self {
@@ -180,9 +200,24 @@ impl SophonDownloader {
         self
     }
 
+    /// Verify downloaded chunks before trying to apply them. If disabled,
+    /// chunks will be written to disk without any verification.
+    ///
+    /// Default: `Fast` (only chunk size)
+    pub fn with_verify_chunks(
+        mut self,
+        method: SophonDownloaderVerifyMethod
+    ) -> Self {
+        self.verify_chunks = method;
+
+        self
+    }
+
     /// Verify files if they're already available on disk before downloading
     /// them. If disabled, the algorithm will not spend time on verifying files
     /// and will overwrite them instead.
+    ///
+    /// Default: `Full` (size + hash)
     pub fn with_verify_before_downloading(
         mut self,
         method: SophonDownloaderVerifyMethod
@@ -242,7 +277,7 @@ impl SophonDownloader {
             download_info.manifest_info.id
         );
 
-        if let Some(slot) = self.download_manifest_cache.read().await.iter()
+        if let Some(slot) = self.manifest_cache.read().await.iter()
             .find(|slot| slot.url == url)
         {
             #[cfg(feature = "tracing")]
@@ -266,6 +301,18 @@ impl SophonDownloader {
             .send()
             .await?;
 
+        // Verify response size.
+        if self.verify_manifest != SophonDownloaderVerifyMethod::None
+            && let Some(content_length) = response.content_length()
+            && content_length != download_info.manifest_info.compressed_size
+        {
+            return Err(SophonDownloaderError::ChunkSizeMismatch {
+                url,
+                actual: content_length,
+                expected: download_info.manifest_info.compressed_size
+            });
+        }
+
         let mut manifest = response.bytes().await?.to_vec();
 
         if download_info.manifest_download.compressed {
@@ -281,6 +328,7 @@ impl SophonDownloader {
         if self.verify_manifest != SophonDownloaderVerifyMethod::None {
             if manifest.len() as u64 != download_info.manifest_info.decompressed_size {
                 return Err(SophonDownloaderError::ManifestSizeMismatch {
+                    url,
                     actual: manifest.len() as u64,
                     expected: download_info.manifest_info.decompressed_size
                 });
@@ -291,6 +339,7 @@ impl SophonDownloader {
 
                 if hash != download_info.manifest_info.hash_md5 {
                     return Err(SophonDownloaderError::ManifestHashMismatch {
+                        url,
                         actual: hash,
                         expected: download_info.manifest_info.hash_md5.clone()
                     });
@@ -303,7 +352,7 @@ impl SophonDownloader {
 
             Ok(decoded_manifest) => {
                 // Cache the manifest only if it can be decoded successfully.
-                self.download_manifest_cache.write().await.push(CacheSlot {
+                self.manifest_cache.write().await.push(CacheSlot {
                     url,
                     value: decoded_manifest.clone()
                 });
@@ -367,7 +416,7 @@ impl SophonDownloader {
         let mut download_manifest = self.fetch_download_info(download_info).await?;
 
         // Clear the cache since it won't be used anymore.
-        self.download_manifest_cache.write().await.clear();
+        self.manifest_cache.write().await.clear();
 
         // Skip assets downloading that are valid.
         if self.verify_before_downloading != SophonDownloaderVerifyMethod::None {
@@ -538,6 +587,18 @@ impl SophonDownloader {
                 let future = async move {
                     let response = request.send().await?;
 
+                    // Verify response size.
+                    if self.verify_chunks != SophonDownloaderVerifyMethod::None
+                        && let Some(content_length) = response.content_length()
+                        && content_length != chunk.compressed_size
+                    {
+                        return Err(SophonDownloaderError::ChunkSizeMismatch {
+                            url,
+                            actual: content_length,
+                            expected: chunk.compressed_size
+                        });
+                    }
+
                     let mut chunk_body = response.bytes().await?.to_vec();
 
                     if decompress_chunk {
@@ -547,6 +608,29 @@ impl SophonDownloader {
                         decoder.read_to_end(&mut buf)?;
 
                         chunk_body = buf;
+                    }
+
+                    // Verify downloaded chunk.
+                    if self.verify_chunks != SophonDownloaderVerifyMethod::None {
+                        if chunk_body.len() as u64 != chunk.decompressed_size {
+                            return Err(SophonDownloaderError::ChunkSizeMismatch {
+                                url,
+                                actual: chunk_body.len() as u64,
+                                expected: chunk.decompressed_size
+                            });
+                        }
+
+                        else if self.verify_manifest == SophonDownloaderVerifyMethod::Full {
+                            let hash = hex::encode(Md5::digest(&chunk_body));
+
+                            if hash != chunk.decompressed_hash_md5 {
+                                return Err(SophonDownloaderError::ChunkHashMismatch {
+                                    url,
+                                    actual: hash,
+                                    expected: chunk.decompressed_hash_md5.clone()
+                                });
+                            }
+                        }
                     }
 
                     let mut lock = file.lock().await;
