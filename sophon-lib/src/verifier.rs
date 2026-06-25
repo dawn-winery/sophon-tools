@@ -24,7 +24,7 @@ use std::io::{Read, BufReader};
 
 use md5::{Md5, Digest};
 
-use crate::protos::SophonDownloadAssetsInfoAsset;
+use crate::protos::{SophonDownloadAssetsInfoAsset, SophonUpdateAssetsInfoAsset};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SophonVerifierAsset {
@@ -55,18 +55,40 @@ pub struct SophonVerifier {
     fast_verify: bool
 }
 
-impl SophonVerifier {
-    pub fn new(
-        assets: impl IntoIterator<Item = SophonDownloadAssetsInfoAsset>
-    ) -> Self {
-        let assets = assets.into_iter()
-            .map(|asset| SophonVerifierAsset {
-                path: asset.path,
-                size: asset.size,
-                hash_md5: asset.hash_md5
-            })
-            .collect::<Box<[_]>>();
+impl From<Vec<SophonDownloadAssetsInfoAsset>> for SophonVerifier {
+    fn from(value: Vec<SophonDownloadAssetsInfoAsset>) -> Self {
+        Self {
+            cache: HashMap::with_capacity(value.len()),
+            assets: value.into_iter()
+                .map(|asset| SophonVerifierAsset {
+                    path: asset.path,
+                    size: asset.size,
+                    hash_md5: asset.hash_md5
+                })
+                .collect(),
+            fast_verify: false
+        }
+    }
+}
 
+impl From<Vec<SophonUpdateAssetsInfoAsset>> for SophonVerifier {
+    fn from(value: Vec<SophonUpdateAssetsInfoAsset>) -> Self {
+        Self {
+            cache: HashMap::with_capacity(value.len()),
+            assets: value.into_iter()
+                .map(|asset| SophonVerifierAsset {
+                    path: asset.path,
+                    size: asset.size,
+                    hash_md5: asset.hash_md5
+                })
+                .collect(),
+            fast_verify: false
+        }
+    }
+}
+
+impl SophonVerifier {
+    pub fn new(assets: Box<[SophonVerifierAsset]>) -> Self {
         Self {
             cache: HashMap::with_capacity(assets.len()),
             assets,
