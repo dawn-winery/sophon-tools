@@ -525,10 +525,10 @@ impl SophonUpdater {
         // first assets will have smallest total decompressed size.
         assets.sort_by(|a, b| {
             let a_size = a.chunks.get(update_version)
-                .map(|chunk| chunk.chunk_size);
+                .map(|chunk| chunk.chunk_length);
 
             let b_size = b.chunks.get(update_version)
-                .map(|chunk| chunk.chunk_size);
+                .map(|chunk| chunk.chunk_length);
 
             a_size.cmp(&b_size)
         });
@@ -582,7 +582,6 @@ impl SophonUpdater {
         struct PatchInfo {
             pub patch_path: PathBuf,
             pub patch_size: u64,
-            pub patch_hash_md5: String,
 
             pub asset_path: PathBuf,
 
@@ -630,9 +629,14 @@ impl SophonUpdater {
             let chunk_download_offset = chunk.chunk_offset;
 
             let patch_info = PatchInfo {
-                patch_path: chunks_dir.join(&chunk.chunk_hash_md5),
+                patch_path: chunks_dir.join(format!(
+                    "{}-{}-{}",
+                    chunk.name,
+                    chunk.chunk_offset,
+                    chunk.chunk_length
+                )),
+
                 patch_size: chunk.chunk_length,
-                patch_hash_md5: chunk.chunk_hash_md5.clone(),
 
                 asset_path: update_dir.join(&asset.path),
 
@@ -665,45 +669,20 @@ impl SophonUpdater {
                     continue;
                 }
 
-                else {
-                    let metadata = patch_info.patch_path.metadata()?;
-                    let is_size_matched = metadata.len() == patch_info.patch_size;
+                else if patch_info.patch_path.metadata()?.len()
+                    == patch_info.patch_size
+                {
+                    #[cfg(feature = "tracing")]
+                    tracing::trace!(
+                        ?patch_info,
+                        url = ?chunk_download_url,
+                        method = ?self.verify_chunks,
+                        "asset chunk already downloaded"
+                    );
 
-                    if self.verify_chunks == SophonUpdaterVerifyMethod::Fast
-                        && is_size_matched
-                    {
-                        #[cfg(feature = "tracing")]
-                        tracing::trace!(
-                            ?patch_info,
-                            url = ?chunk_download_url,
-                            method = ?self.verify_chunks,
-                            "asset chunk already downloaded"
-                        );
+                    patches.push(patch_info);
 
-                        patches.push(patch_info);
-
-                        continue;
-                    }
-
-                    else if is_size_matched {
-                        let hash = Md5::digest(
-                            tokio::fs::read(&patch_info.patch_path).await?
-                        );
-
-                        if hex::encode(hash) == patch_info.patch_hash_md5 {
-                            #[cfg(feature = "tracing")]
-                            tracing::trace!(
-                                ?patch_info,
-                                url = ?chunk_download_url,
-                                method = ?self.verify_chunks,
-                                "asset chunk already downloaded"
-                            );
-
-                            patches.push(patch_info);
-
-                            continue;
-                        }
-                    }
+                    continue;
                 }
             }
 
@@ -810,30 +789,16 @@ impl SophonUpdater {
                 let chunk_body = chunk_body?.to_vec();
 
                 // Verify downloaded chunk.
-                if self.verify_chunks != SophonUpdaterVerifyMethod::None {
-                    if chunk_body.len() as u64 != patch_info.patch_size {
-                        return Err(SophonUpdaterError::ChunkSizeMismatch {
-                            url: chunk_download_url,
-                            actual: chunk_body.len() as u64,
-                            expected: patch_info.patch_size,
-                            offset: chunk_download_offset,
-                            length: patch_info.patch_size
-                        });
-                    }
-
-                    else if self.verify_manifest == SophonUpdaterVerifyMethod::Full {
-                        let hash = hex::encode(Md5::digest(&chunk_body));
-
-                        if hash != patch_info.patch_hash_md5 {
-                            return Err(SophonUpdaterError::ChunkHashMismatch {
-                                url: chunk_download_url,
-                                actual: hash,
-                                expected: patch_info.patch_hash_md5,
-                                offset: chunk_download_offset,
-                                length: patch_info.patch_size
-                            });
-                        }
-                    }
+                if self.verify_chunks != SophonUpdaterVerifyMethod::None
+                    && chunk_body.len() as u64 != patch_info.patch_size
+                {
+                    return Err(SophonUpdaterError::ChunkSizeMismatch {
+                        url: chunk_download_url,
+                        actual: chunk_body.len() as u64,
+                        expected: patch_info.patch_size,
+                        offset: chunk_download_offset,
+                        length: patch_info.patch_size
+                    });
                 }
 
                 // Write downloaded chunk to disk.
