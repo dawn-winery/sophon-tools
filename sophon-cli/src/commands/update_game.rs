@@ -61,7 +61,7 @@ pub fn run(
         .map(Regex::new)
         .transpose()?;
 
-    let api = SophonApi::default();
+    let api = SophonApi::from(reqwest_client(user_agent, proxy)?.build()?);
 
     let game = api.game(region.into(), launcher_id, game_id);
 
@@ -87,7 +87,7 @@ pub fn run(
 
     // Prepare game updater.
     let mut updater = SophonUpdater::default()
-        .with_client(reqwest_client(user_agent, proxy)?.build()?)
+        .with_client(api.into())
         .with_runtime(runtime.handle().clone())
         .with_target_memory_usage(target_memory_usage)
         .with_verify_manifest(verify_manifest.into())
