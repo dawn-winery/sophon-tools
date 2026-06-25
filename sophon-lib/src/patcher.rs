@@ -17,6 +17,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
@@ -55,6 +56,11 @@ impl HdiffPatcher {
             tracing::debug!(?path, "export bundled hpatchz binary");
 
             tokio::fs::write(&path, HPATCHZ).await?;
+
+            tokio::fs::set_permissions(
+                &path,
+                std::fs::Permissions::from_mode(0o755)
+            ).await?;
         }
 
         Ok(Self(path))
