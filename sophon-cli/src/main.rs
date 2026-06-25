@@ -143,8 +143,10 @@ enum CliCommands {
         )]
         threads: usize,
 
-        /// Amount of system memory downloader will try to utilize. Higher value
-        /// will allow downloader to download more files in parallel.
+        /// Amount of system memory downloader will try to utilize.
+        ///
+        /// Higher value will allow downloader to download more files in
+        /// parallel.
         #[arg(
             long, short('m'), default_value_t = String::from("256mb"),
             alias = "target-memory",
@@ -166,9 +168,10 @@ enum CliCommands {
         #[arg(long, default_value_t = VerifyMethod::Fast)]
         verify_chunks: VerifyMethod,
 
-        /// Verify game files before downloading them. If disabled, downloader
-        /// will overwrite game files even if they're already properly
-        /// downloaded.
+        /// Verify game files before downloading them.
+        ///
+        /// If disabled, downloader will overwrite game files even if they're
+        /// already properly downloaded.
         #[arg(
             long, default_value_t = VerifyMethod::Full,
             alias = "verify-before-download"
@@ -204,13 +207,15 @@ enum CliCommands {
         #[arg(long)]
         launcher_id: Option<String>,
 
-        /// Currently installed version of the game. If unset, it will be
-        /// guessed using the `detect` command.
+        /// Currently installed version of the game.
+        ///
+        /// If unset, it will be guessed from the installed game files.
         #[arg(long)]
         from_version: Option<String>,
 
-        /// Version of the game to which it should be updated. If unset, the
-        /// latest available game version will be used.
+        /// Version of the game to which it should be updated.
+        ///
+        /// If unset, the latest available game version will be used.
         #[arg(long)]
         to_version: Option<String>,
 
@@ -248,8 +253,9 @@ enum CliCommands {
         )]
         threads: usize,
 
-        /// Amount of system memory updater will try to utilize. Higher value
-        /// will allow updater to download more files in parallel.
+        /// Amount of system memory updater will try to utilize.
+        ///
+        /// Higher value will allow updater to download more files in parallel.
         #[arg(
             long, short('m'), default_value_t = String::from("256mb"),
             alias = "target-memory",
@@ -271,8 +277,10 @@ enum CliCommands {
         #[arg(long, default_value_t = VerifyMethod::Fast)]
         verify_chunks: VerifyMethod,
 
-        /// Verify game files before updating them. If disabled, updater will
-        /// try to update game files even if they're already updated.
+        /// Verify game files before updating them.
+        ///
+        /// If disabled, updater will try to update game files even if they're
+        /// already updated.
         #[arg(
             long, default_value_t = VerifyMethod::Full,
             alias = "verify-before-update"
