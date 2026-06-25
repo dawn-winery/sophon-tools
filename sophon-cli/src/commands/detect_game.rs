@@ -20,7 +20,7 @@
 use std::path::PathBuf;
 
 use sophon_lib::region::SophonRegion;
-use sophon_lib::api::SophonApi;
+use sophon_lib::api::{SophonApi, SophonApiError};
 
 use super::{OutputFormat, reqwest_client, find_game_name};
 
@@ -40,21 +40,23 @@ pub fn run(
     let mut detected_game = None;
 
     for region in [SophonRegion::Global, SophonRegion::China] {
-        let game_configs = runtime.block_on(api.fetch_games_configs(region, None))
+        let games_branches = runtime.block_on(api.fetch_games_branches_info(region, None))
             .map_err(|err| anyhow::anyhow!(err.to_string()))?;
 
-        for game_config in game_configs {
-            if path.join(game_config.binary_name).is_file() {
-                let game = api.game(region, None, game_config.game_id);
+        for game_branch in games_branches {
+            let game = api.game(region, None, game_branch.game_id);
 
-                let version = runtime.block_on(game.detect_version(&path))
-                    .map_err(|err| anyhow::anyhow!(err.to_string()))?;
-
-                if let Some(version) = version {
+            match runtime.block_on(game.detect_version(&path)) {
+                Ok(Some(version)) => {
                     detected_game = Some((game, version));
 
                     break;
                 }
+
+                Ok(None) => continue,
+                Err(SophonApiError::GameNotFound { .. }) => continue,
+
+                Err(err) => anyhow::bail!(err.to_string())
             }
         }
     }
