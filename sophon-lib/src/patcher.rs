@@ -20,7 +20,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-const HPATCHZ: &[u8] = include_bytes!("../../external/hpatchz/hpatchz");
+const HPATCHZ: &[u8] = include_bytes!("../external/hpatchz/hpatchz");
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct HdiffPatcher(PathBuf);
