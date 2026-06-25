@@ -122,7 +122,7 @@ pub fn run(
             );
 
             for path in entries.into_iter() {
-                match verifier.verify_file(path.clone())? {
+                match runtime.block_on(verifier.verify_file(path.clone()))? {
                     VerifyResult::Valid   => writeln!(view, "      valid  {path:#?}")?,
                     VerifyResult::Invalid => writeln!(view, "[!] invalid  {path:#?}")?,
                     VerifyResult::Unknown => writeln!(view, "[?] unknown  {path:#?}")?
@@ -140,7 +140,7 @@ pub fn run(
                     "path": path,
                     "current": i + 1,
                     "total": total,
-                    "result": match verifier.verify_file(path)? {
+                    "result": match runtime.block_on(verifier.verify_file(path))? {
                         VerifyResult::Valid => "valid",
                         VerifyResult::Invalid => "invalid",
                         VerifyResult::Unknown => "unknown"
