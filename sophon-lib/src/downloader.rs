@@ -418,7 +418,7 @@ impl SophonDownloader {
 
         // Skip assets downloading that are valid.
         if self.verify_before_downloading != SophonDownloaderVerifyMethod::None {
-            let mut verifier = SophonVerifier::new(download_manifest.assets.clone());
+            let mut verifier = SophonVerifier::from(download_manifest.assets.clone());
 
             if self.verify_before_downloading == SophonDownloaderVerifyMethod::Fast {
                 verifier = verifier.with_fast_verify(true);
