@@ -22,18 +22,20 @@ use std::path::PathBuf;
 use regex::Regex;
 
 use sophon_lib::api::SophonApi;
-use sophon_lib::downloader::SophonDownloader;
+use sophon_lib::updater::SophonUpdater;
 
 use super::{
-    SophonRegion, VerifyMethod, OutputFormat, ProgressBar, reqwest_client
+    SophonRegion, VerifyMethod, OutputFormat, reqwest_client
 };
 
 #[allow(clippy::too_many_arguments)]
 pub fn run(
     game_id: String,
     component_id: String,
-    version: Option<String>,
-    path: PathBuf,
+    from_version: Option<String>,
+    to_version: Option<String>,
+    chunks_dir: PathBuf,
+    update_dir: PathBuf,
     region: SophonRegion,
     launcher_id: Option<String>,
     regex: Option<String>,
@@ -41,10 +43,13 @@ pub fn run(
     target_memory_usage: u64,
     verify_manifest: VerifyMethod,
     verify_chunks: VerifyMethod,
-    verify_before_downloading: VerifyMethod,
+    verify_before_updating: VerifyMethod,
+    delete_unused: bool,
+    patch_files: bool,
+    delete_chunks: bool,
     user_agent: Option<String>,
     proxy: Option<String>,
-    output_format: OutputFormat,
+    _output_format: OutputFormat,
     _ascii: bool
 ) -> anyhow::Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -60,69 +65,50 @@ pub fn run(
 
     let game = api.game(region.into(), launcher_id, game_id);
 
-    // Fetch game download manifest.
-    let package = runtime.block_on(game.package(version))
+    // Detect current game version.
+    let from_version = match from_version {
+        Some(version) => version,
+        None => {
+            runtime.block_on(game.detect_version(&update_dir))
+                .map_err(|err| anyhow::anyhow!(err.to_string()))?
+                .ok_or_else(|| anyhow::anyhow!("failed to detect installed game version"))?
+        }
+    };
+
+    // Fetch game update manifest.
+    let package = runtime.block_on(game.package(to_version))
         .map_err(|err| anyhow::anyhow!(err.to_string()))?;
 
-    let Some(download_manifest) = runtime.block_on(package.find_download_manifest(&component_id))
+    let Some(update_manifest) = runtime.block_on(package.find_update_manifest(&component_id))
         .map_err(|err| anyhow::anyhow!(err.to_string()))?
     else {
         return Ok(());
     };
 
-    // Prepare downloader.
-    let mut downloader = SophonDownloader::default()
+    // Prepare game updater.
+    let mut updater = SophonUpdater::default()
         .with_client(reqwest_client(user_agent, proxy)?.build()?)
         .with_runtime(runtime.handle().clone())
         .with_target_memory_usage(target_memory_usage)
         .with_verify_manifest(verify_manifest.into())
         .with_verify_chunks(verify_chunks.into())
-        .with_verify_before_downloading(verify_before_downloading.into());
+        .with_verify_before_updating(verify_before_updating.into())
+        .with_delete_unused(delete_unused)
+        .with_patch_files(patch_files)
+        .with_delete_chunks(delete_chunks);
 
     if let Some(regex) = regex {
-        downloader = downloader.with_assets_filter(Box::new(move |asset| {
+        updater = updater.with_assets_filter(Box::new(move |asset| {
             regex.is_match(&asset.path)
         }));
     }
 
-    match output_format {
-        OutputFormat::Text => {
-            let view = nutmeg::View::new(
-                ProgressBar {
-                    current: 0,
-                    total: 0,
-                    format_bytes: true
-                },
-                nutmeg::Options::default()
-            );
-
-            runtime.block_on(downloader.download(
-                &download_manifest,
-                &path,
-                Box::new(move |current, total| {
-                    view.update(move |model| {
-                        model.current = current;
-                        model.total = total
-                    })
-                })
-            ))?;
-        }
-
-        OutputFormat::Json => {
-            runtime.block_on(downloader.download(
-                &download_manifest,
-                &path,
-                Box::new(|current, total| {
-                    if let Ok(msg) = serde_json::to_string(&serde_json::json!({
-                        "current": current,
-                        "total": total
-                    })) {
-                        println!("{msg}");
-                    }
-                })
-            ))?;
-        }
-    }
+    runtime.block_on(updater.update(
+        &update_manifest,
+        &from_version,
+        &chunks_dir,
+        &update_dir
+    ))?;
 
     Ok(())
 }

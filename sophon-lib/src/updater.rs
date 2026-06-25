@@ -17,14 +17,11 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-use std::fs::File;
-use std::io::{BufWriter, Read, Seek, SeekFrom, Write};
+use std::io::Read;
 
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::RwLock;
 
 use md5::{Md5, Digest};
 use prost::{Message, DecodeError};
@@ -124,7 +121,6 @@ pub struct SophonUpdater {
     delete_unused: bool,
     patch_files: bool,
     delete_chunks: bool,
-    repair_broken: bool,
 
     target_memory_usage: u64,
 
@@ -154,7 +150,6 @@ impl Default for SophonUpdater {
             delete_unused: true,
             patch_files: true,
             delete_chunks: true,
-            repair_broken: true,
 
             target_memory_usage: 256 * 1024 * 1024,
 
@@ -229,7 +224,7 @@ impl SophonUpdater {
     /// and will overwrite them instead.
     ///
     /// Default: `Full` (size + hash)
-    pub fn with_verify_before_downloading(
+    pub fn with_verify_before_updating(
         mut self,
         method: SophonUpdaterVerifyMethod
     ) -> Self {
@@ -263,17 +258,8 @@ impl SophonUpdater {
     /// when the game file is patched.
     ///
     /// Default: `true`
-    pub fn with_delete_chunks(mut self, delete: bool) -> Self {
-        self.delete_chunks = delete;
-
-        self
-    }
-
-    /// Re-download game files which failed to update.
-    ///
-    /// Default: `true`
-    pub fn with_repair_broken(mut self, repair: bool) -> Self {
-        self.repair_broken = repair;
+    pub fn with_delete_chunks(mut self, delete_chunks: bool) -> Self {
+        self.delete_chunks = delete_chunks;
 
         self
     }
@@ -402,7 +388,7 @@ impl SophonUpdater {
     }
 
     /// Update gane files (assets) stored in the `update_dir` using chunks
-    /// stored in the `download_dir`, or by downloading chunks from server.
+    /// stored in the `chunks_dir`, or by downloading chunks from server.
     /// `update_version` indicates the version of the game in the `update_dir`
     /// directory.
     ///
@@ -470,17 +456,17 @@ impl SophonUpdater {
     /// TBD
     pub async fn update(
         self,
-        download_info: &SophonApiPackageManifest,
-        download_dir: &Path,
+        update_info: &SophonApiPackageManifest,
         update_version: &str,
+        chunks_dir: &Path,
         update_dir: &Path
     ) -> Result<(), SophonUpdaterError> {
-        if download_info.diff_download.encrypted {
+        if update_info.diff_download.encrypted {
             return Err(SophonUpdaterError::EncryptionNotSupported);
         }
 
         // Fetch list of assets to update.
-        let mut update_manifest = self.fetch_manifest(download_info).await?;
+        let mut update_manifest = self.fetch_manifest(update_info).await?;
 
         // Clear the cache since it won't be used anymore.
         self.manifest_cache.write().await.clear();
@@ -506,7 +492,7 @@ impl SophonUpdater {
 
             update_manifest.assets.retain(move |asset| {
                 !matches!(
-                    verifier.verify_file(download_dir.join(&asset.path)),
+                    verifier.verify_file(chunks_dir.join(&asset.path)),
                     Ok(VerifyResult::Valid)
                 )
             });
@@ -613,9 +599,9 @@ impl SophonUpdater {
 
         let mut occupied_memory = 0;
 
-        // Create patches download dir if it doesn't exist.
-        if !download_dir.is_dir() {
-            tokio::fs::create_dir_all(download_dir).await?;
+        // Create chunks download dir if it doesn't exist.
+        if !chunks_dir.is_dir() {
+            tokio::fs::create_dir_all(chunks_dir).await?;
         }
 
         // Iterate over all the assets we need to update.
@@ -628,15 +614,15 @@ impl SophonUpdater {
 
             let chunk_download_url = format!(
                 "{}{}/{}",
-                download_info.diff_download.url_prefix,
-                download_info.diff_download.url_suffix,
+                update_info.diff_download.url_prefix,
+                update_info.diff_download.url_suffix,
                 chunk.name
             );
 
             let chunk_download_offset = chunk.chunk_offset;
 
             let patch_info = PatchInfo {
-                patch_path: download_dir.join(&chunk.chunk_hash_md5),
+                patch_path: chunks_dir.join(&chunk.chunk_hash_md5),
                 patch_size: chunk.chunk_length,
                 patch_hash_md5: chunk.chunk_hash_md5.clone(),
 

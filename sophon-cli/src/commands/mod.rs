@@ -19,6 +19,11 @@
 
 use clap::ValueEnum;
 
+use sophon_lib::export::reqwest::{
+    ClientBuilder as ReqwestClientBuilder,
+    Proxy as ReqwestProxy
+};
+
 pub mod list_games;
 pub mod list_components;
 pub mod game_versions;
@@ -27,8 +32,9 @@ pub mod download_info;
 pub mod detect_game;
 pub mod verify_game;
 pub mod download_game;
+pub mod update_game;
 
-#[derive(Debug, Clone, Copy, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ValueEnum)]
 pub enum SophonRegion {
     #[value(name = "global")]
     Global,
@@ -38,21 +44,144 @@ pub enum SophonRegion {
 }
 
 impl From<SophonRegion> for sophon_lib::region::SophonRegion {
-    fn from(value: SophonRegion) -> Self {
-        match value {
+    fn from(region: SophonRegion) -> Self {
+        match region {
             SophonRegion::Global => Self::Global,
             SophonRegion::China => Self::China
         }
     }
 }
 
-#[derive(Debug, Clone, Copy, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ValueEnum)]
+pub enum VerifyMethod {
+    #[value(
+        name = "none",
+        alias = "disable",
+        alias = "disabled"
+    )]
+    None,
+
+    #[value(
+        name = "fast",
+        alias = "size",
+        alias = "sizes",
+        alias = "file-size",
+        alias = "files-sizes"
+    )]
+    Fast,
+
+    #[value(
+        name = "full",
+        alias = "hash",
+        alias = "hashes",
+        alias = "file-hash",
+        alias = "files-hashes"
+    )]
+    Full
+}
+
+impl std::fmt::Display for VerifyMethod {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::None => f.write_str("none"),
+            Self::Fast => f.write_str("fast"),
+            Self::Full => f.write_str("full")
+        }
+    }
+}
+
+impl From<VerifyMethod> for sophon_lib::downloader::SophonDownloaderVerifyMethod {
+    fn from(method: VerifyMethod) -> Self {
+        match method {
+            VerifyMethod::None => Self::None,
+            VerifyMethod::Fast => Self::Fast,
+            VerifyMethod::Full => Self::Full
+        }
+    }
+}
+
+impl From<VerifyMethod> for sophon_lib::updater::SophonUpdaterVerifyMethod {
+    fn from(method: VerifyMethod) -> Self {
+        match method {
+            VerifyMethod::None => Self::None,
+            VerifyMethod::Fast => Self::Fast,
+            VerifyMethod::Full => Self::Full
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ValueEnum)]
 pub enum OutputFormat {
     #[value(name = "text")]
     Text,
 
     #[value(name = "json")]
     Json
+}
+
+#[derive(Default)]
+pub struct ProgressBar {
+    pub current: u64,
+    pub total: u64,
+
+    /// Format current and total as bytes.
+    pub format_bytes: bool
+}
+
+impl nutmeg::Model for ProgressBar {
+    fn render(&mut self, width: usize) -> String {
+        let (current, total) = if self.format_bytes {
+            (format_size(self.current as f64), format_size(self.total as f64))
+        } else {
+            (self.current.to_string(), self.total.to_string())
+        };
+
+        if current.len() + total.len() + 6 > width {
+            return String::new();
+        }
+
+        let pb_width = width - current.len() - total.len() - 6;
+
+        let pb_prefix_width = (self.current as f64 * pb_width as f64 / self.total as f64).round() as usize;
+        let pb_suffix_width = pb_width - pb_prefix_width;
+
+        let pb_prefix = "#".repeat(pb_prefix_width);
+        let pb_suffix = " ".repeat(pb_suffix_width);
+
+        format!("{current} / {total} [{pb_prefix}{pb_suffix}]")
+    }
+}
+
+const MEMORY_MULTIPLIERS: &[(&str, f64)] = &[
+    ("tb", 1024.0 * 1024.0 * 1024.0),
+    ("t",  1024.0 * 1024.0 * 1024.0),
+    ("gb", 1024.0 * 1024.0 * 1024.0),
+    ("g",  1024.0 * 1024.0 * 1024.0),
+    ("mb", 1024.0 * 1024.0),
+    ("m",  1024.0 * 1024.0),
+    ("kb", 1024.0),
+    ("k",  1024.0),
+    ("b", 1.0)
+];
+
+pub fn parse_memory_str(value: &str) -> Option<u64> {
+    let value = value.to_lowercase();
+
+    let mut memory = value.parse::<u64>().ok();
+
+    if memory.is_none() {
+        for (suffix, multiplier) in MEMORY_MULTIPLIERS {
+            if let Some(prefix) = value.strip_suffix(suffix)
+                && let Ok(value) = prefix.trim().parse::<f64>()
+            {
+                memory = Some((value * multiplier).round() as u64);
+
+                break;
+            }
+        }
+    }
+
+    memory
 }
 
 const GAMES: &[(&str, &str, &str)] = &[
@@ -96,35 +225,20 @@ pub fn format_size(size: f64) -> String {
     }
 }
 
-#[derive(Default)]
-pub struct ProgressBar {
-    pub current: u64,
-    pub total: u64,
+pub fn reqwest_client(
+    user_agent: Option<String>,
+    proxy: Option<String>
+) -> anyhow::Result<ReqwestClientBuilder> {
+    let mut builder = ReqwestClientBuilder::new()
+        .user_agent(format!("sophon-tools/v{}", sophon_lib::VERSION));
 
-    /// Format current and total as bytes.
-    pub format_bytes: bool
-}
-
-impl nutmeg::Model for ProgressBar {
-    fn render(&mut self, width: usize) -> String {
-        let (current, total) = if self.format_bytes {
-            (format_size(self.current as f64), format_size(self.total as f64))
-        } else {
-            (self.current.to_string(), self.total.to_string())
-        };
-
-        if current.len() + total.len() + 6 > width {
-            return String::new();
-        }
-
-        let pb_width = width - current.len() - total.len() - 6;
-
-        let pb_prefix_width = (self.current as f64 * pb_width as f64 / self.total as f64).round() as usize;
-        let pb_suffix_width = pb_width - pb_prefix_width;
-
-        let pb_prefix = "#".repeat(pb_prefix_width);
-        let pb_suffix = " ".repeat(pb_suffix_width);
-
-        format!("{current} / {total} [{pb_prefix}{pb_suffix}]")
+    if let Some(user_agent) = user_agent {
+        builder = builder.user_agent(user_agent);
     }
+
+    if let Some(proxy) = proxy {
+        builder = builder.proxy(ReqwestProxy::all(proxy)?);
+    }
+
+    Ok(builder)
 }

@@ -21,7 +21,7 @@ use std::path::PathBuf;
 
 use tracing_subscriber::prelude::*;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ArgAction};
 
 pub mod commands;
 
@@ -133,8 +133,7 @@ enum CliCommands {
         #[arg(long)]
         regex: Option<String>,
 
-        /// Amount of threads to use in the tokio async runtime. If unset,
-        /// amount of virtual CPU cores will be used.
+        /// Amount of threads to use in the tokio async runtime.
         #[arg(
             long, short('t'),
             alias = "workers",
@@ -159,22 +158,150 @@ enum CliCommands {
         )]
         target_memory_usage: String,
 
-        /// Use files sizes for verification instead of calculating md5 hashes.
-        #[arg(long, alias = "fast", alias = "fast-verifying")]
-        fast_verify: bool,
+        /// Verify downloaded manifest.
+        #[arg(long, default_value_t = VerifyMethod::Full)]
+        verify_manifest: VerifyMethod,
 
-        /// Do not verify files before downloading.
+        /// Verify downloaded chunks.
+        #[arg(long, default_value_t = VerifyMethod::Fast)]
+        verify_chunks: VerifyMethod,
+
+        /// Verify game files before downloading them. If disabled, downloader
+        /// will overwrite game files even if they're already properly
+        /// downloaded.
         #[arg(
-            long,
-            alias = "no-verify-before-downloading",
-            alias = "no-verifying-before-download",
-            alias = "no-verifying-before-downloading",
-            alias = "skip-verify-before-download",
-            alias = "skip-verify-before-downloading",
-            alias = "skip-verifying-before-download",
-            alias = "skip-verifying-before-downloading"
+            long, default_value_t = VerifyMethod::Full,
+            alias = "verify-before-download"
         )]
-        no_verify_before_download: bool,
+        verify_before_downloading: VerifyMethod,
+
+        /// Downloader user agent string.
+        #[arg(long)]
+        user_agent: Option<String>,
+
+        /// Downloader proxy.
+        #[arg(long)]
+        proxy: Option<String>,
+
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        output_format: OutputFormat
+    },
+
+    /// Update game.
+    Update {
+        #[arg(index = 1, required = true)]
+        game: String,
+
+        #[arg(index = 2, required = true)]
+        path: PathBuf,
+
+        #[arg(
+            long, value_enum, default_value_t = SophonRegion::Global,
+            alias = "edition"
+        )]
+        region: SophonRegion,
+
+        #[arg(long)]
+        launcher_id: Option<String>,
+
+        /// Currently installed version of the game. If unset, it will be
+        /// guessed using the `detect` command.
+        #[arg(long)]
+        from_version: Option<String>,
+
+        /// Version of the game to which it should be updated. If unset, the
+        /// latest available game version will be used.
+        #[arg(long)]
+        to_version: Option<String>,
+
+        #[arg(
+            long, default_value = ".cache",
+            alias = "chunks-path",
+            alias = "download-dir",
+            alias = "download-path",
+            alias = "chunks-download-dir",
+            alias = "chunks-download-path"
+        )]
+        chunks_dir: PathBuf,
+
+        #[arg(
+            long, default_value_t = String::from("game"),
+            alias = "component-id",
+            alias = "component-name",
+            alias = "category",
+            alias = "category-id",
+            alias = "category-name"
+        )]
+        component: String,
+
+        /// Update files that match the regex.
+        #[arg(long)]
+        regex: Option<String>,
+
+        /// Amount of threads to use in the tokio async runtime.
+        #[arg(
+            long, short('t'),
+            alias = "workers",
+            default_value_t = std::thread::available_parallelism()
+                .map(|threads| threads.get())
+                .unwrap_or(1)
+        )]
+        threads: usize,
+
+        /// Amount of system memory updater will try to utilize. Higher value
+        /// will allow updater to download more files in parallel.
+        #[arg(
+            long, short('m'), default_value_t = String::from("256mb"),
+            alias = "target-memory",
+            alias = "memory-usage",
+            alias = "target-memory-buffer",
+            alias = "target-memory-buf",
+            alias = "memory-buffer",
+            alias = "memory-buf",
+            alias = "memory",
+            alias = "mem"
+        )]
+        target_memory_usage: String,
+
+        /// Verify downloaded manifest.
+        #[arg(long, default_value_t = VerifyMethod::Full)]
+        verify_manifest: VerifyMethod,
+
+        /// Verify downloaded chunks.
+        #[arg(long, default_value_t = VerifyMethod::Fast)]
+        verify_chunks: VerifyMethod,
+
+        /// Verify game files before updating them. If disabled, updater will
+        /// try to update game files even if they're already updated.
+        #[arg(
+            long, default_value_t = VerifyMethod::Full,
+            alias = "verify-before-update"
+        )]
+        verify_before_updating: VerifyMethod,
+
+        /// Delete unused game files.
+        #[arg(
+            long, default_value_t = true,
+            value_parser = clap::value_parser!(bool),
+            action = ArgAction::Set
+        )]
+        delete_unused: bool,
+
+        /// Patch game files.
+        #[arg(
+            long, default_value_t = true,
+            value_parser = clap::value_parser!(bool),
+            action = ArgAction::Set
+        )]
+        patch_files: bool,
+
+        /// Delete chunks after applying them to the game files.
+        #[arg(
+            long, default_value_t = true,
+            value_parser = clap::value_parser!(bool),
+            action = ArgAction::Set
+        )]
+        delete_chunks: bool,
 
         /// Downloader user agent string.
         #[arg(long)]
@@ -400,44 +527,16 @@ fn main() -> anyhow::Result<()> {
             component,
             regex,
             threads,
-            target_memory_usage: target_memory_usage_str,
-            fast_verify,
-            no_verify_before_download,
+            target_memory_usage,
+            verify_manifest,
+            verify_chunks,
+            verify_before_downloading,
             user_agent,
             proxy,
             output_format
         } => {
-            const MULTIPLIERS: &[(&str, f64)] = &[
-                ("tb", 1024.0 * 1024.0 * 1024.0),
-                ("t",  1024.0 * 1024.0 * 1024.0),
-                ("gb", 1024.0 * 1024.0 * 1024.0),
-                ("g",  1024.0 * 1024.0 * 1024.0),
-                ("mb", 1024.0 * 1024.0),
-                ("m",  1024.0 * 1024.0),
-                ("kb", 1024.0),
-                ("k",  1024.0),
-                ("b", 1.0)
-            ];
-
-            let target_memory_usage_str = target_memory_usage_str.to_lowercase();
-
-            let mut target_memory_usage = target_memory_usage_str.parse::<u64>().ok();
-
-            if target_memory_usage.is_none() {
-                for (suffix, multiplier) in MULTIPLIERS {
-                    if let Some(prefix) = target_memory_usage_str.strip_suffix(suffix)
-                        && let Ok(value) = prefix.trim().parse::<f64>()
-                    {
-                        target_memory_usage = Some((value * multiplier).round() as u64);
-
-                        break;
-                    }
-                }
-            }
-
-            let Some(target_memory_usage) = target_memory_usage else {
-                anyhow::bail!("invalid target_memory_usage value");
-            };
+            let target_memory_usage = parse_memory_str(&target_memory_usage)
+                .ok_or_else(|| anyhow::anyhow!("invalid target_memory_usage value"))?;
 
             download_game::run(
                 game,
@@ -449,8 +548,59 @@ fn main() -> anyhow::Result<()> {
                 regex,
                 threads,
                 target_memory_usage,
-                fast_verify,
-                no_verify_before_download,
+                verify_manifest,
+                verify_chunks,
+                verify_before_downloading,
+                user_agent,
+                proxy,
+                output_format,
+                cli.ascii
+            )
+        },
+
+        CliCommands::Update {
+            game,
+            path,
+            region,
+            launcher_id,
+            from_version,
+            to_version,
+            chunks_dir,
+            component,
+            regex,
+            threads,
+            target_memory_usage,
+            verify_manifest,
+            verify_chunks,
+            verify_before_updating,
+            delete_unused,
+            patch_files,
+            delete_chunks,
+            user_agent,
+            proxy,
+            output_format
+        } => {
+            let target_memory_usage = parse_memory_str(&target_memory_usage)
+                .ok_or_else(|| anyhow::anyhow!("invalid target_memory_usage value"))?;
+
+            update_game::run(
+                game,
+                component,
+                from_version,
+                to_version,
+                chunks_dir,
+                path,
+                region,
+                launcher_id,
+                regex,
+                threads,
+                target_memory_usage,
+                verify_manifest,
+                verify_chunks,
+                verify_before_updating,
+                delete_unused,
+                patch_files,
+                delete_chunks,
                 user_agent,
                 proxy,
                 output_format,
