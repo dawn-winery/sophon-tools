@@ -14,13 +14,15 @@ publish = false
 
 [features]
 tracing = ["dep:tracing"]
-default = ["tracing"]
+reqwest-compressions = ["reqwest/deflate", "reqwest/gzip"]
+
+default = ["tracing", "reqwest-compressions"]
 
 [dependencies.reqwest]
 version = "0.13"
 features = [
-    "rustls",
     "http2",
+    "rustls",
     "socks",
     "system-proxy"
 ]

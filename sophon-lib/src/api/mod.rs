@@ -119,12 +119,12 @@ struct PackageCacheSlot<T> {
 pub struct SophonApi {
     client: reqwest::Client,
 
-    game_branches_timeout: Duration,
-    game_versions_info_timeout: Duration,
-    game_configs_timeout: Duration,
+    game_branches_timeout: Option<Duration>,
+    game_versions_info_timeout: Option<Duration>,
+    game_configs_timeout: Option<Duration>,
 
-    package_download_info_timeout: Duration,
-    package_update_info_timeout: Duration,
+    package_download_info_timeout: Option<Duration>,
+    package_update_info_timeout: Option<Duration>,
 
     game_branches_cache: RwLock<Vec<GameCacheSlot<Box<[SophonApiGameBranch]>>>>,
     game_versions_info_cache: RwLock<Vec<GameCacheSlot<Box<[SophonApiGameVersionsInfo]>>>>,
@@ -139,15 +139,17 @@ impl Default for SophonApi {
         Self {
             client: reqwest::Client::builder()
                 .user_agent(format!("sophon-tools/v{}", crate::VERSION))
+                .deflate(true)
+                .gzip(true)
                 .build()
                 .expect("failed to build reqwest client"),
 
-            game_branches_timeout: Duration::from_secs(5),
-            game_versions_info_timeout: Duration::from_secs(5),
-            game_configs_timeout: Duration::from_secs(5),
+            game_branches_timeout: None,
+            game_versions_info_timeout: None,
+            game_configs_timeout: None,
 
-            package_download_info_timeout: Duration::from_secs(7),
-            package_update_info_timeout: Duration::from_secs(7),
+            package_download_info_timeout: None,
+            package_update_info_timeout: None,
 
             game_branches_cache: RwLock::const_new(Vec::with_capacity(1)),
             game_versions_info_cache: RwLock::const_new(Vec::with_capacity(1)),
@@ -177,31 +179,31 @@ impl From<SophonApi> for reqwest::Client {
 
 impl SophonApi {
     pub fn with_game_branches_timeout(mut self, timeout: Duration) -> Self {
-        self.game_branches_timeout = timeout;
+        self.game_branches_timeout = Some(timeout);
 
         self
     }
 
     pub fn with_game_versions_info_timeout(mut self, timeout: Duration) -> Self {
-        self.game_versions_info_timeout = timeout;
+        self.game_versions_info_timeout = Some(timeout);
 
         self
     }
 
     pub fn with_game_configs_timeout(mut self, timeout: Duration) -> Self {
-        self.game_configs_timeout = timeout;
+        self.game_configs_timeout = Some(timeout);
 
         self
     }
 
     pub fn with_package_download_info_timeout(mut self, timeout: Duration) -> Self {
-        self.package_download_info_timeout = timeout;
+        self.package_download_info_timeout = Some(timeout);
 
         self
     }
 
     pub fn with_package_update_info_timeout(mut self, timeout: Duration) -> Self {
-        self.package_update_info_timeout = timeout;
+        self.package_update_info_timeout = Some(timeout);
 
         self
     }
@@ -257,7 +259,7 @@ impl SophonApi {
         );
 
         let response = self.client.get(url)
-            .timeout(self.game_branches_timeout)
+            .timeout(self.game_branches_timeout.unwrap_or(Duration::MAX))
             .send()
             .await?;
 
@@ -340,7 +342,7 @@ impl SophonApi {
         );
 
         let response = self.client.get(url)
-            .timeout(self.game_versions_info_timeout)
+            .timeout(self.game_versions_info_timeout.unwrap_or(Duration::MAX))
             .send()
             .await?;
 
@@ -424,7 +426,7 @@ impl SophonApi {
         );
 
         let response = self.client.get(url)
-            .timeout(self.game_configs_timeout)
+            .timeout(self.game_configs_timeout.unwrap_or(Duration::MAX))
             .send()
             .await?;
 
@@ -520,7 +522,7 @@ impl SophonApi {
         );
 
         let response = self.client.get(url)
-            .timeout(self.package_download_info_timeout)
+            .timeout(self.package_download_info_timeout.unwrap_or(Duration::MAX))
             .send()
             .await?;
 
@@ -609,7 +611,7 @@ impl SophonApi {
         );
 
         let response = self.client.post(url)
-            .timeout(self.package_update_info_timeout)
+            .timeout(self.package_update_info_timeout.unwrap_or(Duration::MAX))
             .send()
             .await?;
 
