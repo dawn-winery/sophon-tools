@@ -123,6 +123,7 @@ pub struct SophonUpdater {
     delete_chunks: bool,
 
     target_memory_usage: u64,
+    chunk_download_attempts: u8,
 
     assets_sorter: Option<AssetsSorter>,
     assets_filter: Option<AssetsFilter>,
@@ -152,6 +153,7 @@ impl Default for SophonUpdater {
             delete_chunks: true,
 
             target_memory_usage: 256 * 1024 * 1024,
+            chunk_download_attempts: 3,
 
             assets_sorter: None,
             assets_filter: None,
@@ -271,6 +273,18 @@ impl SophonUpdater {
     /// Default: `256 MB`
     pub fn with_target_memory_usage(mut self, size: u64) -> Self {
         self.target_memory_usage = size;
+
+        self
+    }
+
+    /// Amount of time updater will try to download a chunk.
+    ///
+    /// Sometimes remote server drops the connection, so we can try to
+    /// download the same chunk multiple times.
+    ///
+    /// Default: `3`
+    pub fn with_chunk_download_attempts(mut self, attempts: u8) -> Self {
+        self.chunk_download_attempts = attempts;
 
         self
     }
@@ -655,7 +669,7 @@ impl SophonUpdater {
                         ?patch_info,
                         url = ?chunk_download_url,
                         method = ?self.verify_chunks,
-                        "asset patch already downloaded"
+                        "asset chunk already downloaded"
                     );
 
                     patches.push(patch_info);
@@ -675,7 +689,7 @@ impl SophonUpdater {
                             ?patch_info,
                             url = ?chunk_download_url,
                             method = ?self.verify_chunks,
-                            "asset patch already downloaded"
+                            "asset chunk already downloaded"
                         );
 
                         patches.push(patch_info);
@@ -694,7 +708,7 @@ impl SophonUpdater {
                                 ?patch_info,
                                 url = ?chunk_download_url,
                                 method = ?self.verify_chunks,
-                                "asset patch already downloaded"
+                                "asset chunk already downloaded"
                             );
 
                             patches.push(patch_info);
@@ -732,7 +746,7 @@ impl SophonUpdater {
             tracing::trace!(
                 ?patch_info,
                 url = ?chunk_download_url,
-                "schedule asset patch download"
+                "schedule asset chunk download"
             );
 
             // For some reason the actual hdiff patch on the server is stored
@@ -760,6 +774,8 @@ impl SophonUpdater {
 
             // Start chunk downloading task.
             let future = async move {
+                let request_copy = request.try_clone();
+
                 let response = request.send().await?;
 
                 // Verify response size.
@@ -774,7 +790,34 @@ impl SophonUpdater {
                     });
                 }
 
-                let chunk_body = response.bytes().await?.to_vec();
+                let mut chunk_body = response.bytes().await;
+
+                if let Some(request) = request_copy && chunk_body.is_err() {
+                    for attempt in 1..self.chunk_download_attempts {
+                        #[cfg(feature = "tracing")]
+                        tracing::debug!(
+                            url = ?chunk_download_url,
+                            ?attempt,
+                            "failed to download chunk"
+                        );
+
+                        let Some(request) = request.try_clone() else {
+                            break;
+                        };
+
+                        let Ok(request) = request.send().await else {
+                            continue;
+                        };
+
+                        chunk_body = request.bytes().await;
+
+                        if chunk_body.is_ok() {
+                            break;
+                        }
+                    }
+                }
+
+                let chunk_body = chunk_body?.to_vec();
 
                 // Verify downloaded chunk.
                 if self.verify_chunks != SophonUpdaterVerifyMethod::None {

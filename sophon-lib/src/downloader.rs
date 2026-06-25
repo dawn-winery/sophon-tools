@@ -245,7 +245,7 @@ impl SophonDownloader {
     /// Amount of time downloader will try to download a chunk.
     ///
     /// Sometimes remote server drops the connection, so we can try to
-    /// downloading the same chunk multiple times.
+    /// download the same chunk multiple times.
     ///
     /// Default: `3`
     pub fn with_chunk_download_attempts(mut self, attempts: u8) -> Self {

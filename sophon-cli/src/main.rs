@@ -300,6 +300,17 @@ enum CliCommands {
         )]
         target_memory_usage: String,
 
+        /// Chunk downloading attempts.
+        #[arg(
+            long, default_value_t = 3,
+            alias = "chunk-downloading-attempts",
+            alias = "downloading-attempts",
+            alias = "download-attempts",
+            alias = "chunk-attempts",
+            alias = "attempts"
+        )]
+        chunk_download_attempts: u8,
+
         /// Verify downloaded manifest.
         #[arg(long, default_value_t = VerifyMethod::Full)]
         verify_manifest: VerifyMethod,
@@ -744,6 +755,7 @@ fn main() -> anyhow::Result<()> {
             regex,
             threads,
             target_memory_usage,
+            chunk_download_attempts,
             verify_manifest,
             verify_chunks,
             verify_before_updating,
@@ -769,6 +781,7 @@ fn main() -> anyhow::Result<()> {
                 regex,
                 threads,
                 target_memory_usage,
+                chunk_download_attempts,
                 verify_manifest,
                 verify_chunks,
                 verify_before_updating,

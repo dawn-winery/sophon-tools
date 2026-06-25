@@ -39,6 +39,7 @@ pub fn run(
     regex: Option<String>,
     threads: usize,
     target_memory_usage: u64,
+    chunk_download_attempts: u8,
     verify_manifest: VerifyMethod,
     verify_chunks: VerifyMethod,
     verify_before_updating: VerifyMethod,
@@ -88,6 +89,7 @@ pub fn run(
         .with_client(api.into())
         .with_runtime(runtime.handle().clone())
         .with_target_memory_usage(target_memory_usage)
+        .with_chunk_download_attempts(chunk_download_attempts)
         .with_verify_manifest(verify_manifest.into())
         .with_verify_chunks(verify_chunks.into())
         .with_verify_before_updating(verify_before_updating.into())
