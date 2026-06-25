@@ -99,7 +99,7 @@ pub fn run(
     let download_info = runtime.block_on(SophonDownloader::default()
         .fetch_download_info(&download_manifest))?;
 
-    let mut verifier = SophonVerifier::new(download_info.assets)
+    let mut verifier = SophonVerifier::from(download_info.assets)
         .with_fast_verify(fast_verify);
 
     match output_format {
