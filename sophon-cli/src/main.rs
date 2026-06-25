@@ -341,6 +341,16 @@ enum CliCommands {
         )]
         verify_before_updating: VerifyMethod,
 
+        /// Verify game files before patching them.
+        ///
+        /// If disabled, updater will try to patch files even if patches cannot
+        /// be applied to them.
+        #[arg(
+            long, default_value_t = VerifyMethod::Full,
+            alias = "verify-before-patch"
+        )]
+        verify_before_patching: VerifyMethod,
+
         /// Delete unused game files.
         #[arg(
             long, default_value_t = true,
@@ -772,6 +782,7 @@ fn main() -> anyhow::Result<()> {
             verify_manifest,
             verify_chunks,
             verify_before_updating,
+            verify_before_patching,
             delete_unused_files,
             patch_files,
             delete_chunks,
@@ -799,6 +810,7 @@ fn main() -> anyhow::Result<()> {
                 verify_manifest,
                 verify_chunks,
                 verify_before_updating,
+                verify_before_patching,
                 delete_unused_files,
                 patch_files,
                 delete_chunks,
