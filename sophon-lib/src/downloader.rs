@@ -21,10 +21,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::path::Path;
 use std::time::Duration;
-use std::fs::File;
-use std::io::{Cursor, BufWriter, Read, Seek, SeekFrom, Write};
+use std::io::{Cursor, Read, SeekFrom};
 
 use tokio::sync::{Mutex, RwLock};
+use tokio::io::{BufWriter, AsyncSeekExt, AsyncWriteExt};
+use tokio::fs::File;
 
 use md5::{Md5, Digest};
 use prost::{Message, DecodeError};
@@ -510,9 +511,10 @@ impl SophonDownloader {
                 .create(true)
                 .truncate(true)
                 .write(true)
-                .open(asset_path)?;
+                .open(asset_path)
+                .await?;
 
-            file.set_len(asset.size)?;
+            file.set_len(asset.size).await?;
 
             let file = Arc::new(Mutex::new(
                 // Increase default buffer to 64 KB because chunks are large.
@@ -646,9 +648,9 @@ impl SophonDownloader {
                         "write chunk to disk"
                     );
 
-                    lock.seek(SeekFrom::Start(chunk.offset))?;
-                    lock.write_all(&chunk_body)?;
-                    lock.flush()?;
+                    lock.seek(SeekFrom::Start(chunk.offset)).await?;
+                    lock.write_all(&chunk_body).await?;
+                    lock.flush().await?;
 
                     drop(lock);
 
