@@ -19,8 +19,9 @@
 
 use std::path::PathBuf;
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::{Read, BufReader};
+
+use tokio::fs::File;
+use tokio::io::{BufReader, AsyncReadExt};
 
 use md5::{Md5, Digest};
 
@@ -129,7 +130,10 @@ impl SophonVerifier {
         feature = "tracing",
         tracing::instrument(level = tracing::Level::DEBUG, skip(self), ret)
     )]
-    pub fn verify_file(&mut self, path: PathBuf) -> std::io::Result<VerifyResult> {
+    pub async fn verify_file(
+        &mut self,
+        path: PathBuf
+    ) -> std::io::Result<VerifyResult> {
         if let Some(is_valid) = self.cache.get(&path) {
             match is_valid {
                 true => return Ok(VerifyResult::Valid),
@@ -143,7 +147,7 @@ impl SophonVerifier {
             return Ok(VerifyResult::Unknown);
         };
 
-        let metadata = path.metadata()?;
+        let metadata = tokio::fs::metadata(&path).await?;
 
         if metadata.len() != asset.size {
             self.cache.insert(path, false);
@@ -157,13 +161,13 @@ impl SophonVerifier {
             return Ok(VerifyResult::Valid);
         }
 
-        let mut file = BufReader::new(File::open(&path)?);
+        let mut file = BufReader::new(File::open(&path).await?);
         let mut hasher = Md5::default();
 
         let mut buf = [0; 1024];
 
         loop {
-            let n = file.read(&mut buf)?;
+            let n = file.read(&mut buf).await?;
 
             if n == 0 {
                 break;

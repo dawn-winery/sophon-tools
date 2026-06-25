@@ -217,8 +217,8 @@ impl SophonDownloader {
     }
 
     /// Verify files if they're already available on disk before downloading
-    /// them. If disabled, the algorithm will not spend time on verifying files
-    /// and will overwrite them instead.
+    /// them. If disabled, the algorithm will not spend time on finding files
+    /// that need to be downloaded, and will download every file instead.
     ///
     /// Default: `Full` (size + hash)
     pub fn with_verify_before_downloading(
@@ -442,11 +442,21 @@ impl SophonDownloader {
                 verifier = verifier.with_fast_verify(true);
             }
 
-            download_manifest.assets.retain(move |asset| {
-                !matches!(
-                    verifier.verify_file(download_dir.join(&asset.path)),
+            let mut valid_assets = Vec::with_capacity(
+                download_manifest.assets.len()
+            );
+
+            for asset in &download_manifest.assets {
+                if matches!(
+                    verifier.verify_file(download_dir.join(&asset.path)).await,
                     Ok(VerifyResult::Valid)
-                )
+                ) {
+                    valid_assets.push(asset.path.clone());
+                }
+            }
+
+            download_manifest.assets.retain(move |asset| {
+                !valid_assets.contains(&asset.path)
             });
         }
 

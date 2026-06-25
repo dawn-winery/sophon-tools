@@ -22,6 +22,8 @@ use std::time::Duration;
 use std::io::Read;
 
 use tokio::sync::RwLock;
+use tokio::fs::File;
+use tokio::io::{BufReader, AsyncReadExt};
 
 use md5::{Md5, Digest};
 use prost::{Message, DecodeError};
@@ -29,6 +31,7 @@ use prost::{Message, DecodeError};
 use crate::api::package_update_info::SophonApiPackageManifest;
 use crate::protos::{SophonUpdateAssetsInfo, SophonUpdateAssetsInfoAsset};
 use crate::verifier::{SophonVerifier, VerifyResult};
+use crate::patcher::HdiffPatcher;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SophonUpdaterError {
@@ -111,6 +114,7 @@ pub enum SophonUpdaterVerifyMethod {
 pub struct SophonUpdater {
     client: reqwest::Client,
     runtime: Option<tokio::runtime::Handle>,
+    patcher: Option<HdiffPatcher>,
 
     fetch_manifest_timeout: Option<Duration>,
     fetch_chunk_timeout_per_mb: Option<Duration>,
@@ -118,6 +122,7 @@ pub struct SophonUpdater {
     verify_manifest: SophonUpdaterVerifyMethod,
     verify_chunks: SophonUpdaterVerifyMethod,
     verify_before_updating: SophonUpdaterVerifyMethod,
+    verify_before_patching: SophonUpdaterVerifyMethod,
 
     delete_unused_files: bool,
     patch_files: bool,
@@ -141,6 +146,7 @@ impl Default for SophonUpdater {
                 .expect("failed to build reqwest client"),
 
             runtime: None,
+            patcher: None,
 
             fetch_manifest_timeout: None,
             fetch_chunk_timeout_per_mb: None,
@@ -148,6 +154,7 @@ impl Default for SophonUpdater {
             verify_manifest: SophonUpdaterVerifyMethod::Full,
             verify_chunks: SophonUpdaterVerifyMethod::Fast,
             verify_before_updating: SophonUpdaterVerifyMethod::Full,
+            verify_before_patching: SophonUpdaterVerifyMethod::Full,
 
             delete_unused_files: true,
             patch_files: true,
@@ -176,6 +183,13 @@ impl SophonUpdater {
     /// If unset, then `tokio::spawn` function will be used to schedule tasks.
     pub fn with_runtime(mut self, runtime: tokio::runtime::Handle) -> Self {
         self.runtime = Some(runtime);
+
+        self
+    }
+
+    /// Hdiff patcher. If unset, bundled `hpatchz` binary will be used.
+    pub fn with_patcher(mut self, patcher: HdiffPatcher) -> Self {
+        self.patcher = Some(patcher);
 
         self
     }
@@ -223,8 +237,8 @@ impl SophonUpdater {
     }
 
     /// Verify files if they're already available on disk before updating
-    /// them. If disabled, the algorithm will not spend time on verifying files
-    /// and will overwrite them instead.
+    /// them. If disabled, the algorithm will not spend time on finding already
+    /// updated files.
     ///
     /// Default: `Full` (size + hash)
     pub fn with_verify_before_updating(
@@ -232,6 +246,19 @@ impl SophonUpdater {
         method: SophonUpdaterVerifyMethod
     ) -> Self {
         self.verify_before_updating = method;
+
+        self
+    }
+
+    /// Verify game files before applying patches to them. If file is invalid,
+    /// then the patch will not be applied.
+    ///
+    /// Default: `Full` (size + hash)
+    pub fn with_verify_before_patching(
+        mut self,
+        method: SophonUpdaterVerifyMethod
+    ) -> Self {
+        self.verify_before_patching = method;
 
         self
     }
@@ -504,11 +531,21 @@ impl SophonUpdater {
                 verifier = verifier.with_fast_verify(true);
             }
 
-            update_manifest.assets.retain(move |asset| {
-                !matches!(
-                    verifier.verify_file(chunks_dir.join(&asset.path)),
+            let mut valid_assets = Vec::with_capacity(
+                update_manifest.assets.len()
+            );
+
+            for asset in &update_manifest.assets {
+                if matches!(
+                    verifier.verify_file(update_dir.join(&asset.path)).await,
                     Ok(VerifyResult::Valid)
-                )
+                ) {
+                    valid_assets.push(asset.path.clone());
+                }
+            }
+
+            update_manifest.assets.retain(move |asset| {
+                !valid_assets.contains(&asset.path)
             });
         }
 
@@ -669,7 +706,7 @@ impl SophonUpdater {
                     continue;
                 }
 
-                else if patch_info.patch_path.metadata()?.len()
+                else if tokio::fs::metadata(&patch_info.patch_path).await?.len()
                     == patch_info.patch_size
                 {
                     #[cfg(feature = "tracing")]
@@ -823,7 +860,124 @@ impl SophonUpdater {
             ).await?
         );
 
-        // --------- Stage 3: patch game files.
+        // Stop updater here if files shouldn't be patched or there's no
+        // patches.
+        if !self.patch_files || patches.is_empty() {
+            return Ok(());
+        }
+
+        // Pre-calculate tasks queue capacity.
+        let median_task_size = patches.get(patches.len() / 3)
+            .map(|patch_info| patch_info.patch_size)
+            .unwrap_or(u64::MAX);
+
+        let mut tasks = Vec::with_capacity(
+            (self.target_memory_usage / median_task_size).max(1) as usize
+        );
+
+        let mut occupied_memory = 0;
+
+        let patcher = match self.patcher {
+            Some(patcher) => patcher,
+            None => HdiffPatcher::export().await?
+        };
+
+        // Iterate over all the assets patches.
+        while let Some(patch_info) = patches.pop() {
+            // If we cannot fit patch in memory yet AND the tasks queue is not
+            // empty - then we wait until already scheduled patches finish
+            // applying.
+            if occupied_memory + patch_info.patch_size > self.target_memory_usage
+                && !tasks.is_empty()
+            {
+                #[cfg(feature = "tracing")]
+                tracing::debug!(
+                    tasks = tasks.len(),
+                    ?occupied_memory,
+                    "wait for scheduled patching tasks"
+                );
+
+                futures::future::try_join_all(
+                    tasks.drain(..)
+                        .map(flatten)
+                ).await?;
+
+                occupied_memory = 0;
+            }
+
+            #[cfg(feature = "tracing")]
+            tracing::trace!(?patch_info, "schedule asset patching");
+
+            occupied_memory += patch_info.patch_size;
+
+            let patcher = patcher.clone();
+
+            // Start asset patching task.
+            let future = async move {
+                // If patch is a new file then extract it.
+                if patch_info.input_asset_size == 0 {
+                    HdiffPatcher::extract(
+                        &patch_info.patch_path,
+                        &patch_info.asset_path
+                    ).await?;
+                }
+
+                // Otherwise apply the patch to asset.
+                else {
+                    // Verify asset before patching it.
+                    if self.verify_before_patching != SophonUpdaterVerifyMethod::None {
+                        // Verify asset size.
+                        let metadata = tokio::fs::metadata(
+                            &patch_info.asset_path
+                        ).await?;
+
+                        if metadata.len() != patch_info.input_asset_size {
+                            return Ok(());
+                        }
+
+                        // Verify asset hash.
+                        if self.verify_before_patching == SophonUpdaterVerifyMethod::Full {
+                            let mut file = BufReader::new(
+                                File::open(&patch_info.asset_path).await?
+                            );
+
+                            let mut hasher = Md5::default();
+                            let mut buf = [0; 1024];
+
+                            loop {
+                                let n = file.read(&mut buf).await?;
+
+                                if n == 0 {
+                                    break;
+                                }
+
+                                hasher.update(&buf[..n]);
+                            }
+
+                            let hash = hex::encode(hasher.finalize());
+
+                            if hash != patch_info.input_asset_hash_md5 {
+                                return Ok(());
+                            }
+                        }
+                    }
+
+                    // patcher.patch(&patch_info.asset_path, , output)
+
+                    // // Write downloaded chunk to disk.
+                    // tokio::fs::write(&patch_info.patch_path, chunk_body).await?;
+                }
+
+                Ok::<_, SophonUpdaterError>(())
+            };
+
+            let task = match &self.runtime {
+                Some(runtime) => runtime.spawn(future),
+                None => tokio::spawn(future)
+            };
+
+            tasks.push(task);
+        }
 
         Ok(())
     }
