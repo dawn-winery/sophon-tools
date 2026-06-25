@@ -120,6 +120,7 @@ pub struct SophonDownloader {
     verify_before_downloading: SophonDownloaderVerifyMethod,
 
     target_memory_usage: u64,
+    chunk_download_attempts: u8,
 
     assets_sorter: Option<AssetsSorter>,
     assets_filter: Option<AssetsFilter>,
@@ -145,6 +146,7 @@ impl Default for SophonDownloader {
             verify_before_downloading: SophonDownloaderVerifyMethod::Full,
 
             target_memory_usage: 256 * 1024 * 1024,
+            chunk_download_attempts: 3,
 
             assets_sorter: None,
             assets_filter: None,
@@ -235,6 +237,19 @@ impl SophonDownloader {
     /// Default: `256 MB`
     pub fn with_target_memory_usage(mut self, size: u64) -> Self {
         self.target_memory_usage = size;
+
+        self
+    }
+
+
+    /// Amount of time downloader will try to download a chunk.
+    ///
+    /// Sometimes remote server drops the connection, so we can try to
+    /// downloading the same chunk multiple times.
+    ///
+    /// Default: `3`
+    pub fn with_chunk_download_attempts(mut self, attempts: u8) -> Self {
+        self.chunk_download_attempts = attempts;
 
         self
     }
@@ -587,6 +602,8 @@ impl SophonDownloader {
 
                 // Start chunk downloading task.
                 let future = async move {
+                    let request_copy = request.try_clone();
+
                     let response = request.send().await?;
 
                     // Verify response size.
@@ -601,7 +618,34 @@ impl SophonDownloader {
                         });
                     }
 
-                    let mut chunk_body = response.bytes().await?.to_vec();
+                    let mut chunk_body = response.bytes().await;
+
+                    if let Some(request) = request_copy && chunk_body.is_err() {
+                        for attempt in 1..self.chunk_download_attempts {
+                            #[cfg(feature = "tracing")]
+                            tracing::debug!(
+                                url = ?chunk_download_url,
+                                ?attempt,
+                                "failed to download chunk"
+                            );
+
+                            let Some(request) = request.try_clone() else {
+                                break;
+                            };
+
+                            let Ok(request) = request.send().await else {
+                                continue;
+                            };
+
+                            chunk_body = request.bytes().await;
+
+                            if chunk_body.is_ok() {
+                                break;
+                            }
+                        }
+                    }
+
+                    let mut chunk_body = chunk_body?.to_vec();
 
                     if decompress_chunk {
                         let mut decoder = ruzstd::decoding::StreamingDecoder::new(
