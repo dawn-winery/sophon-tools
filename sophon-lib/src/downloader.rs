@@ -22,7 +22,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::path::Path;
 use std::time::Duration;
 use std::fs::File;
-use std::io::{BufWriter, Read, Seek, SeekFrom, Write};
+use std::io::{Cursor, BufWriter, Read, Seek, SeekFrom, Write};
 
 use tokio::sync::{Mutex, RwLock};
 
@@ -364,8 +364,6 @@ impl SophonDownloader {
 
     /// Download files (assets) to the given directory.
     ///
-    /// The downloader will skip already downloaded files.
-    ///
     /// ## Downloader strategy
     ///
     /// 1. Prepare list of assets with applied filter function provided by user.
@@ -374,7 +372,7 @@ impl SophonDownloader {
     /// 3. If user provided a sort function, then apply it to the assets list.
     ///
     /// Then, the user provides us with the `target_memory_usage` property. It
-    /// should indicate how much memory *in average* we want to spend on
+    /// should indicate how much memory *on average* we want to spend on
     /// assembling assets.
     ///
     /// Since we know each asset's decompressed chunks size - we can try to fit
@@ -602,8 +600,13 @@ impl SophonDownloader {
                     let mut chunk_body = response.bytes().await?.to_vec();
 
                     if decompress_chunk {
-                        let mut decoder = ruzstd::decoding::StreamingDecoder::new(chunk_body.as_slice())?;
-                        let mut buf = Vec::with_capacity(chunk_body.len());
+                        let mut decoder = ruzstd::decoding::StreamingDecoder::new(
+                            Cursor::new(chunk_body)
+                        )?;
+
+                        let mut buf = Vec::with_capacity(
+                            chunk.decompressed_size as usize
+                        );
 
                         decoder.read_to_end(&mut buf)?;
 
