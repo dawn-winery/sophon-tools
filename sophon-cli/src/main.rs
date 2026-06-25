@@ -282,6 +282,18 @@ enum CliCommands {
         )]
         threads: usize,
 
+        #[arg(
+            long,
+            alias = "hpatchz-path",
+            alias = "hpatchz",
+            alias = "hpatch-binary",
+            alias = "hpatch-path",
+            alias = "hpatch",
+            alias = "patcher-binary",
+            alias = "patcher"
+        )]
+        hpatchz_binary: Option<PathBuf>,
+
         /// Amount of system memory updater will try to utilize.
         ///
         /// Higher value will allow updater to download more files in parallel.
@@ -754,6 +766,7 @@ fn main() -> anyhow::Result<()> {
             component,
             regex,
             threads,
+            hpatchz_binary,
             target_memory_usage,
             chunk_download_attempts,
             verify_manifest,
@@ -780,6 +793,7 @@ fn main() -> anyhow::Result<()> {
                 launcher_id,
                 regex,
                 threads,
+                hpatchz_binary,
                 target_memory_usage,
                 chunk_download_attempts,
                 verify_manifest,

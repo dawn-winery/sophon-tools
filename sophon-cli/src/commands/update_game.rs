@@ -23,6 +23,7 @@ use regex::Regex;
 
 use sophon_lib::api::SophonApi;
 use sophon_lib::updater::SophonUpdater;
+use sophon_lib::patcher::HdiffPatcher;
 
 use super::*;
 
@@ -38,6 +39,7 @@ pub fn run(
     launcher_id: Option<String>,
     regex: Option<String>,
     threads: usize,
+    hpatchz_binary: Option<PathBuf>,
     target_memory_usage: u64,
     chunk_download_attempts: u8,
     verify_manifest: VerifyMethod,
@@ -101,6 +103,10 @@ pub fn run(
         updater = updater.with_assets_filter(Box::new(move |asset| {
             regex.is_match(&asset.path)
         }));
+    }
+
+    if let Some(patcher) = hpatchz_binary {
+        updater = updater.with_patcher(HdiffPatcher::from(patcher));
     }
 
     runtime.block_on(updater.update(
