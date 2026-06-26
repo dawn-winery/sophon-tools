@@ -17,6 +17,8 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+use sophon_lib::api::SophonApiError;
+
 use crate::args::*;
 
 #[allow(clippy::too_many_arguments)]
@@ -33,14 +35,42 @@ pub fn run(
 
     let api = api_client.build()?;
 
-    let game = api.game(
+    let mut game = api.game(
         api_args.region.into(),
-        api_args.launcher_id,
-        game_id
+        api_args.launcher_id.clone(),
+        game_id.clone()
     );
 
-    let game_versions = runtime.block_on(game.fetch_versions_info())
-        .map_err(|err| anyhow::anyhow!(err.to_string()))?;
+    let game_versions = match runtime.block_on(game.fetch_versions_info()) {
+        Ok(game_versions) => game_versions,
+
+        Err(SophonApiError::GameNotFound { .. }) => {
+            let games_branches = runtime.block_on(api.fetch_games_branches_info(
+                api_args.region.into(),
+                api_args.launcher_id.clone()
+            )).map_err(|err| anyhow::anyhow!(err.to_string()))?;
+
+            for game_branch in games_branches {
+                if game_branch.game_id == game_id
+                    || game_branch.game_biz == game_id
+                    || game_branch.package_id == game_id
+                {
+                    game = api.game(
+                        api_args.region.into(),
+                        api_args.launcher_id,
+                        game_branch.game_id
+                    );
+
+                    break;
+                }
+            }
+
+            runtime.block_on(game.fetch_versions_info())
+                .map_err(|err| anyhow::anyhow!(err.to_string()))?
+        }
+
+        Err(err) => anyhow::bail!(err.to_string())
+    };
 
     match output_format {
         OutputFormat::Text => {

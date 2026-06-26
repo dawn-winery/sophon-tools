@@ -130,7 +130,7 @@ impl<'api> SophonApiGame<'api> {
         let Some(game_config) = game_configs.into_iter()
             .find(|game_config| {
                 game_config.game_id == self.game_id
-                || game_config.game_biz == self.game_id
+                    || game_config.game_biz == self.game_id
             })
         else {
             return Err(SophonApiError::GameNotFound {
