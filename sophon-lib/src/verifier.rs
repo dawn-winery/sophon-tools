@@ -251,7 +251,7 @@ impl SophonVerifier {
                     .ok()
                     .map(usize::from)
             })
-            .unwrap_or(4)
+            .unwrap_or(1)
             .max(1);
 
         let mut tasks = Vec::with_capacity(tasks_size);

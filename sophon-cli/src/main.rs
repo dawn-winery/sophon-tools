@@ -94,6 +94,20 @@ enum CliCommands {
         #[arg(long, alias = "fast", alias = "fast-verifying")]
         fast_verify: bool,
 
+        /// Amount of threads to use in the tokio async runtime.
+        ///
+        /// Majority of tasks are IO-bound and are executed asynchronously.
+        /// Setting this value higher than default value will not improve
+        /// verification speed.
+        #[arg(
+            long, short('t'),
+            alias = "workers",
+            default_value_t = std::thread::available_parallelism()
+                .map(|threads| threads.get())
+                .unwrap_or(1)
+        )]
+        threads: usize,
+
         #[command(flatten)]
         api_client: SophonApiClientArgs,
 
@@ -400,6 +414,7 @@ fn main() -> anyhow::Result<()> {
             version,
             regex,
             fast_verify,
+            threads,
             api_client,
             output_format
         } => {
@@ -411,6 +426,7 @@ fn main() -> anyhow::Result<()> {
                 version,
                 regex,
                 fast_verify,
+                threads,
                 api_client,
                 output_format
             )

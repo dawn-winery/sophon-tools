@@ -38,6 +38,10 @@ pub struct ProgressBar {
 
 impl nutmeg::Model for ProgressBar {
     fn render(&mut self, width: usize) -> String {
+        if width < 6 {
+            return String::new();
+        }
+
         let (current, total) = if self.format_bytes {
             (format_size(self.current as f64), format_size(self.total as f64))
         } else {
@@ -51,7 +55,7 @@ impl nutmeg::Model for ProgressBar {
         let pb_width = width - current.len() - total.len() - 6;
 
         let pb_prefix_width = (self.current as f64 * pb_width as f64 / self.total as f64).round() as usize;
-        let pb_suffix_width = pb_width - pb_prefix_width;
+        let pb_suffix_width = pb_width.saturating_sub(pb_prefix_width);
 
         let pb_prefix = "#".repeat(pb_prefix_width);
         let pb_suffix = " ".repeat(pb_suffix_width);

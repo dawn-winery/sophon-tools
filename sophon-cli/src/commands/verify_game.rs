@@ -19,7 +19,6 @@
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
-use std::io::Write;
 
 use regex::Regex;
 
@@ -42,6 +41,7 @@ pub fn run(
     version: Option<String>,
     regex: Option<String>,
     fast_verify: bool,
+    threads: usize,
     api_client: SophonApiClientArgs,
     output_format: OutputFormat
 ) -> anyhow::Result<()> {
@@ -53,7 +53,7 @@ pub fn run(
         return Ok(());
     }
 
-    let mut entries = VecDeque::from([game_dir]);
+    let mut entries = VecDeque::from([game_dir.clone()]);
 
     while let Some(path) = entries.pop_back() {
         if !path.is_dir() {
@@ -79,7 +79,8 @@ pub fn run(
         return Ok(());
     }
 
-    let runtime = tokio::runtime::Builder::new_current_thread()
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(threads)
         .enable_all()
         .build()?;
 
@@ -103,54 +104,66 @@ pub fn run(
     let download_info = runtime.block_on(
         SophonDownloader::default()
             .with_client(api.into())
+            .with_runtime(runtime.handle().clone())
             .fetch_download_info(&download_manifest)
     )?;
 
     let mut verifier = SophonVerifier::from(download_info.assets)
-        .with_fast_verify(fast_verify);
+        .with_runtime(runtime.handle().clone())
+        .with_fast_verify(fast_verify)
+        .with_assets_filter(Box::new(move |path| {
+            entries.iter().any(|entry_path| entry_path == path)
+        }));
 
     match output_format {
         OutputFormat::Text => {
-            let total = entries.len();
-
-            let mut view = nutmeg::View::new(
+            let view = nutmeg::View::new(
                 ProgressBar {
                     current: 0,
-                    total: total as u64,
-                    format_bytes: false
+                    total: 0,
+                    format_bytes: true
                 },
                 nutmeg::Options::new()
                     .print_holdoff(std::time::Duration::ZERO)
             );
 
-            for path in entries.into_iter() {
-                match runtime.block_on(verifier.verify_file(path.clone()))? {
-                    VerifyResult::Valid   => writeln!(view, "      valid  {path:#?}")?,
-                    VerifyResult::Invalid => writeln!(view, "[!] invalid  {path:#?}")?,
-                    VerifyResult::Unknown => writeln!(view, "[?] unknown  {path:#?}")?
-                }
+            runtime.block_on(verifier.scan_directory(
+                game_dir,
+                Box::new(move |update| {
+                    match update.result {
+                        VerifyResult::Valid   => view.message(format!("      valid  {:#?}\n", update.path)),
+                        VerifyResult::Invalid => view.message(format!("[!] invalid  {:#?}\n", update.path)),
+                        VerifyResult::Unknown => view.message(format!("[?] unknown  {:#?}\n", update.path)),
+                    };
 
-                view.update(|model| model.current += 1);
-            }
+                    view.update(move |model| {
+                        model.current = update.current;
+                        model.total = update.total;
+                    });
+                })
+            ))?;
         }
 
         OutputFormat::Json => {
-            let total = entries.len();
+            runtime.block_on(verifier.scan_directory(
+                game_dir,
+                Box::new(move |update| {
+                    let result = &serde_json::json!({
+                        "current": update.current,
+                        "total": update.total,
+                        "path": update.path,
+                        "result": match update.result {
+                            VerifyResult::Valid => "valid",
+                            VerifyResult::Invalid => "invalid",
+                            VerifyResult::Unknown => "unknown"
+                        }
+                    });
 
-            for (i, path) in entries.into_iter().enumerate() {
-                let result = &serde_json::json!({
-                    "path": path,
-                    "current": i + 1,
-                    "total": total,
-                    "result": match runtime.block_on(verifier.verify_file(path))? {
-                        VerifyResult::Valid => "valid",
-                        VerifyResult::Invalid => "invalid",
-                        VerifyResult::Unknown => "unknown"
+                    if let Ok(result) = serde_json::to_string(result) {
+                        println!("{result}");
                     }
-                });
-
-                println!("{}", serde_json::to_string(result)?);
-            }
+                })
+            ))?;
         }
     }
 
