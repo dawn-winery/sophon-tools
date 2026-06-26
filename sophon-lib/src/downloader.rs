@@ -438,6 +438,10 @@ impl SophonDownloader {
                 download_manifest.assets.clone()
             );
 
+            if let Some(runtime) = self.runtime.clone() {
+                verifier = verifier.with_runtime(runtime);
+            }
+
             if self.verify_before_downloading == SophonDownloaderVerifyMethod::Fast {
                 verifier = verifier.with_fast_verify(true);
             }
