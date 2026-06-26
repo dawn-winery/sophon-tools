@@ -34,11 +34,19 @@ use commands::*;
 #[command(version, about)]
 struct Cli {
     /// Enable trace logs in stderr.
-    #[arg(long, alias = "log", alias = "trace")]
+    #[arg(
+        long,
+        alias = "log",
+        alias = "trace",
+        alias = "logs",
+        alias = "traces",
+        alias = "tracing",
+        alias = "tracings"
+    )]
     logs: bool,
 
     /// Disable unicode output.
-    #[arg(long)]
+    #[arg(long, alias = "ansi")]
     ascii: bool,
 
     #[command(subcommand)]
