@@ -536,6 +536,12 @@ impl SophonUpdater {
                 verifier = verifier.with_fast_verify(true);
             }
 
+            // Pre-verify all the directory files in parallel.
+            verifier.scan_directory(
+                update_dir.to_path_buf(),
+                Box::new(|_, _, _| {})
+            ).await?;
+
             let mut valid_assets = Vec::with_capacity(
                 update_manifest.assets.len()
             );

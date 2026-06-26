@@ -140,7 +140,9 @@ impl SophonVerifier {
         self.cache.clear();
     }
 
-    /// Populate verifier cache with given directory entries.
+    /// Populate verifier cache with given directory entries and their
+    /// verification results. Following `verify_file` calls will read the result
+    /// without performing any extra computations.
     pub async fn scan_directory(
         &mut self,
         path: PathBuf,
