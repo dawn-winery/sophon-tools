@@ -124,9 +124,9 @@ pub struct SophonUpdater {
     verify_before_updating: SophonUpdaterVerifyMethod,
     verify_before_patching: SophonUpdaterVerifyMethod,
 
-    delete_unused_files: bool,
-    patch_files: bool,
-    delete_chunks: bool,
+    delete_unused_assets: bool,
+    patch_assets: bool,
+    delete_applied_chunks: bool,
 
     target_memory_usage: u64,
     chunk_download_attempts: u8,
@@ -156,9 +156,9 @@ impl Default for SophonUpdater {
             verify_before_updating: SophonUpdaterVerifyMethod::Full,
             verify_before_patching: SophonUpdaterVerifyMethod::Full,
 
-            delete_unused_files: true,
-            patch_files: true,
-            delete_chunks: true,
+            delete_unused_assets: true,
+            patch_assets: true,
+            delete_applied_chunks: true,
 
             target_memory_usage: 256 * 1024 * 1024,
             chunk_download_attempts: 3,
@@ -266,30 +266,35 @@ impl SophonUpdater {
     /// Delete game files that were marked as unused.
     ///
     /// Default: `true`
-    pub fn with_delete_unused_files(mut self, delete_unused: bool) -> Self {
-        self.delete_unused_files = delete_unused;
+    pub fn with_delete_unused_assets(
+        mut self,
+        delete_unused_assets: bool
+    ) -> Self {
+        self.delete_unused_assets = delete_unused_assets;
 
         self
     }
 
-    /// Apply downloaded chunks to the game files. If disabled, the chunks will
-    /// be stored on disk and could be reused on the next updater execution.
+    /// Apply downloaded chunks to the game files.
+    ///
+    /// If disabled, the chunks will be stored on disk and could be reused on
+    /// the next updater execution.
     ///
     /// Default: `true`
-    pub fn with_patch_files(mut self, patch_files: bool) -> Self {
-        self.patch_files = patch_files;
+    pub fn with_patch_assets(mut self, patch_assets: bool) -> Self {
+        self.patch_assets = patch_assets;
 
         self
     }
 
-    /// Delete downloaded chunks when they become useless.
+    /// Delete downloaded chunks after they were applied to game files.
     ///
     /// If game files patching is enabled, then related chunks will be deleted
     /// when the game file is patched.
     ///
     /// Default: `true`
-    pub fn with_delete_chunks(mut self, delete_chunks: bool) -> Self {
-        self.delete_chunks = delete_chunks;
+    pub fn with_delete_applied_chunks(mut self, delete_applied_chunks: bool) -> Self {
+        self.delete_applied_chunks = delete_applied_chunks;
 
         self
     }
@@ -586,7 +591,7 @@ impl SophonUpdater {
 
         // If update has unused assets then delete them.
         if let Some(unused_assets) = update_manifest.unused_assets.remove(update_version)
-            && self.delete_unused_files
+            && self.delete_unused_assets
         {
             // TODO: delete empty folders
             let tasks = unused_assets.files.into_iter()
@@ -862,7 +867,7 @@ impl SophonUpdater {
 
         // Stop updater here if files shouldn't be patched or there's no
         // patches.
-        if !self.patch_files || patches.is_empty() {
+        if !self.patch_assets || patches.is_empty() {
             return Ok(());
         }
 
@@ -991,7 +996,7 @@ impl SophonUpdater {
                     }
 
                     // Delete patch if it's configured to.
-                    if self.delete_chunks {
+                    if self.delete_applied_chunks {
                         tokio::fs::remove_file(patch_info.patch_path).await?;
                     }
                 }
