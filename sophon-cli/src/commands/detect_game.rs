@@ -43,8 +43,8 @@ pub fn run(
         let games_branches = runtime.block_on(api.fetch_games_branches_info(region, None))
             .map_err(|err| anyhow::anyhow!(err.to_string()))?;
 
-        for game_branch in games_branches {
-            let game = api.game(region, None, game_branch.game_id);
+        for game_branch in games_branches.iter() {
+            let game = api.game(region, None, game_branch.game_id.clone());
 
             match runtime.block_on(game.detect_version(&game_dir)) {
                 Ok(Some(version)) => {

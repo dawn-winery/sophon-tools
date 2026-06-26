@@ -50,7 +50,7 @@ pub fn run(
                 api_args.launcher_id.clone()
             )).map_err(|err| anyhow::anyhow!(err.to_string()))?;
 
-            for game_branch in games_branches {
+            for game_branch in games_branches.iter() {
                 if game_branch.game_id == game_id
                     || game_branch.game_biz == game_id
                     || game_branch.package_id == game_id
@@ -58,7 +58,7 @@ pub fn run(
                     game = api.game(
                         api_args.region.into(),
                         api_args.launcher_id,
-                        game_branch.game_id
+                        game_branch.game_id.clone()
                     );
 
                     break;

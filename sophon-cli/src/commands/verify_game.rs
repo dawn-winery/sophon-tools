@@ -19,6 +19,7 @@
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use regex::Regex;
 
@@ -107,6 +108,8 @@ pub fn run(
             .with_runtime(runtime.handle().clone())
             .fetch_download_info(&download_manifest)
     )?;
+
+    let download_info = Arc::unwrap_or_clone(download_info);
 
     let mut verifier = SophonVerifier::from(download_info.assets)
         .with_runtime(runtime.handle().clone())

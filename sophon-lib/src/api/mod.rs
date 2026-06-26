@@ -17,6 +17,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::sync::RwLock;
@@ -103,7 +104,7 @@ impl<'response> TryFrom<&'response Json> for SophonApiResponse<'response> {
 struct GameCacheSlot<T> {
     pub region: SophonRegion,
     pub launcher_id: String,
-    pub value: T
+    pub value: Arc<T>
 }
 
 #[derive(Default)]
@@ -113,7 +114,7 @@ struct PackageCacheSlot<T> {
     pub password: String,
     pub package_id: String,
     pub version: String,
-    pub value: T
+    pub value: Arc<T>
 }
 
 pub struct SophonApi {
@@ -232,7 +233,7 @@ impl SophonApi {
         &self,
         region: SophonRegion,
         launcher_id: Option<String>
-    ) -> Result<Box<[SophonApiGameBranch]>, SophonApiError> {
+    ) -> Result<Arc<Box<[SophonApiGameBranch]>>, SophonApiError> {
         let launcher_id = launcher_id.unwrap_or_else(|| {
             region.launcher_id().to_string()
         });
@@ -297,13 +298,15 @@ impl SophonApi {
             })
             .collect::<Result<Box<[_]>, SophonApiError>>()?;
 
+        let value = Arc::new(game_branches);
+
         self.game_branches_cache.write().await.push(GameCacheSlot {
             region,
             launcher_id,
-            value: game_branches.clone()
+            value: value.clone()
         });
 
-        Ok(game_branches)
+        Ok(value)
     }
 
     /// Try to fetch list all the versions of available games.
@@ -315,7 +318,7 @@ impl SophonApi {
         &self,
         region: SophonRegion,
         launcher_id: Option<String>
-    ) -> Result<Box<[SophonApiGameVersionsInfo]>, SophonApiError> {
+    ) -> Result<Arc<Box<[SophonApiGameVersionsInfo]>>, SophonApiError> {
         let launcher_id = launcher_id.unwrap_or_else(|| {
             region.launcher_id().to_string()
         });
@@ -380,13 +383,15 @@ impl SophonApi {
             })
             .collect::<Result<Box<[_]>, SophonApiError>>()?;
 
+        let value = Arc::new(versions_info);
+
         self.game_versions_info_cache.write().await.push(GameCacheSlot {
             region,
             launcher_id,
-            value: versions_info.clone()
+            value: value.clone()
         });
 
-        Ok(versions_info)
+        Ok(value)
     }
 
     /// Try to fetch paths information about available games.
@@ -399,7 +404,7 @@ impl SophonApi {
         &self,
         region: SophonRegion,
         launcher_id: Option<String>
-    ) -> Result<Box<[SophonApiGameConfigs]>, SophonApiError> {
+    ) -> Result<Arc<Box<[SophonApiGameConfigs]>>, SophonApiError> {
         let launcher_id = launcher_id.unwrap_or_else(|| {
             region.launcher_id().to_string()
         });
@@ -464,13 +469,15 @@ impl SophonApi {
             })
             .collect::<Result<Box<[_]>, SophonApiError>>()?;
 
+        let value = Arc::new(game_configs);
+
         self.game_configs_cache.write().await.push(GameCacheSlot {
             region,
             launcher_id,
-            value: game_configs.clone()
+            value: value.clone()
         });
 
-        Ok(game_configs)
+        Ok(value)
     }
 
     /// Try to fetch game files downloading information.
@@ -486,7 +493,7 @@ impl SophonApi {
         password: String,
         package_id: String,
         version: String
-    ) -> Result<SophonApiPackageDownloadInfo, SophonApiError> {
+    ) -> Result<Arc<SophonApiPackageDownloadInfo>, SophonApiError> {
         if let Some(slot) = self.package_download_info_cache.read().await.iter()
             .find(|slot| {
                 slot.region == region
@@ -550,16 +557,18 @@ impl SophonApi {
         let download_info = SophonApiPackageDownloadInfo::try_from(response)
             .map_err(|err| SophonApiError::Other(err.into()))?;
 
+        let value = Arc::new(download_info);
+
         self.package_download_info_cache.write().await.push(PackageCacheSlot {
             region,
             branch,
             password,
             package_id,
             version,
-            value: download_info.clone()
+            value: value.clone()
         });
 
-        Ok(download_info)
+        Ok(value)
     }
 
     /// Try to fetch game files updating information.
@@ -575,7 +584,7 @@ impl SophonApi {
         password: String,
         package_id: String,
         version: String
-    ) -> Result<SophonApiPackageUpdateInfo, SophonApiError> {
+    ) -> Result<Arc<SophonApiPackageUpdateInfo>, SophonApiError> {
         if let Some(slot) = self.package_update_info_cache.read().await.iter()
             .find(|slot| {
                 slot.region == region
@@ -639,16 +648,18 @@ impl SophonApi {
         let package_info = SophonApiPackageUpdateInfo::try_from(response)
             .map_err(|err| SophonApiError::Other(err.into()))?;
 
+        let value = Arc::new(package_info);
+
         self.package_update_info_cache.write().await.push(PackageCacheSlot {
             region,
             branch,
             password,
             package_id,
             version,
-            value: package_info.clone()
+            value: value.clone()
         });
 
-        Ok(package_info)
+        Ok(value)
     }
 
     /// Get game info wrapper.

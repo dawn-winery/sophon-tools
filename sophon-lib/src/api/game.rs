@@ -79,7 +79,7 @@ impl<'api> SophonApiGame<'api> {
             Some(self.launcher_id.clone())
         ).await?;
 
-        let Some(game_branch) = game_branches.into_iter()
+        let Some(game_branch) = game_branches.iter()
             .find(|game_branch| {
                 game_branch.game_id == self.game_id
                     || game_branch.game_biz == self.game_id
@@ -93,7 +93,7 @@ impl<'api> SophonApiGame<'api> {
             });
         };
 
-        Ok(game_branch)
+        Ok(game_branch.clone())
     }
 
     /// Try to find versions info about the current game.
@@ -105,7 +105,7 @@ impl<'api> SophonApiGame<'api> {
             Some(self.launcher_id.clone())
         ).await?;
 
-        let Some(version_info) = versions_info.into_iter()
+        let Some(version_info) = versions_info.iter()
             .find(|version_info| version_info.game_id == self.game_id)
         else {
             return Err(SophonApiError::GameNotFound {
@@ -115,7 +115,7 @@ impl<'api> SophonApiGame<'api> {
             });
         };
 
-        Ok(version_info)
+        Ok(version_info.clone())
     }
 
     /// Try to find configs for the current game.
@@ -127,7 +127,7 @@ impl<'api> SophonApiGame<'api> {
             Some(self.launcher_id.clone())
         ).await?;
 
-        let Some(game_config) = game_configs.into_iter()
+        let Some(game_config) = game_configs.iter()
             .find(|game_config| {
                 game_config.game_id == self.game_id
                     || game_config.game_biz == self.game_id
@@ -140,7 +140,7 @@ impl<'api> SophonApiGame<'api> {
             });
         };
 
-        Ok(game_config)
+        Ok(game_config.clone())
     }
 
     /// Get package wrapper for the current game. If `version` is not provided,

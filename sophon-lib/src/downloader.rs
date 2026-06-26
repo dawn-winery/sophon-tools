@@ -93,7 +93,7 @@ pub type AssetsSorter = Box<dyn Fn(
 
 struct CacheSlot {
     pub url: String,
-    pub value: SophonDownloadAssetsInfo
+    pub value: Arc<SophonDownloadAssetsInfo>
 }
 
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -299,7 +299,7 @@ impl SophonDownloader {
     pub async fn fetch_download_info(
         &self,
         download_info: &SophonApiPackageManifest
-    ) -> Result<SophonDownloadAssetsInfo, SophonDownloaderError> {
+    ) -> Result<Arc<SophonDownloadAssetsInfo>, SophonDownloaderError> {
         if download_info.manifest_download.encrypted {
             return Err(SophonDownloaderError::EncryptionNotSupported);
         }
@@ -386,12 +386,14 @@ impl SophonDownloader {
 
             Ok(decoded_manifest) => {
                 // Cache the manifest only if it can be decoded successfully.
+                let value = Arc::new(decoded_manifest);
+
                 self.manifest_cache.write().await.push(CacheSlot {
                     url,
-                    value: decoded_manifest.clone()
+                    value: value.clone()
                 });
 
-                Ok(decoded_manifest)
+                Ok(value)
             }
         }
     }
@@ -445,11 +447,17 @@ impl SophonDownloader {
         }
 
         // Fetch list of assets to download.
-        let mut download_manifest = self.fetch_download_info(download_info).await?;
+        let download_manifest = self.fetch_download_info(download_info).await?;
 
         // Clear the cache since it won't be used anymore.
         self.manifest_cache.write().await.clear();
 
+        // Resolve Arc into actual object after clearing the cache. If manifest
+        // is not cloned anywhere else this will allow us to obtain it without
+        // extra memory allocs.
+        let mut download_manifest = Arc::unwrap_or_clone(download_manifest);
+
+        // Prepare Arc of the updater since it will be passed to many contexts.
         let progress_updater = Arc::new(progress_updater);
 
         // Skip assets downloading that are valid.

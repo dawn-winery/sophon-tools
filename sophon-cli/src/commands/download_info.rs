@@ -17,6 +17,8 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+use std::sync::Arc;
+
 use regex::Regex;
 
 use sophon_lib::downloader::SophonDownloader;
@@ -69,6 +71,8 @@ pub fn run(
             .with_client(api.into())
             .fetch_download_info(&download_manifest)
     )?;
+
+    let download_info = Arc::unwrap_or_clone(download_info);
 
     match output_format {
         OutputFormat::Text => {
@@ -139,8 +143,7 @@ pub fn run(
 
         OutputFormat::Json => {
             println!("{}", serde_json::to_string(&serde_json::json!(
-                download_info.assets
-                    .into_iter()
+                download_info.assets.into_iter()
                     .filter(|asset| {
                         is_regex_match(regex.as_ref(), &asset.path)
                     })

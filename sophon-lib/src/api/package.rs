@@ -82,7 +82,7 @@ impl<'api> SophonApiPackage<'api> {
     /// Fetch current game package files download info.
     pub async fn fetch_download_info(
         &self
-    ) -> Result<SophonApiPackageDownloadInfo, SophonApiError> {
+    ) -> Result<Arc<SophonApiPackageDownloadInfo>, SophonApiError> {
         self.api.fetch_package_download_info(
             self.region,
             self.branch.clone(),
@@ -96,7 +96,7 @@ impl<'api> SophonApiPackage<'api> {
     /// selected version to the latest available one.
     pub async fn fetch_update_info(
         &self
-    ) -> Result<SophonApiPackageUpdateInfo, SophonApiError> {
+    ) -> Result<Arc<SophonApiPackageUpdateInfo>, SophonApiError> {
         self.api.fetch_package_update_info(
             self.region,
             self.branch.clone(),
@@ -112,15 +112,16 @@ impl<'api> SophonApiPackage<'api> {
         &self,
         query: &str
     ) -> Result<Option<package_download_info::SophonApiPackageManifest>, SophonApiError> {
-        let manifest = self.fetch_download_info().await?.manifests
-            .into_iter()
+        let download_info = self.fetch_download_info().await?;
+
+        let manifest = download_info.manifests.iter()
             .find(|info| {
                 info.category_id == query
                     || info.category_name == query
                     || info.name == query
             });
 
-        Ok(manifest)
+        Ok(manifest.cloned())
     }
 
     /// Try to find patch info with given category id, category name or
@@ -129,14 +130,15 @@ impl<'api> SophonApiPackage<'api> {
         &self,
         query: &str
     ) -> Result<Option<package_update_info::SophonApiPackageManifest>, SophonApiError> {
-        let manifest = self.fetch_update_info().await?.manifests
-            .into_iter()
+        let update_info = self.fetch_update_info().await?;
+
+        let manifest = update_info.manifests.iter()
             .find(|info| {
                 info.category_id == query
                     || info.category_name == query
                     || info.name == query
             });
 
-        Ok(manifest)
+        Ok(manifest.cloned())
     }
 }

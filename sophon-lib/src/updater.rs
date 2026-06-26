@@ -98,7 +98,7 @@ pub type AssetsSorter = Box<dyn Fn(
 
 struct CacheSlot {
     pub url: String,
-    pub value: SophonUpdateAssetsInfo
+    pub value: Arc<SophonUpdateAssetsInfo>
 }
 
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -377,7 +377,7 @@ impl SophonUpdater {
     pub async fn fetch_manifest(
         &self,
         download_info: &SophonApiPackageManifest
-    ) -> Result<SophonUpdateAssetsInfo, SophonUpdaterError> {
+    ) -> Result<Arc<SophonUpdateAssetsInfo>, SophonUpdaterError> {
         if download_info.manifest_download.encrypted {
             return Err(SophonUpdaterError::EncryptionNotSupported);
         }
@@ -451,13 +451,15 @@ impl SophonUpdater {
             Err(err) => Err(SophonUpdaterError::from(err)),
 
             Ok(decoded_manifest) => {
+                let value = Arc::new(decoded_manifest);
+
                 // Cache the manifest only if it can be decoded successfully.
                 self.manifest_cache.write().await.push(CacheSlot {
                     url,
-                    value: decoded_manifest.clone()
+                    value: value.clone()
                 });
 
-                Ok(decoded_manifest)
+                Ok(value)
             }
         }
     }
@@ -550,11 +552,17 @@ impl SophonUpdater {
         }
 
         // Fetch list of assets to update.
-        let mut update_manifest = self.fetch_manifest(update_info).await?;
+        let update_manifest = self.fetch_manifest(update_info).await?;
 
         // Clear the cache since it won't be used anymore.
         self.manifest_cache.write().await.clear();
 
+        // Resolve Arc into actual object after clearing the cache. If manifest
+        // is not cloned anywhere else this will allow us to obtain it without
+        // extra memory allocs.
+        let mut update_manifest = Arc::unwrap_or_clone(update_manifest);
+
+        // Prepare Arc of the updater since it will be passed to many contexts.
         let progress_updater = Arc::new(progress_updater);
 
         // Skip assets downloading that are valid.

@@ -63,19 +63,19 @@ pub fn run(
                 "password"
             ]);
 
-            for game_branch in games_branches {
+            for game_branch in games_branches.iter() {
                 let game_name = find_game_name(
                     &game_branch.game_id,
                     &game_branch.game_biz
                 );
 
                 table.add_row([
-                    game_branch.game_id,
-                    game_branch.game_biz,
-                    game_name.unwrap_or("-").to_string(),
-                    game_branch.version,
-                    game_branch.package_id,
-                    game_branch.password
+                    &game_branch.game_id,
+                    &game_branch.game_biz,
+                    game_name.unwrap_or("-"),
+                    &game_branch.version,
+                    &game_branch.package_id,
+                    &game_branch.password
                 ]);
             }
 
@@ -84,7 +84,7 @@ pub fn run(
 
         OutputFormat::Json => {
             println!("{}", serde_json::to_string(&serde_json::json!(
-                games_branches.into_iter()
+                games_branches.iter()
                     .map(|game_branch| {
                         serde_json::json!({
                             "game": {
