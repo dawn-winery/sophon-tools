@@ -268,7 +268,7 @@ pub struct SophonDownloaderArgs {
     /// make downloader to silently re-establish connection with the API server
     /// several times before failing to download a chunk.
     #[arg(
-        long, default_value_t = 3,
+        long, short('a'), default_value_t = 3,
         alias = "chunk-downloading-attempts",
         alias = "downloading-attempts",
         alias = "download-attempts",
@@ -467,7 +467,7 @@ pub struct SophonUpdaterArgs {
     /// make updater to silently re-establish the connection with the API server
     /// several times before failing to download a chunk.
     #[arg(
-        long, default_value_t = 3,
+        long, short('a'), default_value_t = 3,
         alias = "chunk-downloading-attempts",
         alias = "downloading-attempts",
         alias = "download-attempts",

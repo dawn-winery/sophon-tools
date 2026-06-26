@@ -87,7 +87,7 @@ enum CliCommands {
         version: Option<String>,
 
         /// Verify files that match the regex.
-        #[arg(long)]
+        #[arg(long, short('r'))]
         regex: Option<String>,
 
         /// Use files sizes for verification instead of calculating md5 hashes.
@@ -124,7 +124,7 @@ enum CliCommands {
         version: Option<String>,
 
         /// Download files that match the regex.
-        #[arg(long)]
+        #[arg(long, short('r'))]
         regex: Option<String>,
 
         #[command(flatten)]
@@ -177,7 +177,7 @@ enum CliCommands {
         chunks_dir: PathBuf,
 
         /// Update files that match the regex.
-        #[arg(long)]
+        #[arg(long, short('r'))]
         regex: Option<String>,
 
         #[command(flatten)]
@@ -282,7 +282,7 @@ enum CliApiCommands {
         api_args: SophonApiArgs,
 
         /// Show files that match the regex.
-        #[arg(long)]
+        #[arg(long, short('r'))]
         regex: Option<String>,
 
         #[command(flatten)]
