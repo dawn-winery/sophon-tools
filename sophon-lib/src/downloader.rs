@@ -669,6 +669,10 @@ impl SophonDownloader {
 
                     if let Some(request) = request_copy && chunk_body.is_err() {
                         for attempt in 1..self.chunk_download_attempts {
+                            // Wait for some time before making new download
+                            // attempt: 100ms, 200ms, 400ms, 800ms, 1600ms, ...
+                            tokio::time::sleep(Duration::from_millis(100 * (1 << attempt))).await;
+
                             #[cfg(feature = "tracing")]
                             tracing::debug!(
                                 url = ?chunk_download_url,
