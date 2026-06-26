@@ -22,7 +22,7 @@ use std::path::PathBuf;
 use regex::Regex;
 
 use sophon_lib::verifier::VerifyResult;
-use sophon_lib::downloader::SophonDownloaderUpdate;
+use sophon_lib::downloader::SophonDownloaderProgressMsg;
 
 use crate::args::*;
 use crate::commands::*;
@@ -95,7 +95,7 @@ pub fn run(
                 Box::new(move |update| {
                     view.update(move |model| {
                         match update {
-                            SophonDownloaderUpdate::Verify {
+                            SophonDownloaderProgressMsg::Verify {
                                 current,
                                 total,
                                 ..
@@ -105,7 +105,7 @@ pub fn run(
                                 model.prefix = String::from("Verify");
                             }
 
-                            SophonDownloaderUpdate::Download {
+                            SophonDownloaderProgressMsg::Download {
                                 current,
                                 total
                             } => {
@@ -125,7 +125,7 @@ pub fn run(
                 &game_dir,
                 Box::new(|update| {
                     let msg = match update {
-                        SophonDownloaderUpdate::Verify {
+                        SophonDownloaderProgressMsg::Verify {
                             current,
                             total,
                             path,
@@ -145,7 +145,7 @@ pub fn run(
                             }))
                         }
 
-                        SophonDownloaderUpdate::Download { current, total } => {
+                        SophonDownloaderProgressMsg::Download { current, total } => {
                             serde_json::to_string(&serde_json::json!({
                                 "download": {
                                     "current": current,

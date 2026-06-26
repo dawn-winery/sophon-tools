@@ -17,11 +17,17 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+use std::sync::{Arc, Mutex};
 use std::path::PathBuf;
 
 use regex::Regex;
 
+use sophon_lib::verifier::VerifyResult;
+use sophon_lib::downloader::SophonDownloaderProgressMsg;
+use sophon_lib::updater::SophonUpdaterProgressMsg;
+
 use crate::args::*;
+use crate::commands::*;
 
 #[allow(clippy::too_many_arguments)]
 pub fn run(
@@ -35,7 +41,7 @@ pub fn run(
     regex: Option<String>,
     api_client: SophonApiClientArgs,
     updater_args: SophonUpdaterArgs,
-    _output_format: OutputFormat
+    output_format: OutputFormat
 ) -> anyhow::Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(updater_args.threads.max(1))
@@ -85,12 +91,153 @@ pub fn run(
         }));
     }
 
-    runtime.block_on(updater.update(
-        &update_manifest,
-        &from_version,
-        &chunks_dir,
-        &game_dir
-    ))?;
+    let view = Arc::new(Mutex::new({
+        match output_format {
+            OutputFormat::Text => {
+                Some(nutmeg::View::new(
+                    ProgressBar {
+                        current: 0,
+                        total: 0,
+                        prefix: String::new(),
+                        format_bytes: true
+                    },
+                    nutmeg::Options::default()
+                ))
+            }
+
+            OutputFormat::Json => None
+        }
+    }));
+
+    // Update game files.
+    {
+        let view = view.clone();
+
+        runtime.block_on(updater.update(
+            &update_manifest,
+            &from_version,
+            &chunks_dir,
+            &game_dir,
+            Box::new(move |update| {
+                match output_format {
+                    OutputFormat::Text => {
+                        match update {
+                            SophonUpdaterProgressMsg::Verify {
+                                current,
+                                total,
+                                ..
+                            } => {
+                                if let Ok(Some(view)) = view.lock().as_deref() {
+                                    view.update(|model| {
+                                        model.current = current;
+                                        model.total = total;
+                                        model.prefix = String::from("Verify");
+                                    });
+                                }
+                            }
+
+                            SophonUpdaterProgressMsg::Download {
+                                current,
+                                total
+                            } => {
+                                if let Ok(Some(view)) = view.lock().as_deref() {
+                                    view.update(|model| {
+                                        model.current = current;
+                                        model.total = total;
+                                        model.prefix = String::from("Download");
+                                    });
+                                }
+                            }
+
+                            SophonUpdaterProgressMsg::Patch {
+                                current,
+                                total,
+                                ..
+                            } => {
+                                if let Ok(Some(view)) = view.lock().as_deref() {
+                                    view.update(|model| {
+                                        model.current = current;
+                                        model.total = total;
+                                        model.prefix = String::from("Patch");
+                                    });
+                                }
+                            }
+                        }
+                    }
+
+                    OutputFormat::Json => {
+                        match update {
+                            SophonUpdaterProgressMsg::Verify {
+                                current,
+                                total,
+                                path,
+                                result
+                            } => {
+                                let result = serde_json::json!({
+                                    "updater": {
+                                        "verify": {
+                                            "current": current,
+                                            "total": total,
+                                            "path": path,
+                                            "result": match result {
+                                                VerifyResult::Valid => "valid",
+                                                VerifyResult::Invalid => "invalid",
+                                                VerifyResult::Unknown => "unknown"
+                                            }
+                                        }
+                                    }
+                                });
+
+                                if let Ok(result) = serde_json::to_string(&result) {
+                                    println!("{result}");
+                                }
+                            }
+
+                            SophonUpdaterProgressMsg::Download {
+                                current,
+                                total
+                            } => {
+                                let result = serde_json::json!({
+                                    "updater": {
+                                        "download": {
+                                            "current": current,
+                                            "total": total
+                                        }
+                                    }
+                                });
+
+                                if let Ok(result) = serde_json::to_string(&result) {
+                                    println!("{result}");
+                                }
+                            }
+
+                            SophonUpdaterProgressMsg::Patch {
+                                current,
+                                total,
+                                path,
+                                result
+                            } => {
+                                let result = serde_json::json!({
+                                    "updater": {
+                                        "patch": {
+                                            "current": current,
+                                            "total": total,
+                                            "path": path,
+                                            "result": result
+                                        }
+                                    }
+                                });
+
+                                if let Ok(result) = serde_json::to_string(&result) {
+                                    println!("{result}");
+                                }
+                            }
+                        }
+                    }
+                }
+            })
+        ))?;
+    }
 
     // If updater has applied some patches and the user has enabled game assets
     // repairing.
@@ -103,6 +250,7 @@ pub fn run(
             return Ok(());
         };
 
+        // Prepare repairer.
         let mut downloader = SophonDownloaderArgs::from(&updater_args).build()?
             .with_client(api.into())
             .with_runtime(runtime.handle().clone())
@@ -114,10 +262,92 @@ pub fn run(
             }));
         }
 
+        // Repair game files.
         runtime.block_on(downloader.download(
             &download_manifest,
             &game_dir,
-            Box::new(|_| {})
+            Box::new(move |update| {
+                match output_format {
+                    OutputFormat::Text => {
+                        match update {
+                            SophonDownloaderProgressMsg::Verify {
+                                current,
+                                total,
+                                ..
+                            } => {
+                                if let Ok(Some(view)) = view.lock().as_deref() {
+                                    view.update(|model| {
+                                        model.current = current;
+                                        model.total = total;
+                                        model.prefix = String::from("Validate");
+                                    });
+                                }
+                            }
+
+                            SophonDownloaderProgressMsg::Download {
+                                current,
+                                total
+                            } => {
+                                if let Ok(Some(view)) = view.lock().as_deref() {
+                                    view.update(|model| {
+                                        model.current = current;
+                                        model.total = total;
+                                        model.prefix = String::from("Repair");
+                                    });
+                                }
+                            }
+                        }
+                    }
+
+                    OutputFormat::Json => {
+                        match update {
+                            SophonDownloaderProgressMsg::Verify {
+                                current,
+                                total,
+                                path,
+                                result
+                            } => {
+                                let result = serde_json::json!({
+                                    "repairer": {
+                                        "verify": {
+                                            "current": current,
+                                            "total": total,
+                                            "path": path,
+                                            "result": match result {
+                                                VerifyResult::Valid => "valid",
+                                                VerifyResult::Invalid => "invalid",
+                                                VerifyResult::Unknown => "unknown"
+                                            }
+                                        }
+                                    }
+                                });
+
+                                if let Ok(result) = serde_json::to_string(&result) {
+                                    println!("{result}");
+                                }
+                            }
+
+                            SophonDownloaderProgressMsg::Download {
+                                current,
+                                total
+                            } => {
+                                let result = serde_json::json!({
+                                    "repairer": {
+                                        "download": {
+                                            "current": current,
+                                            "total": total
+                                        }
+                                    }
+                                });
+
+                                if let Ok(result) = serde_json::to_string(&result) {
+                                    println!("{result}");
+                                }
+                            }
+                        }
+                    }
+                }
+            })
         ))?;
     }
 

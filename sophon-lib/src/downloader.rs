@@ -109,7 +109,7 @@ pub enum SophonDownloaderVerifyMethod {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum SophonDownloaderUpdate {
+pub enum SophonDownloaderProgressMsg {
     /// Verify game assets before downloading.
     Verify {
         current: u64,
@@ -437,7 +437,7 @@ impl SophonDownloader {
         self,
         download_info: &SophonApiPackageManifest,
         download_dir: &Path,
-        progress_updater: Box<dyn Fn(SophonDownloaderUpdate) + Send + Sync>
+        progress_updater: Box<dyn Fn(SophonDownloaderProgressMsg) + Send + Sync>
     ) -> Result<(), SophonDownloaderError> {
         if download_info.chunk_download.encrypted {
             return Err(SophonDownloaderError::EncryptionNotSupported);
@@ -471,7 +471,7 @@ impl SophonDownloader {
             verifier.scan_directory(
                 download_dir.to_path_buf(),
                 Box::new(move |update| {
-                    progress_updater(SophonDownloaderUpdate::Verify {
+                    progress_updater(SophonDownloaderProgressMsg::Verify {
                         current: update.current,
                         total: update.total,
                         path: update.path,
@@ -542,14 +542,14 @@ impl SophonDownloader {
         let mut occupied_memory = 0;
 
         // Calculate total download assets for progress reporting.
+        let progress_current = Arc::new(AtomicU64::new(0));
+
         let progress_total = assets.iter()
             .flat_map(|asset| {
                 asset.chunks.iter()
                     .map(|chunk| chunk.decompressed_size)
             })
             .sum::<u64>();
-
-        let progress_current = Arc::new(AtomicU64::new(0));
 
         async fn flatten(
             task: tokio::task::JoinHandle<Result<(), SophonDownloaderError>>
@@ -752,7 +752,7 @@ impl SophonDownloader {
                         Ordering::Relaxed
                     );
 
-                    progress_updater(SophonDownloaderUpdate::Download {
+                    progress_updater(SophonDownloaderProgressMsg::Download {
                         current: current + chunk.decompressed_size,
                         total: progress_total
                     });

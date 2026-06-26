@@ -17,6 +17,8 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use std::io::Read;
@@ -109,6 +111,31 @@ pub enum SophonUpdaterVerifyMethod {
 
     /// Do not verify files.
     None
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum SophonUpdaterProgressMsg {
+    /// Verify game assets before patching.
+    Verify {
+        current: u64,
+        total: u64,
+        path: PathBuf,
+        result: VerifyResult
+    },
+
+    /// Download assets chunks.
+    Download {
+        current: u64,
+        total: u64
+    },
+
+    /// Patch game assets.
+    Patch {
+        current: u64,
+        total: u64,
+        path: PathBuf,
+        result: bool
+    }
 }
 
 pub struct SophonUpdater {
@@ -514,7 +541,8 @@ impl SophonUpdater {
         update_info: &SophonApiPackageManifest,
         update_version: &str,
         chunks_dir: &Path,
-        update_dir: &Path
+        update_dir: &Path,
+        progress_updater: Box<dyn Fn(SophonUpdaterProgressMsg) + Send + Sync>
     ) -> Result<(), SophonUpdaterError> {
         if update_info.diff_download.encrypted {
             return Err(SophonUpdaterError::EncryptionNotSupported);
@@ -525,6 +553,8 @@ impl SophonUpdater {
 
         // Clear the cache since it won't be used anymore.
         self.manifest_cache.write().await.clear();
+
+        let progress_updater = Arc::new(progress_updater);
 
         // Skip assets downloading that are valid.
         if self.verify_before_updating != SophonUpdaterVerifyMethod::None {
@@ -540,10 +570,19 @@ impl SophonUpdater {
                 verifier = verifier.with_fast_verify(true);
             }
 
+            let progress_updater = progress_updater.clone();
+
             // Pre-verify all the directory files in parallel.
             verifier.scan_directory(
                 update_dir.to_path_buf(),
-                Box::new(|_| {})
+                Box::new(move |update| {
+                    progress_updater(SophonUpdaterProgressMsg::Verify {
+                        current: update.current,
+                        total: update.total,
+                        path: update.path,
+                        result: update.result
+                    });
+                })
             ).await?;
 
             let mut valid_assets = Vec::with_capacity(
@@ -658,6 +697,16 @@ impl SophonUpdater {
 
         let mut occupied_memory = 0;
 
+        // Calculate total download assets for progress reporting.
+        let progress_current = Arc::new(AtomicU64::new(0));
+
+        let progress_total = assets.iter()
+            .flat_map(|asset| {
+                asset.chunks.get(update_version)
+                    .map(|chunk| chunk.chunk_length)
+            })
+            .sum::<u64>();
+
         // Create chunks download dir if it doesn't exist.
         if !chunks_dir.is_dir() {
             tokio::fs::create_dir_all(chunks_dir).await?;
@@ -706,36 +755,31 @@ impl SophonUpdater {
             // it according to the set method, and if the patch is identified
             // as valid, then push it to the patches list. Otherwise it will be
             // re-downloaded first.
-            if patch_info.patch_path.exists() {
-                if self.verify_chunks == SophonUpdaterVerifyMethod::None {
-                    #[cfg(feature = "tracing")]
-                    tracing::trace!(
-                        ?patch_info,
-                        url = ?chunk_download_url,
-                        method = ?self.verify_chunks,
-                        "asset chunk already downloaded"
-                    );
+            if patch_info.patch_path.exists()
+                && (self.verify_chunks == SophonUpdaterVerifyMethod::None
+                    || tokio::fs::metadata(&patch_info.patch_path).await?.len() == patch_info.patch_size)
+            {
+                #[cfg(feature = "tracing")]
+                tracing::trace!(
+                    ?patch_info,
+                    url = ?chunk_download_url,
+                    method = ?self.verify_chunks,
+                    "asset chunk already downloaded"
+                );
 
-                    patches.push(patch_info);
+                let current = progress_current.fetch_add(
+                    patch_info.patch_size,
+                    Ordering::Relaxed
+                );
 
-                    continue;
-                }
+                progress_updater(SophonUpdaterProgressMsg::Download {
+                    current: current + patch_info.patch_size,
+                    total: progress_total
+                });
 
-                else if tokio::fs::metadata(&patch_info.patch_path).await?.len()
-                    == patch_info.patch_size
-                {
-                    #[cfg(feature = "tracing")]
-                    tracing::trace!(
-                        ?patch_info,
-                        url = ?chunk_download_url,
-                        method = ?self.verify_chunks,
-                        "asset chunk already downloaded"
-                    );
+                patches.push(patch_info);
 
-                    patches.push(patch_info);
-
-                    continue;
-                }
+                continue;
             }
 
             // If we cannot fit patch in memory yet AND the tasks queue is not
@@ -790,6 +834,9 @@ impl SophonUpdater {
             }
 
             occupied_memory += patch_info.patch_size;
+
+            let progress_current = progress_current.clone();
+            let progress_updater = progress_updater.clone();
 
             // Start chunk downloading task.
             let future = async move {
@@ -856,6 +903,16 @@ impl SophonUpdater {
                 // Write downloaded chunk to disk.
                 tokio::fs::write(&patch_info.patch_path, chunk_body).await?;
 
+                let current = progress_current.fetch_add(
+                    patch_info.patch_size,
+                    Ordering::Relaxed
+                );
+
+                progress_updater(SophonUpdaterProgressMsg::Download {
+                    current: current + patch_info.patch_size,
+                    total: progress_total
+                });
+
                 Ok::<PatchInfo, SophonUpdaterError>(patch_info)
             };
 
@@ -892,6 +949,13 @@ impl SophonUpdater {
 
         let mut occupied_memory = 0;
 
+        // Calculate total patch assets for progress reporting.
+        let progress_current = Arc::new(AtomicU64::new(0));
+
+        let progress_total = patches.iter()
+            .map(|patch_info| patch_info.patch_size)
+            .sum::<u64>();
+
         let patcher = match self.patcher {
             Some(patcher) => patcher,
             None => HdiffPatcher::export().await?
@@ -926,6 +990,9 @@ impl SophonUpdater {
             occupied_memory += patch_info.patch_size;
 
             let patcher = patcher.clone();
+
+            let progress_current = progress_current.clone();
+            let progress_updater = progress_updater.clone();
 
             let output_asset_path = chunks_dir.join(&patch_info.output_asset_hash_md5);
 
@@ -991,7 +1058,7 @@ impl SophonUpdater {
                     if result {
                         tokio::fs::rename(
                             output_asset_path,
-                            patch_info.asset_path
+                            &patch_info.asset_path
                         ).await?;
                     }
 
@@ -1008,6 +1075,18 @@ impl SophonUpdater {
                 if result && self.delete_applied_chunks {
                     tokio::fs::remove_file(patch_info.patch_path).await?;
                 }
+
+                let current = progress_current.fetch_add(
+                    patch_info.patch_size,
+                    Ordering::Relaxed
+                );
+
+                progress_updater(SophonUpdaterProgressMsg::Patch {
+                    current: current + patch_info.patch_size,
+                    total: progress_total,
+                    path: patch_info.asset_path,
+                    result
+                });
 
                 Ok::<_, SophonUpdaterError>(())
             };
