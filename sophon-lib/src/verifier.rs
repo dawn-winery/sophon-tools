@@ -204,11 +204,13 @@ impl SophonVerifier {
         let mut entries = VecDeque::from([(path, 0)]);
 
         while let Some((path, _)) = entries.pop_back() && path.is_dir() {
-            for entry in std::fs::read_dir(&path)? {
-                let path = entry?.path();
-                let metadata = tokio::fs::metadata(&path).await?;
+            let mut reader = tokio::fs::read_dir(&path).await?;
 
-                if path.is_dir() {
+            while let Some(entry) = reader.next_entry().await? {
+                let path = entry.path();
+                let metadata = entry.metadata().await?;
+
+                if metadata.is_dir() {
                     entries.push_back((path, 0));
                 } else {
                     entries.push_front((path, metadata.len()));
