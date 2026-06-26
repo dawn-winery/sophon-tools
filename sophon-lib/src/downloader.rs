@@ -33,7 +33,7 @@ use prost::{Message, DecodeError};
 
 use crate::api::package_download_info::SophonApiPackageManifest;
 use crate::protos::{SophonDownloadAssetsInfo, SophonDownloadAssetsInfoAsset};
-use crate::verifier::{SophonVerifier, VerifyResult};
+use crate::verifier::{SophonVerifier, SophonVerifierAsset, VerifyResult};
 
 #[derive(Debug, thiserror::Error)]
 pub enum SophonDownloaderError {
@@ -462,8 +462,14 @@ impl SophonDownloader {
 
         // Skip assets downloading that are valid.
         if self.verify_before_downloading != SophonDownloaderVerifyMethod::None {
-            let mut verifier = SophonVerifier::from(
-                download_manifest.assets.clone()
+            let mut verifier = SophonVerifier::new(
+                download_manifest.assets.iter()
+                    .map(|asset| SophonVerifierAsset {
+                        path: asset.path.clone(),
+                        size: asset.size,
+                        hash_md5: asset.hash_md5.clone()
+                    })
+                    .collect()
             );
 
             if let Some(runtime) = self.runtime.clone() {

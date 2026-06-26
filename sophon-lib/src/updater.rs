@@ -33,7 +33,7 @@ use prost::{Message, DecodeError};
 
 use crate::api::package_update_info::SophonApiPackageManifest;
 use crate::protos::{SophonUpdateAssetsInfo, SophonUpdateAssetsInfoAsset};
-use crate::verifier::{SophonVerifier, VerifyResult};
+use crate::verifier::{SophonVerifier, SophonVerifierAsset, VerifyResult};
 use crate::patcher::HdiffPatcher;
 
 #[derive(Debug, thiserror::Error)]
@@ -567,8 +567,14 @@ impl SophonUpdater {
 
         // Skip assets downloading that are valid.
         if self.verify_before_updating != SophonUpdaterVerifyMethod::None {
-            let mut verifier = SophonVerifier::from(
-                update_manifest.assets.clone()
+            let mut verifier = SophonVerifier::new(
+                update_manifest.assets.iter()
+                    .map(|asset| SophonVerifierAsset {
+                        path: asset.path.clone(),
+                        size: asset.size,
+                        hash_md5: asset.hash_md5.clone()
+                    })
+                    .collect()
             );
 
             if let Some(runtime) = self.runtime.clone() {
