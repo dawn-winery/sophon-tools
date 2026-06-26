@@ -165,6 +165,12 @@ impl SophonVerifier {
             return Ok(());
         }
 
+        let mut entries = Vec::from(entries);
+
+        // Large files should be tested last.
+        #[allow(clippy::unnecessary_sort_by)]
+        entries.sort_by(|a, b| b.1.cmp(&a.1));
+
         let progress_total = entries.iter()
             .map(|(_, size)| *size)
             .sum::<u64>();
@@ -193,7 +199,7 @@ impl SophonVerifier {
             }
         }
 
-        while let Some((path, size)) = entries.pop_back() {
+        while let Some((path, size)) = entries.pop() {
             // Skip already scanned files.
             if self.cache.contains_key(&path) {
                 let current = progress_current.fetch_add(
