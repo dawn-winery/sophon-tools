@@ -34,11 +34,11 @@ pub fn run(
     chunks_dir: PathBuf,
     regex: Option<String>,
     api_client: SophonApiClientArgs,
-    updater: SophonUpdaterArgs,
+    updater_args: SophonUpdaterArgs,
     _output_format: OutputFormat
 ) -> anyhow::Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(updater.threads.max(1))
+        .worker_threads(updater_args.threads.max(1))
         .enable_all()
         .build()?;
 
@@ -75,11 +75,11 @@ pub fn run(
     };
 
     // Prepare game updater.
-    let mut updater = updater.build()?
-        .with_client(api.into())
+    let mut updater = updater_args.build()?
+        .with_client(api.client().clone())
         .with_runtime(runtime.handle().clone());
 
-    if let Some(regex) = regex {
+    if let Some(regex) = regex.clone() {
         updater = updater.with_assets_filter(Box::new(move |asset| {
             regex.is_match(&asset.path)
         }));
@@ -91,6 +91,35 @@ pub fn run(
         &chunks_dir,
         &game_dir
     ))?;
+
+    // If updater has applied some patches and the user has enabled game assets
+    // repairing.
+    if updater_args.patch_assets
+        && updater_args.repair_broken_assets != VerifyMethod::None
+    {
+        let Some(download_manifest) = runtime.block_on(package.find_download_manifest(&component.component))
+            .map_err(|err| anyhow::anyhow!(err.to_string()))?
+        else {
+            return Ok(());
+        };
+
+        let mut downloader = SophonDownloaderArgs::from(&updater_args).build()?
+            .with_client(api.into())
+            .with_runtime(runtime.handle().clone())
+            .with_verify_before_downloading(updater_args.repair_broken_assets.into());
+
+        if let Some(regex) = regex {
+            downloader = downloader.with_assets_filter(Box::new(move |asset| {
+                regex.is_match(&asset.path)
+            }));
+        }
+
+        runtime.block_on(downloader.download(
+            &download_manifest,
+            &game_dir,
+            Box::new(|_, _| {})
+        ))?;
+    }
 
     Ok(())
 }

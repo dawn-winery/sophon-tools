@@ -333,6 +333,21 @@ impl SophonDownloaderArgs {
     }
 }
 
+impl From<&SophonUpdaterArgs> for SophonDownloaderArgs {
+    fn from(updater_args: &SophonUpdaterArgs) -> Self {
+        Self {
+            verify_manifest: updater_args.verify_manifest,
+            verify_chunks: updater_args.verify_chunks,
+            verify_before_downloading: updater_args.verify_before_updating,
+            threads: updater_args.threads,
+            target_memory_usage: updater_args.target_memory_usage.clone(),
+            chunk_download_attempts: updater_args.chunk_download_attempts,
+            fetch_manifest_timeout: updater_args.fetch_manifest_timeout.clone(),
+            fetch_chunk_per_mb_timeout: updater_args.fetch_chunk_per_mb_timeout.clone()
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Args)]
 pub struct SophonUpdaterArgs {
     /// Verify downloaded manifest.
@@ -407,6 +422,16 @@ pub struct SophonUpdaterArgs {
         action = ArgAction::Set
     )]
     pub delete_applied_chunks: bool,
+
+    /// Find invalid or missing assets and repair them.
+    ///
+    /// This option has effect only if `patch_assets` is enabled.
+    #[arg(
+        long, default_value_t = VerifyMethod::Fast,
+        alias = "repair-broken",
+        alias = "repair-assets",
+    )]
+    pub repair_broken_assets: VerifyMethod,
 
     /// Path to the `hpatchz` binary.
     ///
