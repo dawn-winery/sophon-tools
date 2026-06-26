@@ -966,8 +966,8 @@ impl SophonUpdater {
             // If we cannot fit patch in memory yet AND the tasks queue is not
             // empty - then we wait until already scheduled patches finish
             // applying.
-            if occupied_memory + patch_info.patch_size > self.target_memory_usage
-                && !tasks.is_empty()
+            if occupied_memory + patch_info.input_asset_size + patch_info.patch_size
+                > self.target_memory_usage && !tasks.is_empty()
             {
                 #[cfg(feature = "tracing")]
                 tracing::debug!(
@@ -987,7 +987,7 @@ impl SophonUpdater {
             #[cfg(feature = "tracing")]
             tracing::trace!(?patch_info, "schedule asset patching");
 
-            occupied_memory += patch_info.patch_size;
+            occupied_memory += patch_info.input_asset_size + patch_info.patch_size;
 
             let patcher = patcher.clone();
 
