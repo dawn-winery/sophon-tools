@@ -396,9 +396,10 @@ pub struct SophonUpdaterArgs {
         long, default_value_t = true,
         value_parser = clap::value_parser!(bool),
         action = ArgAction::Set,
+        alias = "delete-unused-files",
         alias = "delete-unused"
     )]
-    pub delete_unused_files: bool,
+    pub delete_unused_assets: bool,
 
     /// Patch game files.
     ///
@@ -410,8 +411,11 @@ pub struct SophonUpdaterArgs {
         long, default_value_t = true,
         value_parser = clap::value_parser!(bool),
         action = ArgAction::Set,
+        alias = "patch-files",
         alias = "apply-patches",
-        alias = "apply-chunks"
+        alias = "apply-patch",
+        alias = "apply-chunks",
+        alias = "apply-chunk"
     )]
     pub patch_assets: bool,
 
@@ -419,7 +423,9 @@ pub struct SophonUpdaterArgs {
     #[arg(
         long, default_value_t = true,
         value_parser = clap::value_parser!(bool),
-        action = ArgAction::Set
+        action = ArgAction::Set,
+        alias = "delete-applied-patches",
+        alias = "delete-applied-patch"
     )]
     pub delete_applied_chunks: bool,
 
@@ -428,8 +434,10 @@ pub struct SophonUpdaterArgs {
     /// This option has effect only if `patch_assets` is enabled.
     #[arg(
         long, default_value_t = VerifyMethod::Fast,
+        alias = "repair-broken-files",
         alias = "repair-broken",
         alias = "repair-assets",
+        alias = "repair-files"
     )]
     pub repair_broken_assets: VerifyMethod,
 
@@ -541,7 +549,7 @@ impl SophonUpdaterArgs {
             .with_verify_chunks(self.verify_chunks.into())
             .with_verify_before_updating(self.verify_before_updating.into())
             .with_verify_before_patching(self.verify_before_patching.into())
-            .with_delete_unused_assets(self.delete_unused_files)
+            .with_delete_unused_assets(self.delete_unused_assets)
             .with_patch_assets(self.patch_assets)
             .with_delete_applied_chunks(self.delete_applied_chunks)
             .with_target_memory_usage(target_memory_usage)

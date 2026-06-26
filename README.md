@@ -72,9 +72,10 @@ Pre-download 3.0.0 voiceover update:
     --component en-us \
     --from-version 2.8.0 \
     --to-version 3.0.0 \
-    --delete-unused false \
-    --patch-files false \
-    --delete-chunks false
+    --delete-unused-assets false \
+    --patch-assets false \
+    --delete-applied-chunks false \
+    --repair-broken-assets none
 ```
 
 Update voiceover to 3.0.0 version:
