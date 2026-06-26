@@ -917,22 +917,17 @@ impl SophonUpdater {
 
             let patcher = patcher.clone();
 
-            let output_asset_path = chunks_dir.join({
-                patch_info.asset_path.file_name()
-                    .unwrap_or_else(|| {
-                        std::ffi::OsStr::new(&patch_info.output_asset_hash_md5)
-                    })
-            });
+            let output_asset_path = chunks_dir.join(&patch_info.output_asset_hash_md5);
 
             // Start asset patching task.
             let future = async move {
                 // If patch is a new file then extract it.
-                if patch_info.input_asset_size == 0 {
+                let result = if patch_info.input_asset_size == 0 {
                     patcher.patch(
                         None,
                         &patch_info.patch_path,
                         &patch_info.asset_path
-                    ).await?;
+                    ).await?
                 }
 
                 // Otherwise apply the patch to asset.
@@ -995,10 +990,13 @@ impl SophonUpdater {
                         tokio::fs::remove_file(output_asset_path).await?;
                     }
 
-                    // Delete patch if it's configured to.
-                    if self.delete_applied_chunks {
-                        tokio::fs::remove_file(patch_info.patch_path).await?;
-                    }
+                    result
+                };
+
+                // If patch was applied and delete_applied_chunks is enabled
+                // then delete the patch file.
+                if result && self.delete_applied_chunks {
+                    tokio::fs::remove_file(patch_info.patch_path).await?;
                 }
 
                 Ok::<_, SophonUpdaterError>(())
