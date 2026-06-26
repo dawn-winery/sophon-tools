@@ -17,13 +17,19 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
 use tokio::process::Command;
 
-const HPATCHZ: &[u8] = include_bytes!("../external/hpatchz/hpatchz");
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+const HPATCHZ: &[u8] = include_bytes!("../external/hpatchz/hpatchz-linux64");
+
+#[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+const HPATCHZ: &[u8] = include_bytes!("../external/hpatchz/hpatchz-windows64.exe");
+
+#[cfg(target_os = "macos")]
+const HPATCHZ: &[u8] = include_bytes!("../external/hpatchz/hpatchz-macos");
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct HdiffPatcher(PathBuf);
@@ -31,7 +37,11 @@ pub struct HdiffPatcher(PathBuf);
 impl Default for HdiffPatcher {
     #[inline]
     fn default() -> Self {
-        Self(PathBuf::from("hpatchz"))
+        #[cfg(not(target_os = "windows"))]
+        return Self(PathBuf::from("hpatchz"));
+
+        #[cfg(target_os = "windows")]
+        return Self(PathBuf::from("hpatchz.exe"));
     }
 }
 
@@ -48,8 +58,13 @@ impl HdiffPatcher {
     pub async fn export() -> std::io::Result<Self> {
         let hash = seahash::hash(HPATCHZ);
 
+        #[cfg(not(target_os = "windows"))]
         let path = std::env::temp_dir()
             .join(format!("hpatchz-{hash:0x}"));
+
+        #[cfg(target_os = "windows")]
+        let path = std::env::temp_dir()
+            .join(format!("hpatchz-{hash:0x}.exe"));
 
         if !path.is_file() {
             #[cfg(feature = "tracing")]
@@ -57,10 +72,14 @@ impl HdiffPatcher {
 
             tokio::fs::write(&path, HPATCHZ).await?;
 
-            tokio::fs::set_permissions(
-                &path,
-                std::fs::Permissions::from_mode(0o755)
-            ).await?;
+            #[cfg(target_family = "unix")] {
+                use std::os::unix::fs::PermissionsExt;
+
+                tokio::fs::set_permissions(
+                    &path,
+                    std::fs::Permissions::from_mode(0o755)
+                ).await?;
+            }
         }
 
         Ok(Self(path))
