@@ -121,17 +121,24 @@ pub enum OutputFormat {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Args)]
 pub struct SophonApiClientArgs {
     /// API requests user agent string.
-    #[arg(long)]
+    #[arg(long, alias = "api-user-agent")]
     pub user_agent: Option<String>,
 
     /// API requests proxy.
-    #[arg(long)]
+    #[arg(
+        long,
+        alias = "proxy-addr",
+        alias = "proxy-address",
+        alias = "api-proxy",
+        alias = "api-proxy-addr",
+        alias = "api-proxy-address"
+    )]
     pub proxy: Option<String>,
 
     /// API requests timeout in seconds.
     ///
     /// Supports string values: `1h`, `10m`, `5.5s`.
-    #[arg(long)]
+    #[arg(long, alias = "api-timeout")]
     pub timeout: Option<String>
 }
 
@@ -166,11 +173,17 @@ pub struct SophonApiArgs {
     /// Sophon API server region.
     #[arg(
         long, value_enum, default_value_t = SophonRegion::Global,
-        alias = "edition"
+        alias = "edition",
+        alias = "api-region",
+        alias = "api-edition"
     )]
     pub region: SophonRegion,
 
-    #[arg(long)]
+    #[arg(long,
+        alias = "launcher",
+        alias = "api-launcher-id",
+        alias = "api-launcher"
+    )]
     pub launcher_id: Option<String>
 }
 
@@ -190,21 +203,6 @@ pub struct SophonApiGameComponentArg {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Args)]
 pub struct SophonDownloaderArgs {
-    /// Amount of threads to use in the tokio async runtime.
-    ///
-    /// Majority of tasks are IO-bound and are executed asynchronously. Setting
-    /// this value higher than default value will not improve download speed.
-    ///
-    /// Download speed is bounded by `target_memory_usage` option.
-    #[arg(
-        long, short('t'),
-        alias = "workers",
-        default_value_t = std::thread::available_parallelism()
-            .map(|threads| threads.get())
-            .unwrap_or(1)
-    )]
-    pub threads: usize,
-
     /// Verify downloaded manifest.
     #[arg(long, default_value_t = VerifyMethod::Full)]
     pub verify_manifest: VerifyMethod,
@@ -227,6 +225,21 @@ pub struct SophonDownloaderArgs {
         alias = "verify-before-download"
     )]
     pub verify_before_downloading: VerifyMethod,
+
+    /// Amount of threads to use in the tokio async runtime.
+    ///
+    /// Majority of tasks are IO-bound and are executed asynchronously. Setting
+    /// this value higher than default value will not improve download speed.
+    ///
+    /// Download speed is bounded by `target_memory_usage` option.
+    #[arg(
+        long, short('t'),
+        alias = "workers",
+        default_value_t = std::thread::available_parallelism()
+            .map(|threads| threads.get())
+            .unwrap_or(1)
+    )]
+    pub threads: usize,
 
     /// Amount of system memory downloader will try to utilize.
     ///
@@ -252,8 +265,8 @@ pub struct SophonDownloaderArgs {
     /// Amount of attempts downloader will make to download a chunk.
     ///
     /// Sometimes API may reject your chunk download request. This option will
-    /// make downloader to silently re-establish the connection with the API
-    /// server several times before failing to download a chunk.
+    /// make downloader to silently re-establish connection with the API server
+    /// several times before failing to download a chunk.
     #[arg(
         long, default_value_t = 3,
         alias = "chunk-downloading-attempts",
@@ -262,7 +275,32 @@ pub struct SophonDownloaderArgs {
         alias = "chunk-attempts",
         alias = "attempts"
     )]
-    pub chunk_download_attempts: u8
+    pub chunk_download_attempts: u8,
+
+    /// Timeout of download info manifest fetching.
+    ///
+    /// If unset, no timeout is used.
+    #[arg(
+        long,
+        alias = "download-manifest-timeout",
+        alias = "manifest-timeout"
+    )]
+    pub fetch_manifest_timeout: Option<String>,
+
+    /// Timeout of 1 MB of chunk downloading.
+    ///
+    /// If set, downloader will drop chunk download connection if it didn't
+    /// finish for `ceil(chunk_size_mb) * timeout`.
+    ///
+    /// If unset, no chunk download timeout is used.
+    #[arg(
+        long,
+        alias = "fetch-chunk-timeout",
+        alias = "fetch-chunks-timeout",
+        alias = "download-chunk-timeout",
+        alias = "download-chunks-timeout"
+    )]
+    pub fetch_chunk_per_mb_timeout: Option<String>
 }
 
 impl SophonDownloaderArgs {
@@ -270,12 +308,26 @@ impl SophonDownloaderArgs {
         let target_memory_usage = parse_memory_str(&self.target_memory_usage)
             .ok_or_else(|| anyhow::anyhow!("invalid target_memory_usage value"))?;
 
-        let downloader = SophonDownloader::default()
-            .with_target_memory_usage(target_memory_usage)
-            .with_chunk_download_attempts(self.chunk_download_attempts)
+        let mut downloader = SophonDownloader::default()
             .with_verify_manifest(self.verify_manifest.into())
             .with_verify_chunks(self.verify_chunks.into())
-            .with_verify_before_downloading(self.verify_before_downloading.into());
+            .with_verify_before_downloading(self.verify_before_downloading.into())
+            .with_target_memory_usage(target_memory_usage)
+            .with_chunk_download_attempts(self.chunk_download_attempts);
+
+        if let Some(timeout) = &self.fetch_manifest_timeout {
+            let timeout = parse_duration_str(timeout)
+                .ok_or_else(|| anyhow::anyhow!("invalid fetch_manifest_timeout value"))?;
+
+            downloader = downloader.with_fetch_manifest_timeout(timeout);
+        }
+
+        if let Some(timeout) = &self.fetch_chunk_per_mb_timeout {
+            let timeout = parse_duration_str(timeout)
+                .ok_or_else(|| anyhow::anyhow!("invalid fetch_chunk_per_mb_timeout value"))?;
+
+            downloader = downloader.with_fetch_chunk_timeout_per_mb(timeout);
+        }
 
         Ok(downloader)
     }
@@ -283,38 +335,6 @@ impl SophonDownloaderArgs {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Args)]
 pub struct SophonUpdaterArgs {
-    /// Amount of threads to use in the tokio async runtime.
-    ///
-    /// Majority of tasks are IO-bound and are executed asynchronously. Setting
-    /// this value higher than default value will not improve download speed.
-    ///
-    /// Download speed is bounded by `target_memory_usage` option.
-    #[arg(
-        long, short('t'),
-        alias = "workers",
-        default_value_t = std::thread::available_parallelism()
-            .map(|threads| threads.get())
-            .unwrap_or(1)
-    )]
-    pub threads: usize,
-
-    /// Path to the `hpatchz` binary.
-    ///
-    /// If unset, bundled binary will be extracted to a temporary directory.
-    ///
-    /// https://github.com/sisong/HDiffPatch
-    #[arg(
-        long,
-        alias = "hpatchz-path",
-        alias = "hpatchz",
-        alias = "hpatch-binary",
-        alias = "hpatch-path",
-        alias = "hpatch",
-        alias = "patcher-binary",
-        alias = "patcher"
-    )]
-    pub hpatchz_binary: Option<PathBuf>,
-
     /// Verify downloaded manifest.
     #[arg(long, default_value_t = VerifyMethod::Full)]
     pub verify_manifest: VerifyMethod,
@@ -388,9 +408,41 @@ pub struct SophonUpdaterArgs {
     )]
     pub delete_applied_chunks: bool,
 
-    /// Amount of system memory downloader will try to utilize.
+    /// Path to the `hpatchz` binary.
     ///
-    /// Higher value will allow downloader to download more files in parallel.
+    /// If unset, bundled binary will be extracted to a temporary directory.
+    ///
+    /// https://github.com/sisong/HDiffPatch
+    #[arg(
+        long,
+        alias = "hpatchz-path",
+        alias = "hpatchz",
+        alias = "hpatch-binary",
+        alias = "hpatch-path",
+        alias = "hpatch",
+        alias = "patcher-binary",
+        alias = "patcher"
+    )]
+    pub hpatchz_binary: Option<PathBuf>,
+
+    /// Amount of threads to use in the tokio async runtime.
+    ///
+    /// Majority of tasks are IO-bound and are executed asynchronously. Setting
+    /// this value higher than default value will not improve download speed.
+    ///
+    /// Download speed is bounded by `target_memory_usage` option.
+    #[arg(
+        long, short('t'),
+        alias = "workers",
+        default_value_t = std::thread::available_parallelism()
+            .map(|threads| threads.get())
+            .unwrap_or(1)
+    )]
+    pub threads: usize,
+
+    /// Amount of system memory updater will try to utilize.
+    ///
+    /// Higher value will allow updater to download more files in parallel.
     /// The real memory usage will be higher than the user-specified value.
     ///
     /// Supports string values: `0.5gb`, `512mb`, `64kb`.
@@ -409,11 +461,11 @@ pub struct SophonUpdaterArgs {
     )]
     pub target_memory_usage: String,
 
-    /// Amount of attempts downloader will make to download a chunk.
+    /// Amount of attempts updater will make to download a chunk.
     ///
     /// Sometimes API may reject your chunk download request. This option will
-    /// make downloader to silently re-establish the connection with the API
-    /// server several times before failing to download a chunk.
+    /// make updater to silently re-establish the connection with the API server
+    /// several times before failing to download a chunk.
     #[arg(
         long, default_value_t = 3,
         alias = "chunk-downloading-attempts",
@@ -422,7 +474,36 @@ pub struct SophonUpdaterArgs {
         alias = "chunk-attempts",
         alias = "attempts"
     )]
-    pub chunk_download_attempts: u8
+    pub chunk_download_attempts: u8,
+
+    /// Timeout of download info manifest fetching.
+    ///
+    /// If unset, no timeout is used.
+    #[arg(
+        long,
+        alias = "download-manifest-timeout",
+        alias = "manifest-timeout"
+    )]
+    pub fetch_manifest_timeout: Option<String>,
+
+    /// Timeout of 1 MB of chunk downloading.
+    ///
+    /// If set, updater will drop chunk download connection if it didn't
+    /// finish for `ceil(chunk_size_mb) * timeout`.
+    ///
+    /// If unset, no chunk download timeout is used.
+    #[arg(
+        long,
+        alias = "fetch-chunk-timeout",
+        alias = "fetch-chunks-timeout",
+        alias = "fetch-patch-timeout",
+        alias = "fetch-patches-timeout",
+        alias = "download-chunk-timeout",
+        alias = "download-chunks-timeout",
+        alias = "download-patch-timeout",
+        alias = "download-patches-timeout"
+    )]
+    pub fetch_chunk_per_mb_timeout: Option<String>
 }
 
 impl SophonUpdaterArgs {
@@ -431,18 +512,32 @@ impl SophonUpdaterArgs {
             .ok_or_else(|| anyhow::anyhow!("invalid target_memory_usage value"))?;
 
         let mut updater = SophonUpdater::default()
-            .with_target_memory_usage(target_memory_usage)
-            .with_chunk_download_attempts(self.chunk_download_attempts)
             .with_verify_manifest(self.verify_manifest.into())
             .with_verify_chunks(self.verify_chunks.into())
             .with_verify_before_updating(self.verify_before_updating.into())
             .with_verify_before_patching(self.verify_before_patching.into())
             .with_delete_unused_assets(self.delete_unused_files)
             .with_patch_assets(self.patch_assets)
-            .with_delete_applied_chunks(self.delete_applied_chunks);
+            .with_delete_applied_chunks(self.delete_applied_chunks)
+            .with_target_memory_usage(target_memory_usage)
+            .with_chunk_download_attempts(self.chunk_download_attempts);
 
         if let Some(patcher) = self.hpatchz_binary.clone() {
             updater = updater.with_patcher(HdiffPatcher::from(patcher));
+        }
+
+        if let Some(timeout) = &self.fetch_manifest_timeout {
+            let timeout = parse_duration_str(timeout)
+                .ok_or_else(|| anyhow::anyhow!("invalid fetch_manifest_timeout value"))?;
+
+            updater = updater.with_fetch_manifest_timeout(timeout);
+        }
+
+        if let Some(timeout) = &self.fetch_chunk_per_mb_timeout {
+            let timeout = parse_duration_str(timeout)
+                .ok_or_else(|| anyhow::anyhow!("invalid fetch_chunk_per_mb_timeout value"))?;
+
+            updater = updater.with_fetch_chunk_timeout_per_mb(timeout);
         }
 
         Ok(updater)
