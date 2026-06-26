@@ -83,12 +83,12 @@ pub enum SophonDownloaderError {
     }
 }
 
+pub type AssetsFilter = Box<dyn Fn(&SophonDownloadAssetsInfoAsset) -> bool>;
+
 pub type AssetsSorter = Box<dyn Fn(
     &SophonDownloadAssetsInfoAsset,
     &SophonDownloadAssetsInfoAsset
 ) -> std::cmp::Ordering>;
-
-pub type AssetsFilter = Box<dyn Fn(&SophonDownloadAssetsInfoAsset) -> bool>;
 
 struct CacheSlot {
     pub url: String,
@@ -122,8 +122,8 @@ pub struct SophonDownloader {
     target_memory_usage: u64,
     chunk_download_attempts: u8,
 
-    assets_sorter: Option<AssetsSorter>,
     assets_filter: Option<AssetsFilter>,
+    assets_sorter: Option<AssetsSorter>,
 
     manifest_cache: RwLock<Vec<CacheSlot>>
 }
@@ -148,8 +148,8 @@ impl Default for SophonDownloader {
             target_memory_usage: 256 * 1024 * 1024,
             chunk_download_attempts: 3,
 
-            assets_sorter: None,
             assets_filter: None,
+            assets_sorter: None,
 
             manifest_cache: RwLock::const_new(Vec::with_capacity(1))
         }
@@ -254,19 +254,19 @@ impl SophonDownloader {
         self
     }
 
+    /// Callback used to filter the assets before downloading them. It can be
+    /// used to make downloader ignore some files.
+    pub fn with_assets_filter(mut self, filter: AssetsFilter) -> Self {
+        self.assets_filter = Some(filter);
+
+        self
+    }
+
     /// Callback used to sort the assets before downloading them. It can be used
     /// if you need to make sure that files will be downloaded in the right
     /// order.
     pub fn with_assets_sorter(mut self, sorter: AssetsSorter) -> Self {
         self.assets_sorter = Some(sorter);
-
-        self
-    }
-
-    /// Callback used to filter the assets before downloading them. It can be
-    /// used to make downloader ignore some files.
-    pub fn with_assets_filter(mut self, filter: AssetsFilter) -> Self {
-        self.assets_filter = Some(filter);
 
         self
     }
@@ -445,7 +445,7 @@ impl SophonDownloader {
             // Pre-verify all the directory files in parallel.
             verifier.scan_directory(
                 download_dir.to_path_buf(),
-                Box::new(|_, _, _| {})
+                Box::new(|_| {})
             ).await?;
 
             let mut valid_assets = Vec::with_capacity(

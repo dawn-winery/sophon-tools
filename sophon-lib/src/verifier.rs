@@ -19,7 +19,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::collections::{HashMap, VecDeque};
 
 use tokio::sync::RwLock;
@@ -49,6 +49,24 @@ pub enum VerifyResult {
     Unknown
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct VerifierScanUpdate {
+    /// Amount of already verified bytes.
+    pub current: u64,
+
+    /// Total amount of bytes to verify.
+    pub total: u64,
+
+    /// Path of the verified file.
+    pub path: PathBuf,
+
+    /// File verification result.
+    pub result: VerifyResult
+}
+
+pub type AssetsFilter = Box<dyn Fn(&Path) -> bool>;
+pub type AssetsSorter = Box<dyn Fn(&Path, &Path) -> std::cmp::Ordering>;
+
 // TODO: I don't actually need to know PathBuf so I could use hashes of
 //       paths to save up space. I could also use specialized HashMap
 //       library for faster u64-indexed maps lookups.
@@ -56,8 +74,13 @@ pub enum VerifyResult {
 pub struct SophonVerifier {
     runtime: Option<tokio::runtime::Handle>,
     assets: Box<[SophonVerifierAsset]>,
-    cache: HashMap<PathBuf, bool>,
-    fast_verify: bool
+
+    fast_verify: bool,
+
+    assets_filter: Option<AssetsFilter>,
+    assets_sorter: Option<AssetsSorter>,
+
+    cache: HashMap<PathBuf, bool>
 }
 
 impl From<Vec<SophonDownloadAssetsInfoAsset>> for SophonVerifier {
@@ -65,6 +88,7 @@ impl From<Vec<SophonDownloadAssetsInfoAsset>> for SophonVerifier {
         Self {
             runtime: None,
             cache: HashMap::with_capacity(value.len()),
+
             assets: value.into_iter()
                 .map(|asset| SophonVerifierAsset {
                     path: asset.path,
@@ -72,7 +96,11 @@ impl From<Vec<SophonDownloadAssetsInfoAsset>> for SophonVerifier {
                     hash_md5: asset.hash_md5
                 })
                 .collect(),
-            fast_verify: false
+
+            fast_verify: false,
+
+            assets_filter: None,
+            assets_sorter: None
         }
     }
 }
@@ -82,6 +110,7 @@ impl From<Vec<SophonUpdateAssetsInfoAsset>> for SophonVerifier {
         Self {
             runtime: None,
             cache: HashMap::with_capacity(value.len()),
+
             assets: value.into_iter()
                 .map(|asset| SophonVerifierAsset {
                     path: asset.path,
@@ -89,7 +118,11 @@ impl From<Vec<SophonUpdateAssetsInfoAsset>> for SophonVerifier {
                     hash_md5: asset.hash_md5
                 })
                 .collect(),
-            fast_verify: false
+
+            fast_verify: false,
+
+            assets_filter: None,
+            assets_sorter: None
         }
     }
 }
@@ -100,7 +133,11 @@ impl SophonVerifier {
             runtime: None,
             cache: HashMap::with_capacity(assets.len()),
             assets,
-            fast_verify: false
+
+            fast_verify: false,
+
+            assets_filter: None,
+            assets_sorter: None
         }
     }
 
@@ -118,6 +155,23 @@ impl SophonVerifier {
     /// hashes to ensure that the files are valid.
     pub fn with_fast_verify(mut self, fast_verify: bool) -> Self {
         self.fast_verify = fast_verify;
+
+        self
+    }
+
+    /// Callback used to filter the assets before verifying them. It can be
+    /// used to make verifier ignore some files during directory scanning.
+    pub fn with_assets_filter(mut self, filter: AssetsFilter) -> Self {
+        self.assets_filter = Some(filter);
+
+        self
+    }
+
+    /// Callback used to sort the assets before verifying them. It can be used
+    /// if you need to make sure that files within a directory will be verified
+    /// in the right order.
+    pub fn with_assets_sorter(mut self, sorter: AssetsSorter) -> Self {
+        self.assets_sorter = Some(sorter);
 
         self
     }
@@ -146,7 +200,7 @@ impl SophonVerifier {
     pub async fn scan_directory(
         &mut self,
         path: PathBuf,
-        updater: Box<dyn Fn(u64, u64, PathBuf) + Send + Sync>
+        updater: Box<dyn Fn(VerifierScanUpdate) + Send + Sync>
     ) -> std::io::Result<()> {
         let mut entries = VecDeque::from([(path, 0)]);
 
@@ -169,9 +223,19 @@ impl SophonVerifier {
 
         let mut entries = Vec::from(entries);
 
+        // Apply user-provided filter.
+        if let Some(filter) = &self.assets_filter {
+            entries.retain(|(path, _)| filter(path));
+        }
+
         // Large files should be tested last.
         #[allow(clippy::unnecessary_sort_by)]
         entries.sort_by(|a, b| b.1.cmp(&a.1));
+
+        // Apply user-provided sorter.
+        if let Some(sorter) = &self.assets_sorter {
+            entries.sort_by(|a, b| sorter(&a.0, &b.0));
+        }
 
         let progress_total = entries.iter()
             .map(|(_, size)| *size)
@@ -203,17 +267,22 @@ impl SophonVerifier {
 
         while let Some((path, size)) = entries.pop() {
             // Skip already scanned files.
-            if self.cache.contains_key(&path) {
+            if let Some(result) = self.cache.get(&path) {
                 let current = progress_current.fetch_add(
                     size,
                     Ordering::Relaxed
                 );
 
-                (progress_updater.read().await)(
-                    current + size,
-                    progress_total,
-                    path
-                );
+                (progress_updater.read().await)(VerifierScanUpdate {
+                    current: current + size,
+                    total: progress_total,
+                    path,
+                    result: if *result {
+                        VerifyResult::Valid
+                    } else {
+                        VerifyResult::Invalid
+                    }
+                });
 
                 continue;
             }
@@ -229,11 +298,12 @@ impl SophonVerifier {
                     Ordering::Relaxed
                 );
 
-                (progress_updater.read().await)(
-                    current + size,
-                    progress_total,
-                    path
-                );
+                (progress_updater.read().await)(VerifierScanUpdate {
+                    current: current + size,
+                    total: progress_total,
+                    path,
+                    result: VerifyResult::Unknown
+                });
 
                 continue;
             };
@@ -276,11 +346,12 @@ impl SophonVerifier {
                         Ordering::Relaxed
                     );
 
-                    (progress_updater.read().await)(
-                        current + size,
-                        progress_total,
-                        path.clone()
-                    );
+                    (progress_updater.read().await)(VerifierScanUpdate {
+                        current: current + size,
+                        total: progress_total,
+                        path: path.clone(),
+                        result: VerifyResult::Invalid
+                    });
 
                     return Ok((path, VerifyResult::Invalid));
                 }
@@ -291,11 +362,12 @@ impl SophonVerifier {
                         Ordering::Relaxed
                     );
 
-                    (progress_updater.read().await)(
-                        current + size,
-                        progress_total,
-                        path.clone()
-                    );
+                    (progress_updater.read().await)(VerifierScanUpdate {
+                        current: current + size,
+                        total: progress_total,
+                        path: path.clone(),
+                        result: VerifyResult::Valid
+                    });
 
                     return Ok((path, VerifyResult::Valid));
                 }
@@ -319,22 +391,25 @@ impl SophonVerifier {
                     hasher.update(&buf[..n]);
                 }
 
+                let result = if hex::encode(hasher.finalize()) == asset.hash_md5 {
+                    VerifyResult::Valid
+                } else {
+                    VerifyResult::Invalid
+                };
+
                 let current = progress_current.fetch_add(
                     size,
                     Ordering::Relaxed
                 );
 
-                (progress_updater.read().await)(
-                    current + size,
-                    progress_total,
-                    path.clone()
-                );
+                (progress_updater.read().await)(VerifierScanUpdate {
+                    current: current + size,
+                    total: progress_total,
+                    path: path.clone(),
+                    result
+                });
 
-                if hex::encode(hasher.finalize()) == asset.hash_md5 {
-                    Ok((path, VerifyResult::Valid))
-                } else {
-                    Ok((path, VerifyResult::Invalid))
-                }
+                Ok((path, result))
             };
 
             let task = match &self.runtime {

@@ -86,12 +86,12 @@ pub enum SophonUpdaterError {
     }
 }
 
+pub type AssetsFilter = Box<dyn Fn(&SophonUpdateAssetsInfoAsset) -> bool>;
+
 pub type AssetsSorter = Box<dyn Fn(
     &SophonUpdateAssetsInfoAsset,
     &SophonUpdateAssetsInfoAsset
 ) -> std::cmp::Ordering>;
-
-pub type AssetsFilter = Box<dyn Fn(&SophonUpdateAssetsInfoAsset) -> bool>;
 
 struct CacheSlot {
     pub url: String,
@@ -131,8 +131,8 @@ pub struct SophonUpdater {
     target_memory_usage: u64,
     chunk_download_attempts: u8,
 
-    assets_sorter: Option<AssetsSorter>,
     assets_filter: Option<AssetsFilter>,
+    assets_sorter: Option<AssetsSorter>,
 
     manifest_cache: RwLock<Vec<CacheSlot>>
 }
@@ -163,8 +163,8 @@ impl Default for SophonUpdater {
             target_memory_usage: 256 * 1024 * 1024,
             chunk_download_attempts: 3,
 
-            assets_sorter: None,
             assets_filter: None,
+            assets_sorter: None,
 
             manifest_cache: RwLock::const_new(Vec::with_capacity(1))
         }
@@ -322,19 +322,19 @@ impl SophonUpdater {
         self
     }
 
+    /// Callback used to filter the assets before updating them. It can be
+    /// used to make updater ignore some files.
+    pub fn with_assets_filter(mut self, filter: AssetsFilter) -> Self {
+        self.assets_filter = Some(filter);
+
+        self
+    }
+
     /// Callback used to sort the assets before updating them. It can be used
     /// if you need to make sure that files will be updated in the right
     /// order.
     pub fn with_assets_sorter(mut self, sorter: AssetsSorter) -> Self {
         self.assets_sorter = Some(sorter);
-
-        self
-    }
-
-    /// Callback used to filter the assets before updating them. It can be
-    /// used to make updater ignore some files.
-    pub fn with_assets_filter(mut self, filter: AssetsFilter) -> Self {
-        self.assets_filter = Some(filter);
 
         self
     }
@@ -539,7 +539,7 @@ impl SophonUpdater {
             // Pre-verify all the directory files in parallel.
             verifier.scan_directory(
                 update_dir.to_path_buf(),
-                Box::new(|_, _, _| {})
+                Box::new(|_| {})
             ).await?;
 
             let mut valid_assets = Vec::with_capacity(
