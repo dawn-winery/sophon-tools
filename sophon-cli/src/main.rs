@@ -21,10 +21,13 @@ use std::path::PathBuf;
 
 use tracing_subscriber::prelude::*;
 
-use clap::{Parser, Subcommand, ArgAction};
+use clap::{Parser, Subcommand};
 
+pub mod utils;
+pub mod args;
 pub mod commands;
 
+use args::*;
 use commands::*;
 
 #[derive(Debug, Parser)]
@@ -50,50 +53,38 @@ enum CliCommands {
 
     /// Detect installed game.
     Detect {
+        /// Path to the game installation directory.
         #[arg(index = 1, required = true)]
-        path: PathBuf,
+        game_dir: PathBuf,
 
-        /// API requests user agent string.
-        #[arg(long)]
-        user_agent: Option<String>,
-
-        /// API requests proxy.
-        #[arg(long)]
-        proxy: Option<String>,
+        #[command(flatten)]
+        api_client: SophonApiClientArgs,
 
         #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
         output_format: OutputFormat
     },
 
-    /// Verify game.
+    /// Verify installed game files.
     Verify {
+        /// Game name or identifier.
         #[arg(index = 1, required = true)]
-        game: String,
+        game_id: String,
 
+        /// Path to the game installation directory.
         #[arg(index = 2, required = true)]
-        path: PathBuf,
+        game_dir: PathBuf,
 
-        #[arg(
-            long, value_enum, default_value_t = SophonRegion::Global,
-            alias = "edition"
-        )]
-        region: SophonRegion,
+        #[command(flatten)]
+        api_args: SophonApiArgs,
 
-        #[arg(long)]
-        launcher_id: Option<String>,
+        #[command(flatten)]
+        component: SophonApiGameComponentArg,
 
+        /// Version of the game or component to verify installed file against.
+        ///
+        /// If unset, the latest available game version will be used.
         #[arg(long)]
         version: Option<String>,
-
-        #[arg(
-            long, default_value_t = String::from("game"),
-            alias = "component-id",
-            alias = "component-name",
-            alias = "category",
-            alias = "category-id",
-            alias = "category-name"
-        )]
-        component: String,
 
         /// Verify files that match the regex.
         #[arg(long)]
@@ -103,13 +94,8 @@ enum CliCommands {
         #[arg(long, alias = "fast", alias = "fast-verifying")]
         fast_verify: bool,
 
-        /// API requests user agent string.
-        #[arg(long)]
-        user_agent: Option<String>,
-
-        /// API requests proxy.
-        #[arg(long)]
-        proxy: Option<String>,
+        #[command(flatten)]
+        api_client: SophonApiClientArgs,
 
         #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
         output_format: OutputFormat
@@ -117,103 +103,35 @@ enum CliCommands {
 
     /// Download game.
     Download {
+        /// Game name or identifier.
         #[arg(index = 1, required = true)]
-        game: String,
+        game_id: String,
 
+        /// Path to the game installation directory.
         #[arg(index = 2, required = true)]
-        path: PathBuf,
+        game_dir: PathBuf,
 
-        #[arg(
-            long, value_enum, default_value_t = SophonRegion::Global,
-            alias = "edition"
-        )]
-        region: SophonRegion,
+        #[command(flatten)]
+        api_args: SophonApiArgs,
 
-        #[arg(long)]
-        launcher_id: Option<String>,
+        #[command(flatten)]
+        component: SophonApiGameComponentArg,
 
+        /// Version of the game or component to download.
+        ///
+        /// If unset, the latest available game version will be used.
         #[arg(long)]
         version: Option<String>,
-
-        #[arg(
-            long, default_value_t = String::from("game"),
-            alias = "component-id",
-            alias = "component-name",
-            alias = "category",
-            alias = "category-id",
-            alias = "category-name"
-        )]
-        component: String,
 
         /// Download files that match the regex.
         #[arg(long)]
         regex: Option<String>,
 
-        /// Amount of threads to use in the tokio async runtime.
-        #[arg(
-            long, short('t'),
-            alias = "workers",
-            default_value_t = std::thread::available_parallelism()
-                .map(|threads| threads.get())
-                .unwrap_or(1)
-        )]
-        threads: usize,
+        #[command(flatten)]
+        api_client: SophonApiClientArgs,
 
-        /// Amount of system memory downloader will try to utilize.
-        ///
-        /// Higher value will allow downloader to download more files in
-        /// parallel.
-        #[arg(
-            long, short('m'), default_value_t = String::from("256mb"),
-            alias = "target-memory",
-            alias = "memory-usage",
-            alias = "target-memory-size",
-            alias = "target-memory-buffer",
-            alias = "target-memory-buf",
-            alias = "memory-buffer",
-            alias = "memory-size",
-            alias = "memory-buf",
-            alias = "memory",
-            alias = "mem"
-        )]
-        target_memory_usage: String,
-
-        /// Chunk downloading attempts.
-        #[arg(
-            long, default_value_t = 3,
-            alias = "chunk-downloading-attempts",
-            alias = "downloading-attempts",
-            alias = "download-attempts",
-            alias = "chunk-attempts",
-            alias = "attempts"
-        )]
-        chunk_download_attempts: u8,
-
-        /// Verify downloaded manifest.
-        #[arg(long, default_value_t = VerifyMethod::Full)]
-        verify_manifest: VerifyMethod,
-
-        /// Verify downloaded chunks.
-        #[arg(long, default_value_t = VerifyMethod::Fast)]
-        verify_chunks: VerifyMethod,
-
-        /// Verify game files before downloading them.
-        ///
-        /// If disabled, downloader will overwrite game files even if they're
-        /// already properly downloaded.
-        #[arg(
-            long, default_value_t = VerifyMethod::Full,
-            alias = "verify-before-download"
-        )]
-        verify_before_downloading: VerifyMethod,
-
-        /// Downloader user agent string.
-        #[arg(long)]
-        user_agent: Option<String>,
-
-        /// Downloader proxy.
-        #[arg(long)]
-        proxy: Option<String>,
+        #[command(flatten)]
+        downloader: SophonDownloaderArgs,
 
         #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
         output_format: OutputFormat
@@ -221,20 +139,19 @@ enum CliCommands {
 
     /// Update game.
     Update {
+        /// Game name or identifier.
         #[arg(index = 1, required = true)]
-        game: String,
+        game_id: String,
 
+        /// Path to the game installation directory.
         #[arg(index = 2, required = true)]
-        path: PathBuf,
+        game_dir: PathBuf,
 
-        #[arg(
-            long, value_enum, default_value_t = SophonRegion::Global,
-            alias = "edition"
-        )]
-        region: SophonRegion,
+        #[command(flatten)]
+        api_args: SophonApiArgs,
 
-        #[arg(long)]
-        launcher_id: Option<String>,
+        #[command(flatten)]
+        component: SophonApiGameComponentArg,
 
         /// Currently installed version of the game.
         ///
@@ -248,6 +165,7 @@ enum CliCommands {
         #[arg(long)]
         to_version: Option<String>,
 
+        /// Path to the chunks downloading directory.
         #[arg(
             long, default_value = ".cache",
             alias = "chunks-path",
@@ -258,133 +176,15 @@ enum CliCommands {
         )]
         chunks_dir: PathBuf,
 
-        #[arg(
-            long, default_value_t = String::from("game"),
-            alias = "component-id",
-            alias = "component-name",
-            alias = "category",
-            alias = "category-id",
-            alias = "category-name"
-        )]
-        component: String,
-
         /// Update files that match the regex.
         #[arg(long)]
         regex: Option<String>,
 
-        /// Amount of threads to use in the tokio async runtime.
-        #[arg(
-            long, short('t'),
-            alias = "workers",
-            default_value_t = std::thread::available_parallelism()
-                .map(|threads| threads.get())
-                .unwrap_or(1)
-        )]
-        threads: usize,
+        #[command(flatten)]
+        api_client: SophonApiClientArgs,
 
-        #[arg(
-            long,
-            alias = "hpatchz-path",
-            alias = "hpatchz",
-            alias = "hpatch-binary",
-            alias = "hpatch-path",
-            alias = "hpatch",
-            alias = "patcher-binary",
-            alias = "patcher"
-        )]
-        hpatchz_binary: Option<PathBuf>,
-
-        /// Amount of system memory updater will try to utilize.
-        ///
-        /// Higher value will allow updater to download more files in parallel.
-        #[arg(
-            long, short('m'), default_value_t = String::from("256mb"),
-            alias = "target-memory",
-            alias = "memory-usage",
-            alias = "target-memory-size",
-            alias = "target-memory-buffer",
-            alias = "target-memory-buf",
-            alias = "memory-buffer",
-            alias = "memory-size",
-            alias = "memory-buf",
-            alias = "memory",
-            alias = "mem"
-        )]
-        target_memory_usage: String,
-
-        /// Chunk downloading attempts.
-        #[arg(
-            long, default_value_t = 3,
-            alias = "chunk-downloading-attempts",
-            alias = "downloading-attempts",
-            alias = "download-attempts",
-            alias = "chunk-attempts",
-            alias = "attempts"
-        )]
-        chunk_download_attempts: u8,
-
-        /// Verify downloaded manifest.
-        #[arg(long, default_value_t = VerifyMethod::Full)]
-        verify_manifest: VerifyMethod,
-
-        /// Verify downloaded chunks.
-        #[arg(long, default_value_t = VerifyMethod::Fast)]
-        verify_chunks: VerifyMethod,
-
-        /// Verify game files before updating them.
-        ///
-        /// If disabled, updater will try to update game files even if they're
-        /// already updated.
-        #[arg(
-            long, default_value_t = VerifyMethod::Full,
-            alias = "verify-before-update"
-        )]
-        verify_before_updating: VerifyMethod,
-
-        /// Verify game files before patching them.
-        ///
-        /// If disabled, updater will try to patch files even if patches cannot
-        /// be applied to them.
-        #[arg(
-            long, default_value_t = VerifyMethod::Full,
-            alias = "verify-before-patch"
-        )]
-        verify_before_patching: VerifyMethod,
-
-        /// Delete unused game files.
-        #[arg(
-            long, default_value_t = true,
-            value_parser = clap::value_parser!(bool),
-            action = ArgAction::Set,
-            alias = "delete-unused"
-        )]
-        delete_unused_files: bool,
-
-        /// Patch game files.
-        #[arg(
-            long, default_value_t = true,
-            value_parser = clap::value_parser!(bool),
-            action = ArgAction::Set,
-            alias = "apply-patches",
-            alias = "apply-chunks"
-        )]
-        patch_files: bool,
-
-        /// Delete chunks after applying them to the game files.
-        #[arg(
-            long, default_value_t = true,
-            value_parser = clap::value_parser!(bool),
-            action = ArgAction::Set
-        )]
-        delete_chunks: bool,
-
-        /// Downloader user agent string.
-        #[arg(long)]
-        user_agent: Option<String>,
-
-        /// Downloader proxy.
-        #[arg(long)]
-        proxy: Option<String>,
+        #[command(flatten)]
+        updater: SophonUpdaterArgs,
 
         #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
         output_format: OutputFormat
@@ -396,26 +196,11 @@ enum CliApiCommands {
     /// List information about available games.
     #[command(alias = "games")]
     ListGames {
-        #[arg(
-            long, value_enum, default_value_t = SophonRegion::Global,
-            alias = "edition"
-        )]
-        region: SophonRegion,
+        #[command(flatten)]
+        api_args: SophonApiArgs,
 
-        #[arg(long)]
-        launcher_id: Option<String>,
-
-        /// API request user agent string.
-        #[arg(long)]
-        user_agent: Option<String>,
-
-        /// API request proxy.
-        #[arg(long)]
-        proxy: Option<String>,
-
-        /// API request timeout in seconds.
-        #[arg(long)]
-        timeout: Option<String>,
+        #[command(flatten)]
+        api_client: SophonApiClientArgs,
 
         #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
         output_format: OutputFormat
@@ -432,33 +217,19 @@ enum CliApiCommands {
         alias = "categories"
     )]
     ListComponents {
+        /// Game name or identifier.
         #[arg(index = 1, required = true)]
-        game: String,
+        game_id: String,
 
-        #[arg(
-            long, value_enum, default_value_t = SophonRegion::Global,
-            alias = "edition"
-        )]
-        region: SophonRegion,
-
-        #[arg(long)]
-        launcher_id: Option<String>,
+        #[command(flatten)]
+        api_args: SophonApiArgs,
 
         /// Show all non-standard components.
         #[arg(long)]
         show_all: bool,
 
-        /// API request user agent string.
-        #[arg(long)]
-        user_agent: Option<String>,
-
-        /// API request proxy.
-        #[arg(long)]
-        proxy: Option<String>,
-
-        /// API request timeout in seconds.
-        #[arg(long)]
-        timeout: Option<String>,
+        #[command(flatten)]
+        api_client: SophonApiClientArgs,
 
         #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
         output_format: OutputFormat
@@ -471,29 +242,15 @@ enum CliApiCommands {
         alias = "list-game-versions"
     )]
     GameVersions {
+        /// Game name or identifier.
         #[arg(index = 1, required = true)]
-        game: String,
+        game_id: String,
 
-        #[arg(
-            long, value_enum, default_value_t = SophonRegion::Global,
-            alias = "edition"
-        )]
-        region: SophonRegion,
+        #[command(flatten)]
+        api_args: SophonApiArgs,
 
-        #[arg(long)]
-        launcher_id: Option<String>,
-
-        /// API request user agent string.
-        #[arg(long)]
-        user_agent: Option<String>,
-
-        /// API request proxy.
-        #[arg(long)]
-        proxy: Option<String>,
-
-        /// API request timeout in seconds.
-        #[arg(long)]
-        timeout: Option<String>,
+        #[command(flatten)]
+        api_client: SophonApiClientArgs,
 
         #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
         output_format: OutputFormat
@@ -507,39 +264,29 @@ enum CliApiCommands {
         alias = "download-info"
     )]
     GameDownloadInfo {
+        /// Game name or identifier.
         #[arg(index = 1, required = true)]
-        game: String,
+        game_id: String,
 
+        /// Component name or identifier.
         #[arg(index = 2, default_value_t = String::from("game"))]
-        component: String,
+        component_id: String,
 
+        /// Game version.
+        ///
+        /// If unset, the latest one is used.
         #[arg(index = 3)]
         version: Option<String>,
 
-        #[arg(
-            long, value_enum, default_value_t = SophonRegion::Global,
-            alias = "edition"
-        )]
-        region: SophonRegion,
-
-        #[arg(long)]
-        launcher_id: Option<String>,
+        #[command(flatten)]
+        api_args: SophonApiArgs,
 
         /// Show files that match the regex.
         #[arg(long)]
         regex: Option<String>,
 
-        /// API request user agent string.
-        #[arg(long)]
-        user_agent: Option<String>,
-
-        /// API request proxy.
-        #[arg(long)]
-        proxy: Option<String>,
-
-        /// API request timeout in seconds.
-        #[arg(long)]
-        timeout: Option<String>,
+        #[command(flatten)]
+        api_client: SophonApiClientArgs,
 
         #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
         output_format: OutputFormat
@@ -567,257 +314,157 @@ fn main() -> anyhow::Result<()> {
 
     match cli.command {
         CliCommands::Api(CliApiCommands::ListGames {
-            region,
-            launcher_id,
-            user_agent,
-            proxy,
-            timeout,
+            api_args,
+            api_client,
             output_format
         }) => {
-            let timeout = timeout.as_deref()
-                .map(|timeout| {
-                    parse_time_str(timeout)
-                        .ok_or_else(|| anyhow::anyhow!("invalid timeout value"))
-                })
-                .transpose()?;
-
             list_games::run(
-                region,
-                launcher_id,
-                user_agent,
-                proxy,
-                timeout,
+                api_args,
+                api_client,
                 output_format,
                 cli.ascii
             )
         }
 
         CliCommands::Api(CliApiCommands::ListComponents {
-            game,
-            region,
-            launcher_id,
+            game_id,
+            api_args,
             show_all,
-            user_agent,
-            proxy,
-            timeout,
+            api_client,
             output_format
         }) => {
-            let timeout = timeout.as_deref()
-                .map(|timeout| {
-                    parse_time_str(timeout)
-                        .ok_or_else(|| anyhow::anyhow!("invalid timeout value"))
-                })
-                .transpose()?;
-
             list_components::run(
-                game,
-                region,
-                launcher_id,
+                game_id,
+                api_args,
                 show_all,
-                user_agent,
-                proxy,
-                timeout,
+                api_client,
                 output_format,
                 cli.ascii
             )
         }
 
         CliCommands::Api(CliApiCommands::GameVersions {
-            game,
-            region,
-            launcher_id,
-            user_agent,
-            proxy,
-            timeout,
+            game_id,
+            api_args,
+            api_client,
             output_format
         }) => {
-            let timeout = timeout.as_deref()
-                .map(|timeout| {
-                    parse_time_str(timeout)
-                        .ok_or_else(|| anyhow::anyhow!("invalid timeout value"))
-                })
-                .transpose()?;
-
             game_versions::run(
-                game,
-                region,
-                launcher_id,
-                user_agent,
-                proxy,
-                timeout,
+                game_id,
+                api_args,
+                api_client,
                 output_format,
                 cli.ascii
             )
         }
 
         CliCommands::Api(CliApiCommands::GameDownloadInfo {
-            game,
-            component,
+            game_id,
+            component_id,
             version,
-            region,
-            launcher_id,
+            api_args,
             regex,
-            user_agent,
-            proxy,
-            timeout,
+            api_client,
             output_format
         }) => {
-            let timeout = timeout.as_deref()
-                .map(|timeout| {
-                    parse_time_str(timeout)
-                        .ok_or_else(|| anyhow::anyhow!("invalid timeout value"))
-                })
-                .transpose()?;
-
             download_info::run(
-                game,
-                component,
+                game_id,
+                component_id,
                 version,
-                region,
-                launcher_id,
+                api_args,
                 regex,
-                user_agent,
-                proxy,
-                timeout,
+                api_client,
                 output_format,
                 cli.ascii
             )
         }
 
         CliCommands::Detect {
-            path,
-            user_agent,
-            proxy,
-            output_format
-        } => detect_game::run(
-            path,
-            user_agent,
-            proxy,
-            output_format,
-            cli.ascii
-        ),
-
-        CliCommands::Verify {
-            game,
-            path,
-            region,
-            launcher_id,
-            version,
-            component,
-            regex,
-            fast_verify,
-            user_agent,
-            proxy,
-            output_format
-        } => verify_game::run(
-            game,
-            component,
-            version,
-            path,
-            region,
-            launcher_id,
-            regex,
-            fast_verify,
-            user_agent,
-            proxy,
-            output_format
-        ),
-
-        CliCommands::Download {
-            game,
-            path,
-            region,
-            launcher_id,
-            version,
-            component,
-            regex,
-            threads,
-            target_memory_usage,
-            chunk_download_attempts,
-            verify_manifest,
-            verify_chunks,
-            verify_before_downloading,
-            user_agent,
-            proxy,
+            game_dir,
+            api_client,
             output_format
         } => {
-            let target_memory_usage = parse_memory_str(&target_memory_usage)
-                .ok_or_else(|| anyhow::anyhow!("invalid target_memory_usage value"))?;
-
-            download_game::run(
-                game,
-                component,
-                version,
-                path,
-                region,
-                launcher_id,
-                regex,
-                threads,
-                target_memory_usage,
-                chunk_download_attempts,
-                verify_manifest,
-                verify_chunks,
-                verify_before_downloading,
-                user_agent,
-                proxy,
+            detect_game::run(
+                game_dir,
+                api_client,
                 output_format,
                 cli.ascii
             )
         }
 
+        CliCommands::Verify {
+            game_id,
+            game_dir,
+            api_args,
+            component,
+            version,
+            regex,
+            fast_verify,
+            api_client,
+            output_format
+        } => {
+            verify_game::run(
+                game_id,
+                game_dir,
+                api_args,
+                component,
+                version,
+                regex,
+                fast_verify,
+                api_client,
+                output_format
+            )
+        }
+
+        CliCommands::Download {
+            game_id,
+            game_dir,
+            api_args,
+            component,
+            version,
+            regex,
+            api_client,
+            downloader,
+            output_format
+        } => {
+            download_game::run(
+                game_id,
+                game_dir,
+                api_args,
+                component,
+                version,
+                regex,
+                api_client,
+                downloader,
+                output_format
+            )
+        }
+
         CliCommands::Update {
-            game,
-            path,
-            region,
-            launcher_id,
+            game_id,
+            game_dir,
+            api_args,
+            component,
             from_version,
             to_version,
             chunks_dir,
-            component,
             regex,
-            threads,
-            hpatchz_binary,
-            target_memory_usage,
-            chunk_download_attempts,
-            verify_manifest,
-            verify_chunks,
-            verify_before_updating,
-            verify_before_patching,
-            delete_unused_files,
-            patch_files,
-            delete_chunks,
-            user_agent,
-            proxy,
+            api_client,
+            updater,
             output_format
         } => {
-            let target_memory_usage = parse_memory_str(&target_memory_usage)
-                .ok_or_else(|| anyhow::anyhow!("invalid target_memory_usage value"))?;
-
             update_game::run(
-                game,
+                game_id,
+                game_dir,
+                api_args,
                 component,
                 from_version,
                 to_version,
                 chunks_dir,
-                path,
-                region,
-                launcher_id,
                 regex,
-                threads,
-                hpatchz_binary,
-                target_memory_usage,
-                chunk_download_attempts,
-                verify_manifest,
-                verify_chunks,
-                verify_before_updating,
-                verify_before_patching,
-                delete_unused_files,
-                patch_files,
-                delete_chunks,
-                user_agent,
-                proxy,
-                output_format,
-                cli.ascii
+                api_client,
+                updater,
+                output_format
             )
         }
     }

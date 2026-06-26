@@ -17,18 +17,12 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-use std::time::Duration;
-
-use sophon_lib::api::SophonApi;
-
-use super::*;
+use crate::args::*;
+use crate::commands::*;
 
 pub fn run(
-    region: SophonRegion,
-    launcher_id: Option<String>,
-    user_agent: Option<String>,
-    proxy: Option<String>,
-    timeout: Option<Duration>,
+    api_args: SophonApiArgs,
+    api_client: SophonApiClientArgs,
     output_format: OutputFormat,
     ascii: bool
 ) -> anyhow::Result<()> {
@@ -36,12 +30,11 @@ pub fn run(
         .enable_all()
         .build()?;
 
-    let api = SophonApi::from(reqwest_client(user_agent, proxy)?.build()?)
-        .with_timeout_all(timeout.unwrap_or(Duration::MAX));
+    let api = api_client.build()?;
 
     let future = api.fetch_games_branches_info(
-        region.into(),
-        launcher_id
+        api_args.region.into(),
+        api_args.launcher_id
     );
 
     let games_branches = runtime.block_on(future)

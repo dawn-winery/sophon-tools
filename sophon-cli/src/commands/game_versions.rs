@@ -17,20 +17,13 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-use std::time::Duration;
-
-use sophon_lib::api::SophonApi;
-
-use super::*;
+use crate::args::*;
 
 #[allow(clippy::too_many_arguments)]
 pub fn run(
     game_id: String,
-    region: SophonRegion,
-    launcher_id: Option<String>,
-    user_agent: Option<String>,
-    proxy: Option<String>,
-    timeout: Option<Duration>,
+    api_args: SophonApiArgs,
+    api_client: SophonApiClientArgs,
     output_format: OutputFormat,
     ascii: bool
 ) -> anyhow::Result<()> {
@@ -38,10 +31,13 @@ pub fn run(
         .enable_all()
         .build()?;
 
-    let api = SophonApi::from(reqwest_client(user_agent, proxy)?.build()?)
-        .with_timeout_all(timeout.unwrap_or(Duration::MAX));
+    let api = api_client.build()?;
 
-    let game = api.game(region.into(), launcher_id, game_id);
+    let game = api.game(
+        api_args.region.into(),
+        api_args.launcher_id,
+        game_id
+    );
 
     let game_versions = runtime.block_on(game.fetch_versions_info())
         .map_err(|err| anyhow::anyhow!(err.to_string()))?;

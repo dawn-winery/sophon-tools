@@ -21,41 +21,24 @@ use std::path::PathBuf;
 
 use regex::Regex;
 
-use sophon_lib::api::SophonApi;
-use sophon_lib::updater::SophonUpdater;
-use sophon_lib::patcher::HdiffPatcher;
-
-use super::*;
+use crate::args::*;
 
 #[allow(clippy::too_many_arguments)]
 pub fn run(
     game_id: String,
-    component_id: String,
+    game_dir: PathBuf,
+    api_args: SophonApiArgs,
+    component: SophonApiGameComponentArg,
     from_version: Option<String>,
     to_version: Option<String>,
     chunks_dir: PathBuf,
-    update_dir: PathBuf,
-    region: SophonRegion,
-    launcher_id: Option<String>,
     regex: Option<String>,
-    threads: usize,
-    hpatchz_binary: Option<PathBuf>,
-    target_memory_usage: u64,
-    chunk_download_attempts: u8,
-    verify_manifest: VerifyMethod,
-    verify_chunks: VerifyMethod,
-    verify_before_updating: VerifyMethod,
-    verify_before_patching: VerifyMethod,
-    delete_unused_files: bool,
-    patch_files: bool,
-    delete_chunks: bool,
-    user_agent: Option<String>,
-    proxy: Option<String>,
-    _output_format: OutputFormat,
-    _ascii: bool
+    api_client: SophonApiClientArgs,
+    updater: SophonUpdaterArgs,
+    _output_format: OutputFormat
 ) -> anyhow::Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(threads.max(1))
+        .worker_threads(updater.threads.max(1))
         .enable_all()
         .build()?;
 
@@ -63,15 +46,19 @@ pub fn run(
         .map(Regex::new)
         .transpose()?;
 
-    let api = SophonApi::from(reqwest_client(user_agent, proxy)?.build()?);
+    let api = api_client.build()?;
 
-    let game = api.game(region.into(), launcher_id, game_id);
+    let game = api.game(
+        api_args.region.into(),
+        api_args.launcher_id,
+        game_id
+    );
 
     // Detect current game version.
     let from_version = match from_version {
         Some(version) => version,
         None => {
-            runtime.block_on(game.detect_version(&update_dir))
+            runtime.block_on(game.detect_version(&game_dir))
                 .map_err(|err| anyhow::anyhow!(err.to_string()))?
                 .ok_or_else(|| anyhow::anyhow!("failed to detect installed game version"))?
         }
@@ -81,25 +68,16 @@ pub fn run(
     let package = runtime.block_on(game.package(to_version))
         .map_err(|err| anyhow::anyhow!(err.to_string()))?;
 
-    let Some(update_manifest) = runtime.block_on(package.find_update_manifest(&component_id))
+    let Some(update_manifest) = runtime.block_on(package.find_update_manifest(&component.component))
         .map_err(|err| anyhow::anyhow!(err.to_string()))?
     else {
         return Ok(());
     };
 
     // Prepare game updater.
-    let mut updater = SophonUpdater::default()
+    let mut updater = updater.build()?
         .with_client(api.into())
-        .with_runtime(runtime.handle().clone())
-        .with_target_memory_usage(target_memory_usage)
-        .with_chunk_download_attempts(chunk_download_attempts)
-        .with_verify_manifest(verify_manifest.into())
-        .with_verify_chunks(verify_chunks.into())
-        .with_verify_before_updating(verify_before_updating.into())
-        .with_verify_before_patching(verify_before_patching.into())
-        .with_delete_unused_files(delete_unused_files)
-        .with_patch_files(patch_files)
-        .with_delete_chunks(delete_chunks);
+        .with_runtime(runtime.handle().clone());
 
     if let Some(regex) = regex {
         updater = updater.with_assets_filter(Box::new(move |asset| {
@@ -107,15 +85,11 @@ pub fn run(
         }));
     }
 
-    if let Some(patcher) = hpatchz_binary {
-        updater = updater.with_patcher(HdiffPatcher::from(patcher));
-    }
-
     runtime.block_on(updater.update(
         &update_manifest,
         &from_version,
         &chunks_dir,
-        &update_dir
+        &game_dir
     ))?;
 
     Ok(())

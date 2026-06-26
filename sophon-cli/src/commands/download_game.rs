@@ -21,33 +21,23 @@ use std::path::PathBuf;
 
 use regex::Regex;
 
-use sophon_lib::api::SophonApi;
-use sophon_lib::downloader::SophonDownloader;
-
-use super::*;
+use crate::args::*;
+use crate::commands::*;
 
 #[allow(clippy::too_many_arguments)]
 pub fn run(
     game_id: String,
-    component_id: String,
+    game_dir: PathBuf,
+    api_args: SophonApiArgs,
+    component: SophonApiGameComponentArg,
     version: Option<String>,
-    path: PathBuf,
-    region: SophonRegion,
-    launcher_id: Option<String>,
     regex: Option<String>,
-    threads: usize,
-    target_memory_usage: u64,
-    chunk_download_attempts: u8,
-    verify_manifest: VerifyMethod,
-    verify_chunks: VerifyMethod,
-    verify_before_downloading: VerifyMethod,
-    user_agent: Option<String>,
-    proxy: Option<String>,
-    output_format: OutputFormat,
-    _ascii: bool
+    api_client: SophonApiClientArgs,
+    downloader: SophonDownloaderArgs,
+    output_format: OutputFormat
 ) -> anyhow::Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(threads.max(1))
+        .worker_threads(downloader.threads.max(1))
         .enable_all()
         .build()?;
 
@@ -55,29 +45,28 @@ pub fn run(
         .map(Regex::new)
         .transpose()?;
 
-    let api = SophonApi::from(reqwest_client(user_agent, proxy)?.build()?);
+    let api = api_client.build()?;
 
-    let game = api.game(region.into(), launcher_id, game_id);
+    let game = api.game(
+        api_args.region.into(),
+        api_args.launcher_id,
+        game_id
+    );
 
     // Fetch game download manifest.
     let package = runtime.block_on(game.package(version))
         .map_err(|err| anyhow::anyhow!(err.to_string()))?;
 
-    let Some(download_manifest) = runtime.block_on(package.find_download_manifest(&component_id))
+    let Some(download_manifest) = runtime.block_on(package.find_download_manifest(&component.component))
         .map_err(|err| anyhow::anyhow!(err.to_string()))?
     else {
         return Ok(());
     };
 
     // Prepare downloader.
-    let mut downloader = SophonDownloader::default()
+    let mut downloader = downloader.build()?
         .with_client(api.into())
-        .with_runtime(runtime.handle().clone())
-        .with_target_memory_usage(target_memory_usage)
-        .with_chunk_download_attempts(chunk_download_attempts)
-        .with_verify_manifest(verify_manifest.into())
-        .with_verify_chunks(verify_chunks.into())
-        .with_verify_before_downloading(verify_before_downloading.into());
+        .with_runtime(runtime.handle().clone());
 
     if let Some(regex) = regex {
         downloader = downloader.with_assets_filter(Box::new(move |asset| {
@@ -98,7 +87,7 @@ pub fn run(
 
             runtime.block_on(downloader.download(
                 &download_manifest,
-                &path,
+                &game_dir,
                 Box::new(move |current, total| {
                     view.update(move |model| {
                         model.current = current;
@@ -111,7 +100,7 @@ pub fn run(
         OutputFormat::Json => {
             runtime.block_on(downloader.download(
                 &download_manifest,
-                &path,
+                &game_dir,
                 Box::new(|current, total| {
                     if let Ok(msg) = serde_json::to_string(&serde_json::json!({
                         "current": current,

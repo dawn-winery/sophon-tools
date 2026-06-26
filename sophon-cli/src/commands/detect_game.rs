@@ -20,14 +20,14 @@
 use std::path::PathBuf;
 
 use sophon_lib::region::SophonRegion;
-use sophon_lib::api::{SophonApi, SophonApiError};
+use sophon_lib::api::SophonApiError;
 
-use super::*;
+use crate::args::*;
+use crate::commands::*;
 
 pub fn run(
-    path: PathBuf,
-    user_agent: Option<String>,
-    proxy: Option<String>,
+    game_dir: PathBuf,
+    api_client: SophonApiClientArgs,
     output_format: OutputFormat,
     ascii: bool
 ) -> anyhow::Result<()> {
@@ -35,7 +35,7 @@ pub fn run(
         .enable_all()
         .build()?;
 
-    let api = SophonApi::from(reqwest_client(user_agent, proxy)?.build()?);
+    let api = api_client.build()?;
 
     let mut detected_game = None;
 
@@ -46,7 +46,7 @@ pub fn run(
         for game_branch in games_branches {
             let game = api.game(region, None, game_branch.game_id);
 
-            match runtime.block_on(game.detect_version(&path)) {
+            match runtime.block_on(game.detect_version(&game_dir)) {
                 Ok(Some(version)) => {
                     detected_game = Some((game, version));
 

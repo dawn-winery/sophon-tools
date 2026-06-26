@@ -23,11 +23,11 @@ use std::io::Write;
 
 use regex::Regex;
 
-use sophon_lib::api::SophonApi;
 use sophon_lib::downloader::SophonDownloader;
 use sophon_lib::verifier::{SophonVerifier, VerifyResult};
 
-use super::*;
+use crate::args::*;
+use crate::commands::*;
 
 fn is_regex_match(regex: Option<&Regex>, path: &str) -> bool {
     regex.map(|regex| regex.is_match(path)).unwrap_or(true)
@@ -36,26 +36,24 @@ fn is_regex_match(regex: Option<&Regex>, path: &str) -> bool {
 #[allow(clippy::too_many_arguments)]
 pub fn run(
     game_id: String,
-    component_id: String,
+    game_dir: PathBuf,
+    api_args: SophonApiArgs,
+    component: SophonApiGameComponentArg,
     version: Option<String>,
-    path: PathBuf,
-    region: SophonRegion,
-    launcher_id: Option<String>,
     regex: Option<String>,
     fast_verify: bool,
-    user_agent: Option<String>,
-    proxy: Option<String>,
+    api_client: SophonApiClientArgs,
     output_format: OutputFormat
 ) -> anyhow::Result<()> {
     let regex = regex.as_deref()
         .map(Regex::new)
         .transpose()?;
 
-    if !path.is_dir() {
+    if !game_dir.is_dir() {
         return Ok(());
     }
 
-    let mut entries = VecDeque::from([path]);
+    let mut entries = VecDeque::from([game_dir]);
 
     while let Some(path) = entries.pop_back() {
         if !path.is_dir() {
@@ -85,14 +83,18 @@ pub fn run(
         .enable_all()
         .build()?;
 
-    let api = SophonApi::from(reqwest_client(user_agent, proxy)?.build()?);
+    let api = api_client.build()?;
 
-    let game = api.game(region.into(), launcher_id, game_id);
+    let game = api.game(
+        api_args.region.into(),
+        api_args.launcher_id,
+        game_id
+    );
 
     let package = runtime.block_on(game.package(version))
         .map_err(|err| anyhow::anyhow!(err.to_string()))?;
 
-    let Some(download_manifest) = runtime.block_on(package.find_download_manifest(&component_id))
+    let Some(download_manifest) = runtime.block_on(package.find_download_manifest(&component.component))
         .map_err(|err| anyhow::anyhow!(err.to_string()))?
     else {
         return Ok(());
