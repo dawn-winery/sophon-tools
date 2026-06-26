@@ -17,6 +17,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::path::{Path, PathBuf};
@@ -585,7 +586,7 @@ impl SophonUpdater {
                 })
             ).await?;
 
-            let mut valid_assets = Vec::with_capacity(
+            let mut valid_assets = HashSet::with_capacity(
                 update_manifest.assets.len()
             );
 
@@ -594,17 +595,17 @@ impl SophonUpdater {
                     verifier.verify_file(update_dir.join(&asset.path)).await,
                     Ok(VerifyResult::Valid)
                 ) {
-                    valid_assets.push(asset.path.clone());
+                    valid_assets.insert(asset.path.clone());
                 }
             }
 
-            update_manifest.assets.retain(move |asset| {
+            update_manifest.assets.retain(|asset| {
                 !valid_assets.contains(&asset.path)
             });
         }
 
         // Apply filter function to the list.
-        let mut assets = update_manifest.assets.into_iter()
+        let assets = update_manifest.assets.into_iter()
             .filter(|asset| {
                 self.assets_filter.as_ref()
                     .map(|filter| filter(asset))
@@ -614,19 +615,21 @@ impl SophonUpdater {
 
         // Sort assets by their total chunks size in descending order, so the
         // first assets will have largest total size.
-        assets.sort_by(|a, b| {
-            let a_size = a.chunks.get(update_version)
-                .map(|chunk| chunk.chunk_length);
+        let mut assets = assets.into_iter()
+            .map(|asset| {
+                let size = asset.chunks.get(update_version)
+                    .map(|chunk| chunk.chunk_length);
 
-            let b_size = b.chunks.get(update_version)
-                .map(|chunk| chunk.chunk_length);
+                (asset, size)
+            })
+            .collect::<Vec<_>>();
 
-            b_size.cmp(&a_size)
-        });
+        #[allow(clippy::unnecessary_sort_by)]
+        assets.sort_unstable_by(|a, b| b.1.cmp(&a.1));
 
         // If assets sorter function is provided, then apply it as well.
         if let Some(sorter) = self.assets_sorter {
-            assets.sort_by(sorter);
+            assets.sort_by(|a, b| sorter(&a.0, &b.0));
         }
 
         async fn flatten<T>(
@@ -685,8 +688,7 @@ impl SophonUpdater {
 
         // Pre-calculate tasks queue capacity.
         let median_task_size = assets.get(assets.len() / 3)
-            .and_then(|asset| asset.chunks.get(update_version))
-            .map(|chunk| chunk.chunk_length)
+            .and_then(|(_, size)| *size)
             .unwrap_or(u64::MAX);
 
         let mut tasks = Vec::with_capacity(
@@ -701,10 +703,7 @@ impl SophonUpdater {
         let progress_current = Arc::new(AtomicU64::new(0));
 
         let progress_total = assets.iter()
-            .flat_map(|asset| {
-                asset.chunks.get(update_version)
-                    .map(|chunk| chunk.chunk_length)
-            })
+            .filter_map(|(_, size)| *size)
             .sum::<u64>();
 
         // Create chunks download dir if it doesn't exist.
@@ -713,7 +712,7 @@ impl SophonUpdater {
         }
 
         // Iterate over all the assets we need to update.
-        while let Some(mut asset) = assets.pop() {
+        while let Some((mut asset, _)) = assets.pop() {
             // Skip assets that cannot be updated from the given version. These
             // should be handled separately using downloader as files repairer.
             let Some(chunk) = asset.chunks.remove(update_version) else {
