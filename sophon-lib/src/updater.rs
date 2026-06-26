@@ -1012,11 +1012,37 @@ impl SophonUpdater {
                     // Verify asset before patching it.
                     if self.verify_before_patching != SophonUpdaterVerifyMethod::None {
                         // Verify asset size.
-                        let metadata = tokio::fs::metadata(
+                        let Ok(metadata) = tokio::fs::metadata(
                             &patch_info.asset_path
-                        ).await?;
+                        ).await else {
+                            let current = progress_current.fetch_add(
+                                patch_info.patch_size,
+                                Ordering::Relaxed
+                            );
+
+                            progress_updater(SophonUpdaterProgressMsg::Patch {
+                                current: current + patch_info.patch_size,
+                                total: progress_total,
+                                path: patch_info.asset_path,
+                                result: false
+                            });
+
+                            return Ok(());
+                        };
 
                         if metadata.len() != patch_info.input_asset_size {
+                            let current = progress_current.fetch_add(
+                                patch_info.patch_size,
+                                Ordering::Relaxed
+                            );
+
+                            progress_updater(SophonUpdaterProgressMsg::Patch {
+                                current: current + patch_info.patch_size,
+                                total: progress_total,
+                                path: patch_info.asset_path,
+                                result: false
+                            });
+
                             return Ok(());
                         }
 
@@ -1042,6 +1068,18 @@ impl SophonUpdater {
                             let hash = hex::encode(hasher.finalize());
 
                             if hash != patch_info.input_asset_hash_md5 {
+                                let current = progress_current.fetch_add(
+                                    patch_info.patch_size,
+                                    Ordering::Relaxed
+                                );
+
+                                progress_updater(SophonUpdaterProgressMsg::Patch {
+                                    current: current + patch_info.patch_size,
+                                    total: progress_total,
+                                    path: patch_info.asset_path,
+                                    result: false
+                                });
+
                                 return Ok(());
                             }
                         }
