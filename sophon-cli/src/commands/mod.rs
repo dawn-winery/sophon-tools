@@ -32,13 +32,16 @@ pub struct ProgressBar {
     pub current: u64,
     pub total: u64,
 
+    /// Prefix message.
+    pub prefix: String,
+
     /// Format current and total as bytes.
     pub format_bytes: bool
 }
 
 impl nutmeg::Model for ProgressBar {
     fn render(&mut self, width: usize) -> String {
-        if width < 6 {
+        if width < 7 {
             return String::new();
         }
 
@@ -48,11 +51,15 @@ impl nutmeg::Model for ProgressBar {
             (self.current.to_string(), self.total.to_string())
         };
 
-        if current.len() + total.len() + 6 > width {
+        if current.len() + total.len() + self.prefix.len() + 7 > width {
             return String::new();
         }
 
-        let pb_width = width - current.len() - total.len() - 6;
+        let mut pb_width = width - current.len() - total.len() - 6;
+
+        if !self.prefix.is_empty() {
+            pb_width -= self.prefix.len() + 1;
+        }
 
         let pb_prefix_width = (self.current as f64 * pb_width as f64 / self.total as f64).round() as usize;
         let pb_suffix_width = pb_width.saturating_sub(pb_prefix_width);
@@ -60,7 +67,11 @@ impl nutmeg::Model for ProgressBar {
         let pb_prefix = "#".repeat(pb_prefix_width);
         let pb_suffix = " ".repeat(pb_suffix_width);
 
-        format!("{current} / {total} [{pb_prefix}{pb_suffix}]")
+        if self.prefix.is_empty() {
+            format!("{current} / {total} [{pb_prefix}{pb_suffix}]")
+        } else {
+            format!("{} {current} / {total} [{pb_prefix}{pb_suffix}]", self.prefix)
+        }
     }
 }
 

@@ -19,7 +19,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 use std::io::{Cursor, Read, SeekFrom};
 
@@ -106,6 +106,23 @@ pub enum SophonDownloaderVerifyMethod {
 
     /// Do not verify files.
     None
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum SophonDownloaderUpdate {
+    /// Verify game assets before downloading.
+    Verify {
+        current: u64,
+        total: u64,
+        path: PathBuf,
+        result: VerifyResult
+    },
+
+    /// Download assets chunks.
+    Download {
+        current: u64,
+        total: u64
+    }
 }
 
 pub struct SophonDownloader {
@@ -420,7 +437,7 @@ impl SophonDownloader {
         self,
         download_info: &SophonApiPackageManifest,
         download_dir: &Path,
-        progress_updater: Box<dyn Fn(u64, u64) + Send + Sync>
+        progress_updater: Box<dyn Fn(SophonDownloaderUpdate) + Send + Sync>
     ) -> Result<(), SophonDownloaderError> {
         if download_info.chunk_download.encrypted {
             return Err(SophonDownloaderError::EncryptionNotSupported);
@@ -431,6 +448,8 @@ impl SophonDownloader {
 
         // Clear the cache since it won't be used anymore.
         self.manifest_cache.write().await.clear();
+
+        let progress_updater = Arc::new(progress_updater);
 
         // Skip assets downloading that are valid.
         if self.verify_before_downloading != SophonDownloaderVerifyMethod::None {
@@ -446,10 +465,19 @@ impl SophonDownloader {
                 verifier = verifier.with_fast_verify(true);
             }
 
+            let progress_updater = progress_updater.clone();
+
             // Pre-verify all the directory files in parallel.
             verifier.scan_directory(
                 download_dir.to_path_buf(),
-                Box::new(|_| {})
+                Box::new(move |update| {
+                    progress_updater(SophonDownloaderUpdate::Verify {
+                        current: update.current,
+                        total: update.total,
+                        path: update.path,
+                        result: update.result
+                    });
+                })
             ).await?;
 
             let mut valid_assets = Vec::with_capacity(
@@ -522,7 +550,6 @@ impl SophonDownloader {
             .sum::<u64>();
 
         let progress_current = Arc::new(AtomicU64::new(0));
-        let progress_updater = Arc::new(RwLock::new(progress_updater));
 
         async fn flatten(
             task: tokio::task::JoinHandle<Result<(), SophonDownloaderError>>
@@ -720,15 +747,15 @@ impl SophonDownloader {
 
                     drop(lock);
 
-                    let prev_curr = progress_current.fetch_add(
+                    let current = progress_current.fetch_add(
                         chunk.decompressed_size,
                         Ordering::Relaxed
                     );
 
-                    (progress_updater.read().await)(
-                        prev_curr + chunk.decompressed_size,
-                        progress_total
-                    );
+                    progress_updater(SophonDownloaderUpdate::Download {
+                        current: current + chunk.decompressed_size,
+                        total: progress_total
+                    });
 
                     Ok::<_, SophonDownloaderError>(())
                 };

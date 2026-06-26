@@ -22,7 +22,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::path::{Path, PathBuf};
 use std::collections::{HashMap, VecDeque};
 
-use tokio::sync::RwLock;
 use tokio::fs::File;
 use tokio::io::{BufReader, AsyncReadExt};
 
@@ -50,7 +49,7 @@ pub enum VerifyResult {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct VerifierScanUpdate {
+pub struct SophonVerifierScanUpdate {
     /// Amount of already verified bytes.
     pub current: u64,
 
@@ -200,7 +199,7 @@ impl SophonVerifier {
     pub async fn scan_directory(
         &mut self,
         path: PathBuf,
-        updater: Box<dyn Fn(VerifierScanUpdate) + Send + Sync>
+        updater: Box<dyn Fn(SophonVerifierScanUpdate) + Send + Sync>
     ) -> std::io::Result<()> {
         let mut entries = VecDeque::from([(path, 0)]);
 
@@ -242,7 +241,7 @@ impl SophonVerifier {
             .sum::<u64>();
 
         let progress_current = Arc::new(AtomicU64::new(0));
-        let progress_updater = Arc::new(RwLock::new(updater));
+        let progress_updater = Arc::new(updater);
 
         let tasks_size = self.runtime.as_ref()
             .map(|runtime| runtime.metrics().num_workers())
@@ -273,7 +272,7 @@ impl SophonVerifier {
                     Ordering::Relaxed
                 );
 
-                (progress_updater.read().await)(VerifierScanUpdate {
+                progress_updater(SophonVerifierScanUpdate {
                     current: current + size,
                     total: progress_total,
                     path,
@@ -298,7 +297,7 @@ impl SophonVerifier {
                     Ordering::Relaxed
                 );
 
-                (progress_updater.read().await)(VerifierScanUpdate {
+                progress_updater(SophonVerifierScanUpdate {
                     current: current + size,
                     total: progress_total,
                     path,
@@ -346,7 +345,7 @@ impl SophonVerifier {
                         Ordering::Relaxed
                     );
 
-                    (progress_updater.read().await)(VerifierScanUpdate {
+                    progress_updater(SophonVerifierScanUpdate {
                         current: current + size,
                         total: progress_total,
                         path: path.clone(),
@@ -362,7 +361,7 @@ impl SophonVerifier {
                         Ordering::Relaxed
                     );
 
-                    (progress_updater.read().await)(VerifierScanUpdate {
+                    progress_updater(SophonVerifierScanUpdate {
                         current: current + size,
                         total: progress_total,
                         path: path.clone(),
@@ -402,7 +401,7 @@ impl SophonVerifier {
                     Ordering::Relaxed
                 );
 
-                (progress_updater.read().await)(VerifierScanUpdate {
+                progress_updater(SophonVerifierScanUpdate {
                     current: current + size,
                     total: progress_total,
                     path: path.clone(),

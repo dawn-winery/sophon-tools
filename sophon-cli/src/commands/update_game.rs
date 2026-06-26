@@ -117,7 +117,7 @@ pub fn run(
         runtime.block_on(downloader.download(
             &download_manifest,
             &game_dir,
-            Box::new(|_, _| {})
+            Box::new(|_| {})
         ))?;
     }
 

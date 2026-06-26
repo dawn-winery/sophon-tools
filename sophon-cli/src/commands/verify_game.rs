@@ -121,6 +121,7 @@ pub fn run(
                 ProgressBar {
                     current: 0,
                     total: 0,
+                    prefix: String::from("Verify"),
                     format_bytes: true
                 },
                 nutmeg::Options::new()

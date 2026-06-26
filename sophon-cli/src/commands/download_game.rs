@@ -21,6 +21,9 @@ use std::path::PathBuf;
 
 use regex::Regex;
 
+use sophon_lib::verifier::VerifyResult;
+use sophon_lib::downloader::SophonDownloaderUpdate;
+
 use crate::args::*;
 use crate::commands::*;
 
@@ -80,6 +83,7 @@ pub fn run(
                 ProgressBar {
                     current: 0,
                     total: 0,
+                    prefix: String::new(),
                     format_bytes: true
                 },
                 nutmeg::Options::default()
@@ -88,10 +92,28 @@ pub fn run(
             runtime.block_on(downloader.download(
                 &download_manifest,
                 &game_dir,
-                Box::new(move |current, total| {
+                Box::new(move |update| {
                     view.update(move |model| {
-                        model.current = current;
-                        model.total = total
+                        match update {
+                            SophonDownloaderUpdate::Verify {
+                                current,
+                                total,
+                                ..
+                            } => {
+                                model.current = current;
+                                model.total = total;
+                                model.prefix = String::from("Verify");
+                            }
+
+                            SophonDownloaderUpdate::Download {
+                                current,
+                                total
+                            } => {
+                                model.current = current;
+                                model.total = total;
+                                model.prefix = String::from("Download");
+                            }
+                        }
                     })
                 })
             ))?;
@@ -101,11 +123,39 @@ pub fn run(
             runtime.block_on(downloader.download(
                 &download_manifest,
                 &game_dir,
-                Box::new(|current, total| {
-                    if let Ok(msg) = serde_json::to_string(&serde_json::json!({
-                        "current": current,
-                        "total": total
-                    })) {
+                Box::new(|update| {
+                    let msg = match update {
+                        SophonDownloaderUpdate::Verify {
+                            current,
+                            total,
+                            path,
+                            result
+                        } => {
+                            serde_json::to_string(&serde_json::json!({
+                                "verify": {
+                                    "current": current,
+                                    "total": total,
+                                    "path": path,
+                                    "result": match result {
+                                        VerifyResult::Valid => "valid",
+                                        VerifyResult::Invalid => "invalid",
+                                        VerifyResult::Unknown => "unknown"
+                                    }
+                                }
+                            }))
+                        }
+
+                        SophonDownloaderUpdate::Download { current, total } => {
+                            serde_json::to_string(&serde_json::json!({
+                                "download": {
+                                    "current": current,
+                                    "total": total
+                                }
+                            }))
+                        }
+                    };
+
+                    if let Ok(msg) = msg {
                         println!("{msg}");
                     }
                 })
