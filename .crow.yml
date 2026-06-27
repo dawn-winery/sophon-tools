@@ -4,7 +4,7 @@ when:
     path: ['.crow/*', 'Cargo.toml', 'Cargo.lock', '**/*.rs']
   - event: pull_request
   - event: tag
-    ref: "v*"
+    ref: ref/tags/v*
   - event: manual
 
 labels:
@@ -42,6 +42,6 @@ steps:
         from_secret: FORGEJO_TOKEN
       files:
         - sophon-tools
-      base_url: https://dawn.wine
+      title: sophon-cli $CI_COMMIT_TAG
     when:
       - event: tag
