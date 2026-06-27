@@ -177,8 +177,8 @@ impl SophonVerifier {
 
     /// Get list of assets info stored in the verifier.
     #[inline]
-    pub fn assets(&self) -> impl Iterator<Item = &'_ SophonVerifierAsset> {
-        self.assets.iter()
+    pub fn assets(&self) -> &[SophonVerifierAsset] {
+        &self.assets
     }
 
     /// Clear verifications results cache.
@@ -205,7 +205,13 @@ impl SophonVerifier {
 
         let mut entries = VecDeque::from([(path, 0)]);
 
-        while let Some((path, _)) = entries.pop_back() && path.is_dir() {
+        while let Some((path, size)) = entries.pop_back() {
+            if !path.is_dir() {
+                entries.push_front((path, size));
+
+                break;
+            }
+
             let mut reader = tokio::fs::read_dir(&path).await?;
 
             while let Some(entry) = reader.next_entry().await? {
