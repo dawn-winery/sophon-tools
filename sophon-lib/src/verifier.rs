@@ -313,6 +313,56 @@ impl SophonVerifier {
                 continue;
             };
 
+            // Do fast asset size verification outside of async runtime.
+            let result = if size != asset.size {
+                let current = progress_current.fetch_add(
+                    size,
+                    Ordering::Relaxed
+                );
+
+                progress_updater(SophonVerifierScanUpdate {
+                    current: current + size,
+                    total: progress_total,
+                    path: path.clone(),
+                    result: VerifyResult::Unknown
+                });
+
+                Some(VerifyResult::Invalid)
+            } else if self.fast_verify {
+                let current = progress_current.fetch_add(
+                    size,
+                    Ordering::Relaxed
+                );
+
+                progress_updater(SophonVerifierScanUpdate {
+                    current: current + size,
+                    total: progress_total,
+                    path: path.clone(),
+                    result: VerifyResult::Valid
+                });
+
+                Some(VerifyResult::Valid)
+            } else {
+                None
+            };
+
+            match result {
+                Some(VerifyResult::Valid) => {
+                    self.cache.insert(path, true);
+
+                    continue;
+                }
+
+                Some(VerifyResult::Invalid) => {
+                    self.cache.insert(path, false);
+
+                    continue;
+                }
+
+                Some(VerifyResult::Unknown) => continue,
+                None => ()
+            };
+
             if tasks.len() >= tasks_size {
                 #[cfg(feature = "tracing")]
                 tracing::debug!(
@@ -335,48 +385,12 @@ impl SophonVerifier {
             }
 
             #[cfg(feature = "tracing")]
-            tracing::trace!(?path, "schedule file verifying");
+            tracing::trace!(?path, "schedule file hash verifying");
 
             let progress_current = progress_current.clone();
             let progress_updater = progress_updater.clone();
 
-            let fast_verify = self.fast_verify;
-
             let future = async move {
-                let metadata = tokio::fs::metadata(&path).await?;
-
-                if metadata.len() != asset.size {
-                    let current = progress_current.fetch_add(
-                        size,
-                        Ordering::Relaxed
-                    );
-
-                    progress_updater(SophonVerifierScanUpdate {
-                        current: current + size,
-                        total: progress_total,
-                        path: path.clone(),
-                        result: VerifyResult::Invalid
-                    });
-
-                    return Ok((path, VerifyResult::Invalid));
-                }
-
-                else if fast_verify {
-                    let current = progress_current.fetch_add(
-                        size,
-                        Ordering::Relaxed
-                    );
-
-                    progress_updater(SophonVerifierScanUpdate {
-                        current: current + size,
-                        total: progress_total,
-                        path: path.clone(),
-                        result: VerifyResult::Valid
-                    });
-
-                    return Ok((path, VerifyResult::Valid));
-                }
-
                 let mut file = BufReader::with_capacity(
                     64 * 1024,
                     File::open(&path).await?
