@@ -40,7 +40,8 @@ pub mod updater;
 pub fn client_builder() -> reqwest::ClientBuilder {
     reqwest::ClientBuilder::new()
         .user_agent(format!("sophon-tools/v{VERSION}"))
+        .connect_timeout(Duration::from_secs(20))
         .pool_idle_timeout(Duration::from_secs(180))
-        .http2_keep_alive_interval(Some(Duration::from_secs(20)))
-        .http2_keep_alive_timeout(Duration::from_secs(10))
+        .http2_keep_alive_interval(Some(Duration::from_secs(30)))
+        .http2_keep_alive_timeout(Duration::from_secs(20))
 }
