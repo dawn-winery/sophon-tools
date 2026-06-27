@@ -32,9 +32,6 @@ pub mod protos;
 pub mod verifier;
 pub mod downloader;
 
-// pub mod version;
 // pub mod utils;
 // pub mod protos;
-// pub mod error;
-// pub mod installer;
 // pub mod updater;
