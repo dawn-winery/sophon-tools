@@ -29,19 +29,12 @@ steps:
       - event: [tag, manual]
 
   - name: release
-    image: alpine:3.24
-    commands:
-      - apk add --no-cache curl jq
-      - |
-        set -e
-        api="https://dawn.wine/api/v1/repos/${CI_REPO}"
-        release_id=$(curl -sS -H "Authorization: Bearer $FORGEJO_TOKEN" \
-          "${api}/releases/tags/${CI_TAG}" | jq -r '.id')
-        [ "$release_id" != "null" ] || { echo "Release not found for tag ${CI_TAG}"; exit 1; }
-        curl -X POST -S \
-          -H "Authorization: Bearer $FORGEJO_TOKEN" \
-          -F "attachment=@sophon-tools" \
-          "${api}/releases/${release_id}/assets"
+    image: woodpeckerci/plugin-release
+    settings:
+      api_key:
+        from_secret: FORGEJO_TOKEN
+      files:
+        - sophon-tools
+      base_url: https://dawn.wine
     when:
       - event: tag
-    secrets: [FORGEJO_TOKEN]
