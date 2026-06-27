@@ -1,7 +1,7 @@
 when:
   - event: push
     branch: ${CI_REPO_DEFAULT_BRANCH}
-    path: ['.crow/*', 'Cargo.toml', 'Cargo.lock', '**/*.rs']
+    path: ['.crow.yml', 'Cargo.toml', 'Cargo.lock', '**/*.rs']
   - event: pull_request
   - event: tag
     ref: ref/tags/v*
