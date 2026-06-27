@@ -20,8 +20,8 @@ steps:
       - rustup target add x86_64-unknown-linux-musl
       - cargo check --target x86_64-unknown-linux-musl --verbose
     when:
-      - event: [push, pull_request]
-        path: ['.crow/*', 'Cargo.toml', 'Cargo.lock', '**/*.rs']
+      - event: [push, pull_request, manual]
+        path: ['Cargo.toml', 'Cargo.lock', '**/*.rs']
 
   - name: build
     image: rust:trixie
