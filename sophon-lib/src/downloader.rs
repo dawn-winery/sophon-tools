@@ -173,6 +173,22 @@ impl Default for SophonDownloader {
     }
 }
 
+impl From<reqwest::Client> for SophonDownloader {
+    fn from(client: reqwest::Client) -> Self {
+        Self {
+            client,
+            ..Self::default()
+        }
+    }
+}
+
+impl From<SophonDownloader> for reqwest::Client {
+    #[inline]
+    fn from(value: SophonDownloader) -> Self {
+        value.client
+    }
+}
+
 impl SophonDownloader {
     pub fn with_client(mut self, client: reqwest::Client) -> Self {
         self.client = client;

@@ -198,6 +198,22 @@ impl Default for SophonUpdater {
     }
 }
 
+impl From<reqwest::Client> for SophonUpdater {
+    fn from(client: reqwest::Client) -> Self {
+        Self {
+            client,
+            ..Self::default()
+        }
+    }
+}
+
+impl From<SophonUpdater> for reqwest::Client {
+    #[inline]
+    fn from(value: SophonUpdater) -> Self {
+        value.client
+    }
+}
+
 impl SophonUpdater {
     pub fn with_client(mut self, client: reqwest::Client) -> Self {
         self.client = client;
