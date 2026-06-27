@@ -15,10 +15,38 @@ steps:
     image: rust:trixie
     commands:
       - apt-get update
-      - apt-get install -y protobuf-compiler musl-tools
+      - apt-get install -y protobuf-compiler musl-tools jq
       - ln -sf /usr/bin/musl-gcc /usr/local/bin/x86_64-unknown-linux-musl-gcc
       - rustup target add x86_64-unknown-linux-musl
-      - cargo check --target x86_64-unknown-linux-musl --verbose
+      - cargo build --target x86_64-unknown-linux-musl --bin sophon-cli --verbose
+      - BINARY=target/x86_64-unknown-linux-musl/debug/sophon-cli
+
+      # api list-games: verify known game biz
+      - $BINARY api list-games --output-format json | jq -e '
+          [.[].game.biz] | contains(["nap_global", "hkrpg_global", "hk4e_global", "bh3_global"])
+        '
+
+      # api list-components: verify known component names
+      - $BINARY api list-components nap_global --output-format json | jq -e '
+          [.[].name] | contains(["game", "en-us", "zh-cn", "ja-jp", "ko-kr"])
+        '
+
+      # api game-versions: verify output is a non-empty array
+      - $BINARY api game-versions nap_global --output-format json | jq -e '
+          length > 0 and all(has("version") and has("hash_md5"))
+        '
+
+      # api game-download-info: verify structure of returned manifest and chunks
+      - $BINARY api game-download-info nap_global --output-format json | jq -e '
+          length > 0 and all(
+            has("path") and has("size") and has("hash_md5") and
+            (.chunks | length > 0 and all(
+              has("name") and has("offset") and
+              (.compressed | has("size") and has("hash_md5")) and
+              (.decompressed | has("size") and has("hash_md5"))
+            ))
+          )
+        '
     when:
       - event: [push, pull_request, manual]
         path: ['Cargo.toml', 'Cargo.lock', '**/*.rs']
