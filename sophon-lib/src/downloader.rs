@@ -439,7 +439,7 @@ impl SophonDownloader {
         self,
         download_info: &SophonApiPackageManifest,
         download_dir: &Path,
-        progress_updater: Box<dyn Fn(SophonDownloaderProgressMsg) + Send + Sync>
+        progress_updater: Arc<dyn Fn(SophonDownloaderProgressMsg) + Send + Sync>
     ) -> Result<(), SophonDownloaderError> {
         if download_info.chunk_download.encrypted {
             return Err(SophonDownloaderError::EncryptionNotSupported);
@@ -455,9 +455,6 @@ impl SophonDownloader {
         // is not cloned anywhere else this will allow us to obtain it without
         // extra memory allocs.
         let mut download_manifest = Arc::unwrap_or_clone(download_manifest);
-
-        // Prepare Arc of the updater since it will be passed to many contexts.
-        let progress_updater = Arc::new(progress_updater);
 
         // Skip assets downloading that are valid.
         if self.verify_before_downloading != SophonDownloaderVerifyMethod::None {

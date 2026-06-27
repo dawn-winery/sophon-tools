@@ -17,6 +17,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+use std::sync::Arc;
 use std::path::PathBuf;
 
 use regex::Regex;
@@ -92,7 +93,7 @@ pub fn run(
             runtime.block_on(downloader.download(
                 &download_manifest,
                 &game_dir,
-                Box::new(move |update| {
+                Arc::new(move |update| {
                     view.update(move |model| {
                         match update {
                             SophonDownloaderProgressMsg::Verify {
@@ -123,7 +124,7 @@ pub fn run(
             runtime.block_on(downloader.download(
                 &download_manifest,
                 &game_dir,
-                Box::new(|update| {
+                Arc::new(|update| {
                     let msg = match update {
                         SophonDownloaderProgressMsg::Verify {
                             current,

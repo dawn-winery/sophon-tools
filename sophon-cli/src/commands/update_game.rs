@@ -118,7 +118,7 @@ pub fn run(
             &from_version,
             &chunks_dir,
             &game_dir,
-            Box::new(move |update| {
+            Arc::new(move |update| {
                 match output_format {
                     OutputFormat::Text => {
                         match update {
@@ -266,7 +266,7 @@ pub fn run(
         runtime.block_on(downloader.download(
             &download_manifest,
             &game_dir,
-            Box::new(move |update| {
+            Arc::new(move |update| {
                 match output_format {
                     OutputFormat::Text => {
                         match update {

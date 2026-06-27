@@ -544,7 +544,7 @@ impl SophonUpdater {
         update_version: &str,
         chunks_dir: &Path,
         update_dir: &Path,
-        progress_updater: Box<dyn Fn(SophonUpdaterProgressMsg) + Send + Sync>
+        progress_updater: Arc<dyn Fn(SophonUpdaterProgressMsg) + Send + Sync>
     ) -> Result<(), SophonUpdaterError> {
         if update_info.diff_download.encrypted {
             return Err(SophonUpdaterError::EncryptionNotSupported);
@@ -560,9 +560,6 @@ impl SophonUpdater {
         // is not cloned anywhere else this will allow us to obtain it without
         // extra memory allocs.
         let mut update_manifest = Arc::unwrap_or_clone(update_manifest);
-
-        // Prepare Arc of the updater since it will be passed to many contexts.
-        let progress_updater = Arc::new(progress_updater);
 
         // Skip assets downloading that are valid.
         if self.verify_before_updating != SophonUpdaterVerifyMethod::None {
