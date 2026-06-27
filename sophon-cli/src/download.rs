@@ -93,7 +93,8 @@ impl DownloadArgs {
             components.contains(&download_info.matching_field)
                 || (match_extra_components
                     && !(["zh-cn", "en-us", "ja-jp", "ko-kr"]
-                        .contains(&download_info.matching_field.as_str())))
+                        .iter()
+                        .any(|locale| download_info.matching_field.ends_with(locale))))
         });
 
         output.dl_info(&downloads_info)?;
