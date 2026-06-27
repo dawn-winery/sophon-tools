@@ -1,32 +1,46 @@
 [package]
 name = "sophon-lib"
-version = "0.1.8"
-edition = "2024"
+version = "0.2.0"
+authors = [
+    "Nikita Podvirnyi <krypt0nn@vk.com>",
+    "John the Cooling Fan"
+]
+homepage = "https://dawn.wine/dawn-winery/sophon-tools"
+repository = "https://dawn.wine/dawn-winery/sophon-tools"
 license = "GPL-3.0-or-later"
 rust-version = "1.94.1"
+edition = "2024"
+publish = false
 
 [features]
-default = ["vendored-hpatchz"]
+tracing = ["dep:tracing"]
 vendored-hpatchz = []
-paimon = ["dep:paimon"]
-extra-logs = []
+
+default = ["tracing", "vendored-hpatchz"]
+
+[dependencies.reqwest]
+version = "0.13"
+features = [
+    "rustls",
+    "charset",
+    "http2",
+    "socks",
+    "system-proxy"
+]
+default-features = false
 
 [dependencies]
+thiserror = "2.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.52", features = ["rt-multi-thread"] }
+futures-lite = "2.6"
+prost = "0.14"
 zstd = { version = "0.13" }
-reqwest = { version = "0.12", features = ["blocking", "h2", "http2", "json", "rustls-tls", "rustls-tls-webpki-roots", "socks"], default-features = false }
-serde = { version = "1.0.219", features = ["derive"] }
-thiserror = "2.0.16"
-md-5 = "0.10.6"
-tracing = "0.1.41"
-fs2 = "0.4.3"
-crossbeam-channel = "0.5.15"
-bytes = "1.11.0"
-fs_extra = "1.3.0"
-prost = "0.14.3"
-interprocess = "2.4.0"
-rand = "0.10.0"
-paimon = { git = "https://dawn.wine/lily/paimon", version = "0.1.0", optional = true }
+md-5 = "0.11"
+rand = "0.10"
+
+tracing = { version = "0.1", optional = true }
 
 [build-dependencies]
-md-5 = "0.10.6"
-prost-build = "0.14.3"
+prost-build = "0.14"

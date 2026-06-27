@@ -16,7 +16,7 @@ use crate::{
 };
 
 const HPATCHZ_BINARY: &[u8] = include_bytes!("../../external/hpatchz/hpatchz");
-const HPATCHZ_MD5: &str = env!("HPATCHZ_MD5");
+const HPATCHZ_MD5: &str = ""; // env!("HPATCHZ_MD5");
 
 /// Save the hpatchz binary to disk if this is run for the first time. Otherwise, just return the
 /// path

@@ -1,9 +1,12 @@
 [package]
 name = "sophon-cli"
-version = "0.1.8"
-edition = "2024"
+version = "0.1.7"
+homepage = "https://dawn.wine/dawn-winery/sophon-tools"
+repository = "https://dawn.wine/dawn-winery/sophon-tools"
 license = "GPL-3.0-or-later"
 rust-version = "1.94.1"
+edition = "2024"
+publish = false
 
 [dependencies]
 atty = "0.2.14"

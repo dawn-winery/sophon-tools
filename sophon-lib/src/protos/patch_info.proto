@@ -1,0 +1,54 @@
+syntax = "proto3";
+
+package protos;
+
+message SophonPatchInfo {
+    repeated SophonPatchInfoAsset assets = 1;
+
+    map<string, SophonPatchInfoUnusedAsset> unused_assets = 2;
+}
+
+message SophonPatchInfoAsset {
+    // Path to the asset relative to the base game directory.
+    string path = 1;
+
+    // Size of the entire asset in bytes.
+    uint64 size = 2;
+
+    // Hash of the patched asset.
+    string hash_md5 = 3;
+
+    map<string, SophonPatchInfoAssetChunk> chunks = 4;
+}
+
+message SophonPatchInfoAssetChunk {
+    string name = 1;
+    string version = 2;
+    string build_id = 3;
+
+    uint64 chunk_size = 4;
+    string chunk_hash_md5 = 5;
+    uint64 chunk_offset = 6;
+    uint64 chunk_length = 7;
+
+    string asset_name = 8;
+    uint64 asset_size = 9;
+
+    // Hash of the asset before patching.
+    string asset_hash_md5 = 10;
+}
+
+message SophonPatchInfoUnusedAsset {
+    repeated SophonPatchInfoUnusedAssetFile files = 1;
+}
+
+message SophonPatchInfoUnusedAssetFile {
+    // File name.
+    string name = 1;
+
+    // File size in bytes.
+    uint64 size = 2;
+
+    // Hash of the file.
+    string hash_md5 = 3;
+}

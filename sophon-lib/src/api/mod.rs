@@ -1,308 +1,582 @@
-use std::borrow::Cow;
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// sophon-tools
+// Copyright (C) 2026  Nikita Podvirnyi <krypt0nn@vk.com>
+//                     "John the Cooling Fan"
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-use bytes::Bytes;
-use prost::Message;
-use reqwest::blocking::Client;
-use serde::de::DeserializeOwned;
+use std::time::Duration;
 
-use crate::{
-    GameEdition, SophonError,
-    api::schemas::{
-        ApiResponse,
-        game_branches::{GameBranches, PackageInfo},
-        game_configs::GameConfigs,
-        game_scan_info::GameScanInfo,
-        sophon_diff::{SophonDiff, SophonDiffs},
-        sophon_manifests::{SophonDownloadInfo, SophonDownloads},
+use tokio::sync::RwLock;
+
+use serde_json::Value as Json;
+
+pub mod game_branch;
+pub mod game_versions_info;
+pub mod game_configs;
+// pub mod package_patch_info;
+// pub mod package_download_info;
+pub mod game;
+
+use crate::region::SophonRegion;
+
+use game_branch::SophonApiGameBranch;
+use game_versions_info::SophonApiGameVersionsInfo;
+use game_configs::SophonApiGameConfigs;
+use game::SophonApiGame;
+
+#[derive(Debug, thiserror::Error)]
+pub enum SophonApiError {
+    #[error("failed to perform http request: {0}")]
+    Reqwest(#[from] reqwest::Error),
+
+    #[error("failed to deserialize json response: {0}")]
+    Deserialize(#[from] serde_json::Error),
+
+    #[error("sophon API returned invalid status: {code} {message}")]
+    InvalidSophonStatus {
+        code: i32,
+        message: String
     },
-    protos::{SophonManifestProto, SophonPatchProto},
-};
 
-pub mod schemas;
+    #[error("sophon API returned invalid response")]
+    InvalidSophonResponse,
 
-// URLs
+    #[error("sophon api with region '{region:?}' and launcher id '{launcher_id}' doesn't contain information about the game with id '{game_id}'")]
+    GameNotFound {
+        region: SophonRegion,
+        launcher_id: String,
+        game_id: String
+    },
 
-fn get_game_branches_url(edition: &GameEdition) -> String {
-    format!(
-        "{}/hyp/hyp-connect/api/getGameBranches?launcher_id={}",
-        edition.branches_host(),
-        edition.launcher_id()
-    )
+    #[error(transparent)]
+    Other(Box<dyn std::error::Error>)
 }
 
-fn get_game_scan_info_url(edition: &GameEdition) -> String {
-    format!(
-        "{}/hyp/hyp-connect/api/getGameScanInfo?launcher_id={}",
-        edition.branches_host(),
-        edition.launcher_id()
-    )
+#[derive(Debug, serde::Deserialize)]
+struct SophonApiResponse<T> {
+    pub retcode: i32,
+    pub message: String,
+    pub data: Option<T>
 }
 
-fn get_game_configs_url(edition: &GameEdition) -> String {
-    format!(
-        "{}/hyp/hyp-connect/api/getGameConfigs?launcher_id={}",
-        edition.branches_host(),
-        edition.launcher_id()
-    )
+#[derive(Default)]
+struct GameCacheSlot<T> {
+    pub region: SophonRegion,
+    pub launcher_id: String,
+    pub value: T
 }
 
-fn sophon_patch_info_url(package_info: &PackageInfo, edition: &GameEdition) -> String {
-    format!(
-        "{}/downloader/sophon_chunk/api/getPatchBuild?branch={}&password={}&package_id={}&tag={}",
-        edition.api_host(),
-        package_info.branch,
-        package_info.password,
-        package_info.package_id,
-        package_info.tag
-    )
+#[derive(Default)]
+struct PackageCacheSlot<T> {
+    pub region: SophonRegion,
+    pub branch: String,
+    pub password: String,
+    pub package_id: String,
+    pub version: String,
+    pub value: T
 }
 
-fn sophon_download_info_url(package_info: &PackageInfo, edition: &GameEdition) -> String {
-    format!(
-        "{}/downloader/sophon_chunk/api/getBuild?branch={}&password={}&package_id={}&tag={}",
-        edition.api_host(),
-        package_info.branch,
-        package_info.password,
-        package_info.package_id,
-        package_info.tag
-    )
+pub struct SophonApi {
+    client: reqwest::Client,
+
+    game_branches_timeout: Duration,
+    game_versions_info_timeout: Duration,
+    game_configs_timeout: Duration,
+
+    package_patch_info_timeout: Duration,
+    package_download_info_timeout: Duration,
+
+    game_branches_cache: RwLock<Vec<GameCacheSlot<Box<[SophonApiGameBranch]>>>>,
+    game_versions_info_cache: RwLock<Vec<GameCacheSlot<Box<[SophonApiGameVersionsInfo]>>>>,
+    game_configs_cache: RwLock<Vec<GameCacheSlot<Box<[SophonApiGameConfigs]>>>>,
+
+    package_patch_info_cache: RwLock<Vec<PackageCacheSlot<()>>>,
+    package_download_info_cache: RwLock<Vec<PackageCacheSlot<()>>>
 }
 
-// HTTP API call helpers
+impl Default for SophonApi {
+    fn default() -> Self {
+        Self {
+            client: reqwest::Client::builder()
+                .user_agent(format!("sophon-tools/{}", crate::VERSION))
+                .build()
+                .expect("failed to build reqwest client"),
 
-fn api_get_request<T: DeserializeOwned>(
-    client: &Client,
-    url: impl AsRef<str>,
-) -> Result<T, SophonError> {
-    let response = client.get(url.as_ref()).send()?.error_for_status()?;
+            game_branches_timeout: Duration::from_secs(5),
+            game_versions_info_timeout: Duration::from_secs(5),
+            game_configs_timeout: Duration::from_secs(5),
 
-    Ok(response.json::<ApiResponse<T>>()?.data)
+            package_patch_info_timeout: Duration::from_secs(5),
+            package_download_info_timeout: Duration::from_secs(5),
+
+            game_branches_cache: Default::default(),
+            game_versions_info_cache: Default::default(),
+            game_configs_cache: Default::default(),
+
+            package_patch_info_cache: Default::default(),
+            package_download_info_cache: Default::default()
+        }
+    }
 }
 
-fn api_post_request<T: DeserializeOwned>(
-    client: &Client,
-    url: impl AsRef<str>,
-) -> Result<T, SophonError> {
-    let response = client.post(url.as_ref()).send()?.error_for_status()?;
-
-    Ok(response.json::<ApiResponse<T>>()?.data)
+impl From<reqwest::Client> for SophonApi {
+    fn from(client: reqwest::Client) -> Self {
+        Self {
+            client,
+            ..Self::default()
+        }
+    }
 }
 
-fn api_get_request_raw(client: &Client, url: impl AsRef<str>) -> Result<String, SophonError> {
-    let response = client.get(url.as_ref()).send()?.error_for_status()?;
-
-    Ok(response.text()?)
+impl From<SophonApi> for reqwest::Client {
+    #[inline]
+    fn from(value: SophonApi) -> Self {
+        value.client
+    }
 }
 
-fn api_post_request_raw(client: &Client, url: impl AsRef<str>) -> Result<String, SophonError> {
-    let response = client.post(url.as_ref()).send()?.error_for_status()?;
+impl SophonApi {
+    pub fn with_game_branches_timeout(mut self, timeout: Duration) -> Self {
+        self.game_branches_timeout = timeout;
 
-    Ok(response.text()?)
+        self
+    }
+
+    pub fn with_game_versions_info_timeout(mut self, timeout: Duration) -> Self {
+        self.game_versions_info_timeout = timeout;
+
+        self
+    }
+
+    pub fn with_game_configs_timeout(mut self, timeout: Duration) -> Self {
+        self.game_configs_timeout = timeout;
+
+        self
+    }
+
+    pub fn with_package_patch_info_timeout(mut self, timeout: Duration) -> Self {
+        self.package_patch_info_timeout = timeout;
+
+        self
+    }
+
+    pub fn with_package_download_info_timeout(mut self, timeout: Duration) -> Self {
+        self.package_download_info_timeout = timeout;
+
+        self
+    }
+
+    /// Try to fetch list of available games, their versions and components.
+    ///
+    /// This information can be used to list information about game components,
+    /// check latest available game version and whether it's possible to update
+    /// from another version to it.
+    ///
+    /// `<game_info_url>/hyp/hyp-connect/api/getGameBranches`.
+    pub async fn game_branches(
+        &self,
+        region: SophonRegion,
+        launcher_id: Option<String>
+    ) -> Result<Box<[SophonApiGameBranch]>, SophonApiError> {
+        let launcher_id = launcher_id.unwrap_or_else(|| {
+            region.launcher_id().to_string()
+        });
+
+        if let Some(slot) = self.game_branches_cache.read().await.iter()
+            .find(|slot| {
+                slot.region == region && slot.launcher_id == launcher_id
+            })
+        {
+            #[cfg(feature = "tracing")]
+            tracing::trace!(
+                ?region,
+                ?launcher_id,
+                "game_branches API cache read"
+            );
+
+            return Ok(slot.value.clone());
+        }
+
+        let url = format!(
+            "{}/hyp/hyp-connect/api/getGameBranches?launcher_id={}",
+            region.game_info_url(),
+            launcher_id
+        );
+
+        #[cfg(feature = "tracing")]
+        tracing::debug!(
+            ?region,
+            ?launcher_id,
+            ?url,
+            "fetch game_branches from the API"
+        );
+
+        let response = self.client.get(url)
+            .timeout(self.game_branches_timeout)
+            .send()
+            .await?;
+
+        let response = serde_json::from_slice::<SophonApiResponse<Json>>(
+            &response.bytes().await?
+        )?;
+
+        let Some(response) = response.data else {
+            return Err(SophonApiError::InvalidSophonStatus {
+                code: response.retcode,
+                message: response.message
+            });
+        };
+
+        let Some(game_branches) = response.get("game_branches")
+            .and_then(Json::as_array)
+        else {
+            return Err(SophonApiError::InvalidSophonResponse);
+        };
+
+        let game_branches = game_branches.iter()
+            .map(|game_branch| {
+                SophonApiGameBranch::try_from(game_branch)
+                    .map_err(|err| SophonApiError::Other(err.into()))
+            })
+            .collect::<Result<Box<[_]>, SophonApiError>>()?;
+
+        self.game_branches_cache.write().await.push(GameCacheSlot {
+            region,
+            launcher_id,
+            value: game_branches.clone()
+        });
+
+        Ok(game_branches)
+    }
+
+    /// Try to fetch list all the versions of available games.
+    ///
+    /// This information can be used to detect currently installed game version.
+    ///
+    /// `<game_info_url>/hyp/hyp-connect/api/getGameScanInfo`.
+    pub async fn game_versions_info(
+        &self,
+        region: SophonRegion,
+        launcher_id: Option<String>
+    ) -> Result<Box<[SophonApiGameVersionsInfo]>, SophonApiError> {
+        let launcher_id = launcher_id.unwrap_or_else(|| {
+            region.launcher_id().to_string()
+        });
+
+        if let Some(slot) = self.game_versions_info_cache.read().await.iter()
+            .find(|slot| {
+                slot.region == region && slot.launcher_id == launcher_id
+            })
+        {
+            #[cfg(feature = "tracing")]
+            tracing::trace!(
+                ?region,
+                ?launcher_id,
+                "game_versions_info API cache read"
+            );
+
+            return Ok(slot.value.clone());
+        }
+
+        let url = format!(
+            "{}/hyp/hyp-connect/api/getGameScanInfo?launcher_id={}",
+            region.game_info_url(),
+            launcher_id
+        );
+
+        #[cfg(feature = "tracing")]
+        tracing::debug!(
+            ?region,
+            ?launcher_id,
+            ?url,
+            "fetch game_versions_info from the API"
+        );
+
+        let response = self.client.get(url)
+            .timeout(self.game_versions_info_timeout)
+            .send()
+            .await?;
+
+        let response = serde_json::from_slice::<SophonApiResponse<Json>>(
+            &response.bytes().await?
+        )?;
+
+        let Some(response) = response.data else {
+            return Err(SophonApiError::InvalidSophonStatus {
+                code: response.retcode,
+                message: response.message
+            });
+        };
+
+        let Some(versions_info) = response.get("game_scan_info")
+            .and_then(Json::as_array)
+        else {
+            return Err(SophonApiError::InvalidSophonResponse);
+        };
+
+        let versions_info = versions_info.iter()
+            .map(|versions_info| {
+                SophonApiGameVersionsInfo::try_from(versions_info)
+                    .map_err(|err| SophonApiError::Other(err.into()))
+            })
+            .collect::<Result<Box<[_]>, SophonApiError>>()?;
+
+        self.game_versions_info_cache.write().await.push(GameCacheSlot {
+            region,
+            launcher_id,
+            value: versions_info.clone()
+        });
+
+        Ok(versions_info)
+    }
+
+    /// Try to fetch paths information about available games.
+    ///
+    /// This information can be used to determine directories layout of the
+    /// installed game files.
+    ///
+    /// `<game_info_url>/hyp/hyp-connect/api/getGameConfigs`.
+    pub async fn game_configs(
+        &self,
+        region: SophonRegion,
+        launcher_id: Option<String>
+    ) -> Result<Box<[SophonApiGameConfigs]>, SophonApiError> {
+        let launcher_id = launcher_id.unwrap_or_else(|| {
+            region.launcher_id().to_string()
+        });
+
+        if let Some(slot) = self.game_configs_cache.read().await.iter()
+            .find(|slot| {
+                slot.region == region && slot.launcher_id == launcher_id
+            })
+        {
+            #[cfg(feature = "tracing")]
+            tracing::trace!(
+                ?region,
+                ?launcher_id,
+                "game_configs API cache read"
+            );
+
+            return Ok(slot.value.clone());
+        }
+
+        let url = format!(
+            "{}/hyp/hyp-connect/api/getGameConfigs?launcher_id={}",
+            region.game_info_url(),
+            launcher_id
+        );
+
+        #[cfg(feature = "tracing")]
+        tracing::debug!(
+            ?region,
+            ?launcher_id,
+            ?url,
+            "fetch game_configs from the API"
+        );
+
+        let response = self.client.get(url)
+            .timeout(self.game_configs_timeout)
+            .send()
+            .await?;
+
+        let response = serde_json::from_slice::<SophonApiResponse<Json>>(
+            &response.bytes().await?
+        )?;
+
+        let Some(response) = response.data else {
+            return Err(SophonApiError::InvalidSophonStatus {
+                code: response.retcode,
+                message: response.message
+            });
+        };
+
+        let Some(game_configs) = response.get("launch_configs")
+            .and_then(Json::as_array)
+        else {
+            return Err(SophonApiError::InvalidSophonResponse);
+        };
+
+        let game_configs = game_configs.iter()
+            .map(|game_config| {
+                SophonApiGameConfigs::try_from(game_config)
+                    .map_err(|err| SophonApiError::Other(err.into()))
+            })
+            .collect::<Result<Box<[_]>, SophonApiError>>()?;
+
+        self.game_configs_cache.write().await.push(GameCacheSlot {
+            region,
+            launcher_id,
+            value: game_configs.clone()
+        });
+
+        Ok(game_configs)
+    }
+
+    /// Try to fetch game files patching information.
+    ///
+    /// `<sophon_data_url>/downloader/sophon_chunk/api/getPatchBuild`.
+    pub async fn package_patch_info(
+        &self,
+        region: SophonRegion,
+        branch: String,
+        password: String,
+        package_id: String,
+        version: String
+    ) -> Result<(), SophonApiError> {
+        if let Some(slot) = self.package_patch_info_cache.read().await.iter()
+            .find(|slot| {
+                slot.region == region
+                    && slot.branch == branch
+                    && slot.password == password
+                    && slot.package_id == package_id
+                    && slot.version == version
+            })
+        {
+            #[cfg(feature = "tracing")]
+            tracing::trace!(
+                ?region,
+                ?branch,
+                ?password,
+                ?package_id,
+                ?version,
+                "package_patch_info API cache read"
+            );
+
+            return Ok(slot.value.clone());
+        }
+
+        let url = format!(
+            "{}/downloader/sophon_chunk/api/getPatchBuild?branch={}&password={}&package_id={}&tag={}",
+            region.sophon_data_url(),
+            branch,
+            password,
+            package_id,
+            version
+        );
+
+        #[cfg(feature = "tracing")]
+        tracing::debug!(
+            ?region,
+            ?branch,
+            ?password,
+            ?package_id,
+            ?version,
+            "fetch package_patch_info from the API"
+        );
+
+        let response = self.client.post(url)
+            .timeout(self.game_configs_timeout)
+            .send()
+            .await?;
+
+        let response = serde_json::from_slice::<SophonApiResponse<Json>>(
+            &response.bytes().await?
+        )?;
+
+        std::fs::write("patch_info.json", serde_json::to_vec_pretty(&response.data)?).unwrap();
+
+        todo!()
+
+        // let response = serde_json::from_slice::<SophonApiResponse<Json>>(
+        //     &response.bytes().await?
+        // )?;
+
+        // let Some(response) = response.data else {
+        //     return Err(SophonApiError::InvalidSophonStatus {
+        //         code: response.retcode,
+        //         message: response.message
+        //     });
+        // };
+
+        // let Some(game_configs) = response.get("launch_configs")
+        //     .and_then(Json::as_array)
+        // else {
+        //     return Err(SophonApiError::InvalidSophonResponse);
+        // };
+
+        // let game_configs = game_configs.iter()
+        //     .map(|game_config| {
+        //         SophonApiGameConfigs::try_from(game_config)
+        //             .map_err(|err| SophonApiError::Other(err.into()))
+        //     })
+        //     .collect::<Result<Box<[_]>, SophonApiError>>()?;
+
+        // self.game_configs_cache.replace(GameCacheSlot {
+        //     region,
+        //     launcher_id,
+        //     value: Some(game_configs.clone())
+        // });
+
+        // Ok(game_configs)
+    }
+
+    /// Get game info wrapper.
+    pub fn game(
+        &self,
+        region: SophonRegion,
+        launcher_id: Option<String>,
+        game_id: String
+    ) -> SophonApiGame<'_> {
+        let launcher_id = launcher_id.unwrap_or_else(|| {
+            region.launcher_id().to_string()
+        });
+
+        SophonApiGame::new(
+            self,
+            region,
+            launcher_id,
+            game_id
+        )
+    }
 }
 
-// Protobuf helpers
+#[test]
+fn test() {
+    let runtime = tokio::runtime::Runtime::new()
+        .unwrap();
 
-pub fn get_protobuf_from_url<T>(
-    client: &Client,
-    url: impl AsRef<str>,
-    compression: bool,
-) -> Result<T, SophonError>
-where
-    T: Message,
-    T: Default,
-{
-    let response = client.get(url.as_ref()).send()?.error_for_status()?;
+    let api = SophonApi::default();
 
-    let compressed_manifest = response.bytes()?;
+    runtime.block_on(async move {
+        // let branches = api.game_branches(SophonRegion::Global, None).await;
 
-    let protobuf_bytes = if compression {
-        zstd::decode_all(&*compressed_manifest).unwrap()
-    } else {
-        compressed_manifest.into()
-    };
+        // dbg!(branches);
 
-    let parsed_manifest = T::decode(protobuf_bytes.as_slice()).unwrap();
+        // let versions = api.game_versions_info(SophonRegion::Global, None).await;
 
-    Ok(parsed_manifest)
-}
+        // dbg!(versions);
 
-pub fn get_protobuf_from_url_raw(
-    client: &Client,
-    url: impl AsRef<str>,
-    compression: bool,
-) -> Result<Bytes, SophonError> {
-    let response = client.get(url.as_ref()).send()?.error_for_status()?;
+        // let configs = api.game_configs(SophonRegion::Global, None).await;
 
-    let compressed_manifest = response.bytes()?;
+        // dbg!(configs);
 
-    let protobuf_bytes = if compression {
-        zstd::decode_all(&*compressed_manifest).unwrap().into()
-    } else {
-        compressed_manifest
-    };
+        let game = api.game(
+            SophonRegion::Global,
+            None,
+            String::from("U5hbdsT9W7")
+        );
 
-    Ok(protobuf_bytes)
-}
+        let branch = game.fetch_branch().await.unwrap();
 
-/// Try to decode protobuf from arbitrary data. Tries to decompress the data using zstd, and if
-/// that fails, assumes the data is uncompressed
-pub fn decode_protobuf<T>(data: &[u8]) -> Result<T, SophonError>
-where
-    T: Message,
-    T: Default,
-{
-    let mut data_ref = data;
-    let decomperssed_data = zstd::decode_all(&mut data_ref)
-        .inspect_err(|err| {
-            tracing::warn!(
-                ?err,
-                "Failed to decomperss provided data stream, assuming the data is uncompressed"
-            )
-        })
-        .map(Cow::Owned)
-        .unwrap_or(Cow::Borrowed(data));
-
-    T::decode(decomperssed_data.as_ref())
-        .map_err(|err| SophonError::IoError(std::io::Error::other(err)))
-}
-
-// Specific API endpoint and datatype getters
-
-pub fn get_game_branches_info(
-    client: &Client,
-    edition: &GameEdition,
-) -> Result<GameBranches, SophonError> {
-    api_get_request(client, get_game_branches_url(edition))
-}
-
-pub fn get_game_branches_info_raw(
-    client: &Client,
-    edition: &GameEdition,
-) -> Result<String, SophonError> {
-    api_get_request_raw(client, get_game_branches_url(edition))
-}
-
-pub fn get_game_scan_info(
-    client: &Client,
-    edition: &GameEdition,
-) -> Result<GameScanInfo, SophonError> {
-    api_get_request(client, get_game_scan_info_url(edition))
-}
-
-pub fn get_game_scan_info_raw(
-    client: &Client,
-    edition: &GameEdition,
-) -> Result<String, SophonError> {
-    api_get_request_raw(client, get_game_scan_info_url(edition))
-}
-
-pub fn get_game_configs(
-    client: &Client,
-    edition: &GameEdition,
-) -> Result<GameConfigs, SophonError> {
-    api_get_request(client, get_game_configs_url(edition))
-}
-
-pub fn get_game_configs_raw(client: &Client, edition: &GameEdition) -> Result<String, SophonError> {
-    api_get_request_raw(client, get_game_configs_url(edition))
-}
-
-pub fn get_game_download_sophon_info(
-    client: &Client,
-    package_info: &PackageInfo,
-    edition: &GameEdition,
-) -> Result<SophonDownloads, SophonError> {
-    let url = sophon_download_info_url(package_info, edition);
-
-    api_get_request(client, url)
-}
-
-pub fn get_game_download_sophon_info_raw(
-    client: &Client,
-    package_info: &PackageInfo,
-    edition: &GameEdition,
-) -> Result<String, SophonError> {
-    let url = sophon_download_info_url(package_info, edition);
-
-    api_get_request_raw(client, url)
-}
-
-pub fn get_download_manifest(
-    client: &Client,
-    download_info: &SophonDownloadInfo,
-) -> Result<SophonManifestProto, SophonError> {
-    let url_prefix = &download_info.manifest_download.url_prefix;
-    let url_suffix = &download_info.manifest_download.url_suffix;
-    let manifest_id = &download_info.manifest.id;
-
-    get_protobuf_from_url(
-        client,
-        format!("{url_prefix}{url_suffix}/{manifest_id}"),
-        download_info.manifest_download.compression == 1,
-    )
-}
-
-pub fn get_download_manifest_raw(
-    client: &Client,
-    download_info: &SophonDownloadInfo,
-) -> Result<Bytes, SophonError> {
-    let url_prefix = &download_info.manifest_download.url_prefix;
-    let url_suffix = &download_info.manifest_download.url_suffix;
-    let manifest_id = &download_info.manifest.id;
-
-    get_protobuf_from_url_raw(
-        client,
-        format!("{url_prefix}{url_suffix}/{manifest_id}"),
-        download_info.manifest_download.compression == 1,
-    )
-}
-
-pub fn get_game_diffs_sophon_info(
-    client: &Client,
-    package_info: &PackageInfo,
-    edition: &GameEdition,
-) -> Result<SophonDiffs, SophonError> {
-    let url = sophon_patch_info_url(package_info, edition);
-
-    api_post_request(client, &url)
-}
-
-pub fn get_game_diffs_sophon_info_raw(
-    client: &Client,
-    package_info: &PackageInfo,
-    edition: &GameEdition,
-) -> Result<String, SophonError> {
-    let url = sophon_patch_info_url(package_info, edition);
-
-    api_post_request_raw(client, &url)
-}
-
-pub fn get_patch_manifest(
-    client: &Client,
-    diff_info: &SophonDiff,
-) -> Result<SophonPatchProto, SophonError> {
-    let url_prefix = &diff_info.manifest_download.url_prefix;
-    let url_suffix = &diff_info.manifest_download.url_suffix;
-    let manifest_id = &diff_info.manifest.id;
-
-    get_protobuf_from_url(
-        client,
-        format!("{url_prefix}{url_suffix}/{manifest_id}"),
-        diff_info.manifest_download.compression == 1,
-    )
-}
-
-pub fn get_patch_manifest_raw(
-    client: &Client,
-    diff_info: &SophonDiff,
-) -> Result<Bytes, SophonError> {
-    let url_prefix = &diff_info.manifest_download.url_prefix;
-    let url_suffix = &diff_info.manifest_download.url_suffix;
-    let manifest_id = &diff_info.manifest.id;
-
-    get_protobuf_from_url_raw(
-        client,
-        format!("{url_prefix}{url_suffix}/{manifest_id}"),
-        diff_info.manifest_download.compression == 1,
-    )
+        api.package_patch_info(
+            SophonRegion::Global,
+            branch.branch,
+            branch.password,
+            branch.package_id,
+            branch.version
+        ).await;
+    });
 }

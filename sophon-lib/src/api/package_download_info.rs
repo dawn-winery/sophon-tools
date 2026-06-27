@@ -16,17 +16,3 @@
 //
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
-
-/// `sophon-tools` version.
-pub const VERSION: &str = env!("CARGO_PKG_VERSION");
-
-pub mod region;
-pub mod protos;
-pub mod api;
-
-// pub mod version;
-// pub mod utils;
-// pub mod protos;
-// pub mod error;
-// pub mod installer;
-// pub mod updater;

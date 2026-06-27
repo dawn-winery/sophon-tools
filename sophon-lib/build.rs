@@ -1,25 +1,32 @@
 fn main() {
-    #[cfg(feature = "vendored-hpatchz")]
-    {
-        use md5::{Digest, Md5};
+    // if cfg!(feature = "vendored-hpatchz") {
+    //     use md5::{Md5, Digest};
 
-        println!("cargo::rerun-if-changed=external/hpatchz/hpatchz");
-        let hpatchz_data =
-            std::fs::read("external/hpatchz/hpatchz").expect("Failed to read hpatchz binary");
-        let hpatchz_md5 = Md5::digest(&hpatchz_data);
-        println!("cargo::rustc-env=HPATCHZ_MD5={hpatchz_md5:x}");
-    }
+    //     println!("cargo::rerun-if-changed=external/hpatchz/hpatchz");
+
+    //     let buf = std::fs::read("external/hpatchz/hpatchz")
+    //         .expect("failed to read hpatchz binary");
+
+    //     let mut hash = [0; 16];
+
+    //     let hash = Md5::default()
+    //         .chain_update(&buf)
+    //         .finalize();
+
+    //     println!("cargo::rustc-env=HPATCHZ_MD5={hash:x}");
+    // }
+
     prost_build::Config::new()
-        .message_attribute(
-            ".",
-            "#[derive(serde::Serialize)] #[serde(rename_all=\"snake_case\")]",
-        )
+        .message_attribute(".", r#"
+            #[derive(serde::Serialize)]
+            #[serde(rename_all="snake_case")]
+        "#)
         .compile_protos(
             &[
-                "src/protos/SophonManifest.proto",
-                "src/protos/SophonPatch.proto",
+                "src/protos/download_info.proto",
+                "src/protos/patch_info.proto",
             ],
             &["src/protos"],
         )
-        .unwrap();
+        .expect("failed to compile sophon protobufs");
 }
