@@ -32,7 +32,7 @@ default-features = false
 [dependencies]
 thiserror = "2.0"
 serde_json = "1.0"
-tokio = { version = "1.52", features = ["rt-multi-thread"] }
+tokio = "1.52"
 prost = "0.14"
 zstd = { version = "0.13" }
 md-5 = "0.11"

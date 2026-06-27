@@ -24,7 +24,7 @@ use md5::{Md5, Digest};
 use prost::{Message, DecodeError};
 
 use crate::api::package_download_info::SophonApiPackageManifest;
-use crate::protos::SophonDownloadAssetsInfo;
+use crate::protos::{SophonDownloadAssetsInfo, SophonDownloadAssetsInfoAsset};
 
 #[derive(Debug, thiserror::Error)]
 pub enum SophonDownloaderError {
@@ -47,6 +47,8 @@ pub enum SophonDownloaderError {
     }
 }
 
+pub type AssetsSorter = Box<dyn Fn(&SophonDownloadAssetsInfoAsset, &SophonDownloadAssetsInfoAsset) -> std::cmp::Ordering>;
+
 pub struct SophonDownloader {
     client: reqwest::Client,
 
@@ -54,7 +56,9 @@ pub struct SophonDownloader {
 
     verify_manifest_hash: bool,
 
-    disk_cache_directory: PathBuf
+    disk_cache_directory: PathBuf,
+
+    assets_sorter: Option<AssetsSorter>
 }
 
 impl Default for SophonDownloader {
@@ -69,7 +73,9 @@ impl Default for SophonDownloader {
 
             verify_manifest_hash: true,
 
-            disk_cache_directory: PathBuf::from(".cache")
+            disk_cache_directory: PathBuf::from(".cache"),
+
+            assets_sorter: None
         }
     }
 }
@@ -97,6 +103,15 @@ impl SophonDownloader {
     /// Path to the directory in which temporary data is stored.
     pub fn with_disk_cache_directory(mut self, path: PathBuf) -> Self {
         self.disk_cache_directory = path;
+
+        self
+    }
+
+    /// Callback used to sort the assets before downloading them. It can be used
+    /// if you need to make sure that files will be downloaded in the right
+    /// order.
+    pub fn with_assets_sorter(mut self, sorter: AssetsSorter) -> Self {
+        self.assets_sorter = Some(sorter);
 
         self
     }

@@ -1,199 +1,82 @@
-use std::{io::BufReader, path::PathBuf, str::FromStr};
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// sophon-tools
+// Copyright (C) 2026  Nikita Podvirnyi <krypt0nn@vk.com>
+//                     "John the Cooling Fan"
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-use clap::{Args, Parser, Subcommand, ValueHint};
-use sophon_lib::{GameEdition, api::schemas::game_branches::PackageInfo};
-use tracing_subscriber::{
-    EnvFilter, Layer, filter::filter_fn, layer::SubscriberExt, util::SubscriberInitExt,
-};
+use tracing_subscriber::prelude::*;
 
-mod api_data;
-mod download;
-mod ndjson_messages;
-mod repair;
-mod status_format;
-mod update;
+use clap::{Parser, Subcommand};
 
-use api_data::{DumpFormat, DumpTarget};
-use download::DownloadArgs;
-use repair::RepairArgs;
-use update::UpdateArgs;
+pub mod commands;
 
-use crate::status_format::StatusFormat;
-
-mod pretty_print;
+use commands::*;
 
 #[derive(Debug, Parser)]
-#[command(version, about, long_about = None)]
+#[command(version, about)]
 struct Cli {
-    /// Game edition, global or china
-    #[arg(short = 'E', long, default_value = "global")]
-    edition: String,
-
-    /// Cache directory
-    #[arg(short = 'C', long, default_value_os_t = std::env::home_dir().unwrap().join(".cache/sophon-tools"), value_hint = ValueHint::DirPath)]
-    cache_dir: PathBuf,
-
-    /// Thread limit for the commands that use multiple threads
-    #[arg(short = 'T', long, default_value_t = 2)]
-    threads: usize,
-
     #[command(subcommand)]
-    action: Action,
+    command: CliCommands
 }
 
 #[derive(Debug, Subcommand)]
-enum Action {
-    #[command(alias = "downlaod")]
-    Download(#[command(flatten)] DownloadArgs),
-
-    Update(#[command(flatten)] UpdateArgs),
-
-    Repair(#[command(flatten)] RepairArgs),
-
-    /// Dump various API data
-    Dump {
-        /// Whether to output as JSON. Autodetected if omitted.
-        #[arg(short, long)]
-        format: Option<DumpFormat>,
-
-        /// Output verbosity, primarily used by the pretty format
-        #[arg(short, long, action = clap::ArgAction::Count)]
-        verbosity: u8,
-
-        #[command(subcommand)]
-        target: DumpTarget,
-    },
+enum CliCommands {
+    /// Perform Sophon API requests.
+    #[command(subcommand)]
+    Api(CliCommandList)
 }
 
-#[derive(Debug, Args)]
-struct GameCommon {
-    /// Game codename (biz) or id
-    game: String,
-    /// Path to game directory
-    #[arg(value_hint = ValueHint::DirPath)]
-    game_dir: PathBuf,
-    /// Game component(s) to check and repair, defaults to `game` if unset. Set multiple times to
-    /// target multiple components.
-    #[arg(short, long)]
-    component: Option<Vec<String>>,
-}
+#[derive(Debug, Subcommand)]
+enum CliCommandList {
+    /// List information about available games.
+    ListGames {
+        #[arg(
+            long, value_enum, default_value_t = SophonRegion::Global,
+            alias = "edition"
+        )]
+        region: SophonRegion,
 
-#[derive(Debug, Args)]
-struct DownloadParameters {
-    /// Skip checking for free space
-    #[arg(long)]
-    skip_free_space_check: bool,
-    /// Set limit of how much chunk data can be buffered in the queue. Download will be
-    /// throttled if the queue reaches this size.
-    #[arg(long)]
-    memory_buffer_limit: Option<u64>,
-    /// Enable memory buffering: don't store chunk files on disk, but only pass through memory when
-    /// possible.
-    #[arg(long)]
-    chunk_buffer_memory: bool,
-    /// Pretend this is a preload, so don't install/update files, only download and store in cache
-    /// the intermediates
-    #[arg(long)]
-    preload_pretend: bool,
-    /// Select status output format. Defaults to `ndjson` when piped
-    #[arg(long)]
-    status_format: Option<StatusFormat>,
-}
+        #[arg(long)]
+        launcher_id: Option<String>,
 
-#[derive(Debug, Args)]
-struct CustomPackageInfo {
-    /// Ad-hoc package info branch
-    #[arg(long = "package-info-branch")]
-    branch: Option<String>,
-    /// Ad-hoc package info password
-    #[arg(long = "package-info-password")]
-    password: Option<String>,
-    /// Ad-hoc package info package id
-    #[arg(long = "package-info-package-id")]
-    package_id: Option<String>,
-    /// Ad-hoc package info tag
-    #[arg(long = "package-info-tag")]
-    tag: Option<String>,
-    /// Ad-hoc package info from a file. Overrides the other package-info args.
-    #[arg(long = "package-info")]
-    json_file: Option<PathBuf>,
-}
-
-impl CustomPackageInfo {
-    pub(crate) fn assemble_adhoc(self) -> Option<PackageInfo> {
-        if let Some(json_file_path) = &self.json_file
-            && let Some(package_info) = std::fs::File::open(json_file_path)
-                .inspect_err(|err| eprintln!("Faield to open package info file: {err:?}"))
-                .ok()
-                .map(BufReader::new)
-                .and_then(|mut package_info_file| {
-                    serde_json::from_reader::<_, PackageInfo>(&mut package_info_file)
-                        .inspect_err(|err| eprintln!("Failed to parse package info file: {err:?}"))
-                        .ok()
-                })
-        {
-            return Some(package_info);
-        }
-
-        match (self.branch, self.password, self.package_id, self.tag) {
-            (Some(branch), Some(password), Some(package_id), Some(tag)) => Some(PackageInfo {
-                package_id,
-                branch,
-                password,
-                tag,
-                diff_tags: vec![],
-                categories: vec![],
-            }),
-            _ => None,
-        }
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        output_format: OutputFormat
     }
 }
 
-fn is_piped() -> bool {
-    atty::isnt(atty::Stream::Stdout)
-}
-
-fn init_tracing() {
-    let stdout_layer = tracing_subscriber::fmt::layer()
+fn main() -> anyhow::Result<()> {
+    let logger = tracing_subscriber::fmt::layer()
         .pretty()
-        .with_filter(EnvFilter::from_default_env())
-        .with_filter(filter_fn(|metadata| {
+        .with_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_filter(tracing_subscriber::filter::filter_fn(|metadata| {
             !metadata.target().contains("rustls")
                 && !metadata.target().contains("reqwest")
                 && !metadata.target().contains("h2")
                 && !metadata.target().contains("hyper_util")
         }));
 
-    let registry = tracing_subscriber::registry().with(stdout_layer);
+    tracing_subscriber::registry()
+        .with(logger)
+        .init();
 
-    #[cfg(feature = "tracy")]
-    let registry = registry.with(
-        tracing_tracy::TracyLayer::default()
-            .with_filter(tracing_subscriber::filter::LevelFilter::DEBUG)
-            .with_filter(filter_fn(move |metadata| {
-                !metadata.target().contains("h2") && !metadata.target().contains("hyper_util")
-            })),
-    );
-
-    registry.init()
-}
-
-fn main() -> Result<(), String> {
-    init_tracing();
-
-    let cli_args = Cli::parse();
-    let edition = GameEdition::from_str(&cli_args.edition).unwrap();
-
-    // TODO? custom error type
-
-    match cli_args.action {
-        Action::Dump {
-            format,
-            target,
-            verbosity,
-        } => target.dump_api_data(edition, api_data::decide_format(format), verbosity),
-        Action::Download(args) => args.download(edition, cli_args.cache_dir, cli_args.threads),
-        Action::Repair(args) => args.repair(edition, cli_args.cache_dir, cli_args.threads),
-        Action::Update(args) => args.update(edition, cli_args.cache_dir, cli_args.threads),
+    match Cli::parse().command {
+        CliCommands::Api(CliCommandList::ListGames {
+            region,
+            launcher_id,
+            output_format
+        }) => list_games::run(region, launcher_id, output_format)
     }
 }

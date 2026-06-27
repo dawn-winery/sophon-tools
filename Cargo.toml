@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["sophon-lib"]
+members = ["sophon-lib", "sophon-cli"]
 
 [profile.release]
 strip = true
