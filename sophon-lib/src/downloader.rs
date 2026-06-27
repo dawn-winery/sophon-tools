@@ -149,8 +149,7 @@ pub struct SophonDownloader {
 impl Default for SophonDownloader {
     fn default() -> Self {
         Self {
-            client: reqwest::Client::builder()
-                .user_agent(format!("sophon-tools/v{}", crate::VERSION))
+            client: crate::client_builder()
                 .build()
                 .expect("failed to build reqwest client"),
 

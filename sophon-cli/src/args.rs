@@ -21,10 +21,7 @@ use std::path::PathBuf;
 
 use clap::{Args, ArgAction, ValueEnum};
 
-use sophon_lib::export::reqwest::{
-    ClientBuilder as ReqwestClientBuilder,
-    Proxy as ReqwestProxy
-};
+use sophon_lib::export::reqwest::Proxy as ReqwestProxy;
 
 use sophon_lib::api::SophonApi;
 use sophon_lib::patcher::HdiffPatcher;
@@ -144,8 +141,7 @@ pub struct SophonApiClientArgs {
 
 impl SophonApiClientArgs {
     pub fn build(&self) -> anyhow::Result<SophonApi> {
-        let mut client = ReqwestClientBuilder::new()
-            .user_agent(format!("sophon-tools/v{}", sophon_lib::VERSION));
+        let mut client = sophon_lib::client_builder();
 
         if let Some(user_agent) = &self.user_agent {
             client = client.user_agent(user_agent);

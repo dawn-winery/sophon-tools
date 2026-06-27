@@ -138,8 +138,7 @@ pub struct SophonApi {
 impl Default for SophonApi {
     fn default() -> Self {
         Self {
-            client: reqwest::Client::builder()
-                .user_agent(format!("sophon-tools/v{}", crate::VERSION))
+            client: crate::client_builder()
                 .build()
                 .expect("failed to build reqwest client"),
 

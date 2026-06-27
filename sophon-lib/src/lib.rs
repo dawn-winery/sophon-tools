@@ -17,6 +17,8 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+use std::time::Duration;
+
 /// `sophon-tools` version.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -33,3 +35,12 @@ pub mod verifier;
 pub mod patcher;
 pub mod downloader;
 pub mod updater;
+
+/// Get standard `sophon-tools` reqwest client builder.
+pub fn client_builder() -> reqwest::ClientBuilder {
+    reqwest::ClientBuilder::new()
+        .user_agent(format!("sophon-tools/v{VERSION}"))
+        .pool_idle_timeout(Duration::from_secs(180))
+        .http2_keep_alive_interval(Some(Duration::from_secs(20)))
+        .http2_keep_alive_timeout(Duration::from_secs(10))
+}
