@@ -22,6 +22,8 @@ use std::process::Stdio;
 
 use tokio::process::Command;
 
+use md5::{Md5, Digest};
+
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 const HPATCHZ: &[u8] = include_bytes!("../external/hpatchz/hpatchz-linux64");
 
@@ -56,15 +58,16 @@ impl HdiffPatcher {
     /// Write bundled hpatchz binary to the temp directory and point the patcher
     /// to use it.
     pub async fn export() -> std::io::Result<Self> {
-        let hash = seahash::hash(HPATCHZ);
+        // FIXME: cache this value somewhere?
+        let hash = hex::encode(Md5::digest(HPATCHZ));
 
         #[cfg(not(target_os = "windows"))]
         let path = std::env::temp_dir()
-            .join(format!("hpatchz-{hash:0x}"));
+            .join(format!("hpatchz-{hash}"));
 
         #[cfg(target_os = "windows")]
         let path = std::env::temp_dir()
-            .join(format!("hpatchz-{hash:0x}.exe"));
+            .join(format!("hpatchz-{hash}.exe"));
 
         if !path.is_file() {
             #[cfg(feature = "tracing")]

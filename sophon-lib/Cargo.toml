@@ -36,7 +36,6 @@ futures = "0.3"
 prost = "0.14"
 ruzstd = "0.8"
 md-5 = "0.11"
-seahash = "4.1"
 hex = "0.4"
 
 tracing = { version = "0.1", optional = true }
