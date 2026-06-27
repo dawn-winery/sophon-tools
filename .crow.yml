@@ -1,27 +1,33 @@
 when:
   - event: push
     branch: ${CI_REPO_DEFAULT_BRANCH}
+    path: ['.crow/*', 'Cargo.toml', 'Cargo.lock', '**/*.rs']
+
   - event: pull_request
   - event: tag
     ref: "v*"
   - event: manual
 
+labels:
+  platform: linux/amd64
+
 steps:
   - name: check
     image: rust:trixie
     commands:
-      - apt update
-      - apt install protobuf-compiler musl-tools
+      - apt-get update
+      - apt-get install protobuf-compiler musl-tools
       - ln -sf /usr/bin/musl-gcc /usr/local/bin/x86_64-unknown-linux-musl-gcc
       - cargo check --target x86_64-unknown-linux-musl --verbose
     when:
       - event: [push, pull_request]
+        path: ['.crow/*', 'Cargo.toml', 'Cargo.lock', '**/*.rs']
 
   - name: build
     image: rust:trixie
     commands:
-      - apt update
-      - apt install protobuf-compiler musl-tools
+      - apt-get update
+      - apt-get install protobuf-compiler musl-tools
       - ln -sf /usr/bin/musl-gcc /usr/local/bin/x86_64-unknown-linux-musl-gcc
       - cargo build --release --target x86_64-unknown-linux-musl --bin sophon-cli --verbose
       - mv target/x86_64-unknown-linux-musl/release/sophon-cli sophon-tools
