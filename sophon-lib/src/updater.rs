@@ -586,7 +586,7 @@ impl SophonUpdater {
             // Pre-verify all the directory files in parallel.
             verifier.scan_directory(
                 update_dir.to_path_buf(),
-                Box::new(move |update| {
+                Arc::new(move |update| {
                     progress_updater(SophonUpdaterProgressMsg::Verify {
                         current: update.current,
                         total: update.total,

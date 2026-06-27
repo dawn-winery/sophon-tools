@@ -481,7 +481,7 @@ impl SophonDownloader {
             // Pre-verify all the directory files in parallel.
             verifier.scan_directory(
                 download_dir.to_path_buf(),
-                Box::new(move |update| {
+                Arc::new(move |update| {
                     progress_updater(SophonDownloaderProgressMsg::Verify {
                         current: update.current,
                         total: update.total,

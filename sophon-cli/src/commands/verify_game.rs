@@ -133,7 +133,7 @@ pub fn run(
 
             runtime.block_on(verifier.scan_directory(
                 game_dir,
-                Box::new(move |update| {
+                Arc::new(move |update| {
                     match update.result {
                         VerifyResult::Valid   => view.message(format!("      valid  {:#?}\n", update.path)),
                         VerifyResult::Invalid => view.message(format!("[!] invalid  {:#?}\n", update.path)),
@@ -151,7 +151,7 @@ pub fn run(
         OutputFormat::Json => {
             runtime.block_on(verifier.scan_directory(
                 game_dir,
-                Box::new(move |update| {
+                Arc::new(move |update| {
                     let result = &serde_json::json!({
                         "current": update.current,
                         "total": update.total,

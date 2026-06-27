@@ -17,10 +17,10 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::path::{Path, PathBuf};
-use std::collections::{HashMap, VecDeque};
 
 use tokio::fs::File;
 use tokio::io::{BufReader, AsyncReadExt};
@@ -199,8 +199,10 @@ impl SophonVerifier {
     pub async fn scan_directory(
         &mut self,
         path: PathBuf,
-        updater: Box<dyn Fn(SophonVerifierScanUpdate) + Send + Sync>
+        progress_updater: Arc<dyn Fn(SophonVerifierScanUpdate) + Send + Sync>
     ) -> std::io::Result<()> {
+        let base_dir = path.clone();
+
         let mut entries = VecDeque::from([(path, 0)]);
 
         while let Some((path, _)) = entries.pop_back() && path.is_dir() {
@@ -238,13 +240,18 @@ impl SophonVerifier {
             entries.sort_by(|a, b| sorter(&a.0, &b.0));
         }
 
+        // Prepare assets hash map for fast assets info querying.
+        let mut assets = self.assets.iter()
+            .map(|asset| (base_dir.join(&asset.path), asset.clone()))
+            .collect::<HashMap<PathBuf, SophonVerifierAsset>>();
+
+        let progress_current = Arc::new(AtomicU64::new(0));
+
         let progress_total = entries.iter()
             .map(|(_, size)| *size)
             .sum::<u64>();
 
-        let progress_current = Arc::new(AtomicU64::new(0));
-        let progress_updater = Arc::new(updater);
-
+        // Prepare tasks queue.
         let tasks_size = self.runtime.as_ref()
             .map(|runtime| runtime.metrics().num_workers())
             .or_else(|| {
@@ -290,10 +297,7 @@ impl SophonVerifier {
 
             // Find asset info for the given file, or skip it if the file is
             // unknown.
-            let Some(asset) = self.assets.iter()
-                .find(|asset| path.ends_with(&asset.path))
-                .cloned()
-            else {
+            let Some(asset) = assets.remove(&path) else {
                 let current = progress_current.fetch_add(
                     size,
                     Ordering::Relaxed
