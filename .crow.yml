@@ -89,6 +89,6 @@ steps:
         from_secret: FORGEJO_TOKEN
       files:
         - sophon-tools
-      title: sophon-tools $CI_COMMIT_TAG
+      title: sophon-tools ${CI_COMMIT_TAG}
     when:
       - event: tag
