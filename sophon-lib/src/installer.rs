@@ -24,6 +24,7 @@ use super::{
     protos::{SophonManifestAssetChunk, SophonManifestAssetProperty, SophonManifestProto},
     utils::size_limited_queue::*,
 };
+use crate::utils::semaphore::Semaphore;
 
 #[derive(Debug, Serialize)]
 pub enum Update {
@@ -446,6 +447,9 @@ impl SophonInstaller {
     ) {
         tracing::debug!("Starting mutlithreaded download and install");
 
+        let total_threads =
+            NonZeroUsize::new(download_threads.get() + assembly_threads.get()).expect("NonZero + NonZero is NonZero, unless the numbers are extremely high, close to 2^62 high");
+
         let mut download_index = DownloadIndex::new(&self.download_info, &self.manifest);
         tracing::info!(
             "{} Chunks to download, {} Files to install, {} total bytes",
@@ -462,77 +466,96 @@ impl SophonInstaller {
             self.chunks_queue_data_limit.map(|lim| (lim, &queue_size)),
         );
 
-        let mut redownload_set = HashSet::with_capacity(download_index.chunks_used_in.len());
         let mut chunk_dedupe_set = HashSet::with_capacity(download_index.chunks_used_in.len());
 
         let total_files = download_index.total_files();
         (updater)(Update::CheckingFiles { total_files });
 
-        let mut passed_files = 0_u64;
+        let passed_files_at = AtomicU64::new(0);
+        let passed_files = &passed_files_at;
 
-        let download_queue = tracing::info_span!("Building chunk queue").in_scope(|| {
+        let semaphore = Semaphore::new(total_threads);
+
+        let download_queue = std::thread::scope(|scope| {
+            let _span = tracing::info_span!("Building chunk queue").entered();
             VecDeque::from_iter(
                 download_index
                     .files
                     .values()
-                    .filter(|file_info| {
-                        let check_res = check_file(
-                            file_info.target_file_path(game_folder),
-                            file_info.file_manifest.asset_size,
-                            &file_info.file_manifest.asset_hash_md5,
-                        )
-                        .unwrap_or(false);
-                        if check_res {
-                            passed_files += 1;
-                            (updater)(Update::CheckingFilesProgress {
-                                passed: passed_files,
-                                total: total_files,
-                            });
-                        } else if self.mode_repair {
-                            // if this is not repair (so, download), then it's just a
-                            // not-yet-downlaoded file, no need to sound the "BROKEN FILE" alarm
-                            tracing::error!(
-                                asset = file_info.file_manifest.asset_name,
-                                "Broken file detected"
-                            );
-                        }
-                        !check_res
+                    // check the whole file in a scoped thread, if it's broken also check each
+                    // chunk in same thread
+                    .map(|file_info| {
+                        let updater_clone = updater.clone();
+                        let permit = semaphore.acquire(1);
+                        scope.spawn(move || {
+                            //println!("Checking");
+                            let check_res = check_file(
+                                file_info.target_file_path(game_folder),
+                                file_info.file_manifest.asset_size,
+                                &file_info.file_manifest.asset_hash_md5,
+                            )
+                            .unwrap_or(false);
+                            let broken_chunks = if check_res {
+                                let passed = passed_files
+                                    .fetch_add(1, std::sync::atomic::Ordering::AcqRel)
+                                    + 1;
+                                (updater_clone)(Update::CheckingFilesProgress {
+                                    passed,
+                                    total: total_files,
+                                });
+                                None
+                            } else {
+                                if self.mode_repair {
+                                    // if this is not repair (so, download), then it's just a
+                                    // not-yet-downlaoded file, no need to sound the "BROKEN FILE"
+                                    // alarm
+                                    tracing::error!(
+                                        asset = file_info.file_manifest.asset_name,
+                                        "Broken file detected"
+                                    );
+                                }
+                                let broken_chunks = file_info.chunks_iter().filter(|chunk_info| {
+                                    if !self
+                                        .check_file_region(game_folder, chunk_info, file_info)
+                                        .unwrap_or(false)
+                                    {
+                                        if self.mode_repair && cfg!(feature = "extra-logs") {
+                                            tracing::debug!(
+                                                asset_name = file_info.file_manifest.asset_name,
+                                                ?chunk_info,
+                                                "Broken file region detected"
+                                            )
+                                        }
+                                        true
+                                    } else {
+                                        false
+                                    }
+                                });
+                                Some(broken_chunks.collect::<Vec<_>>())
+                            };
+                            drop(permit);
+                            //println!("Checking done");
+                            (file_info, broken_chunks)
+                        })
                     })
-                    .flat_map(|file_info| std::iter::repeat(file_info).zip(file_info.chunks_iter()))
-                    .filter(move |(file_info, chunk_info)| {
-                        if !self.mode_repair
-                            && redownload_set.contains(&chunk_info.chunk_manifest.chunk_name)
-                        {
-                            // This chunk was already checked, and included in the queue. No need
-                            // for duplicates, as they will be filtered
-                            // in the next filter call
-                            //
-                            // but if it's repair, need to account for all files where the chunk
-                            // appears, hence `&& !self.mode_repair`
-                            return false;
-                        }
-                        if !self
-                            .check_file_region(game_folder, chunk_info, file_info)
-                            .unwrap_or(false)
-                        {
-                            if self.mode_repair && cfg!(feature = "extra-logs") {
-                                tracing::debug!(
-                                    asset_name = file_info.file_manifest.asset_name,
-                                    ?chunk_info,
-                                    "Broken file region detected"
-                                )
+                    // collect to a vec now to make all threads spawn and operate on handles
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .map(|handle| handle.join())
+                    // keep only the broken files
+                    .filter_map(|res| match res {
+                        Ok((file_info, is_broken)) => match is_broken {
+                            Some(broken_chunks) if !broken_chunks.is_empty() => {
+                                Some((file_info, broken_chunks))
                             }
-                            if !self.mode_repair {
-                                // redownload set gets completely unused in the case of repair, but
-                                // that one has its own hashsets to deal with
-                                redownload_set.insert(&chunk_info.chunk_manifest.chunk_name);
-                            }
-                            true
-                        } else {
-                            false
+                            _ => None,
+                        },
+                        Err(err) => {
+                            tracing::error!("Error joining file checking thread: {err:?}");
+                            None
                         }
                     })
-                    .map(|(file_info, chunk_info)| {
+                    .flat_map(|(file_info, broken_chunks)| {
                         if self.mode_repair {
                             let repair_checklist = download_index
                                 .repair_checklist
@@ -540,12 +563,14 @@ impl SophonInstaller {
                                 .or_default()
                                 .get_mut()
                                 .expect("Nothing to poison the lock yet");
-                            repair_checklist.insert(&chunk_info.chunk_manifest.chunk_name);
+                            for chunk_info in &broken_chunks {
+                                repair_checklist.insert(&chunk_info.chunk_manifest.chunk_name);
+                            }
                         }
-                        chunk_info
+                        broken_chunks
                     })
                     .filter(move |chunk_info| {
-                        // deduplicate for the download to avoid queueing up teh same chunk in
+                        // deduplicate for the download to avoid queueing up the same chunk in
                         // multiple threads or having separate retry counters for the same chunk
                         // or- why am I explaining that this better not have duplicate chunks?
                         chunk_dedupe_set.insert(&chunk_info.chunk_manifest.chunk_name)
@@ -578,7 +603,7 @@ impl SophonInstaller {
             total_files: if !self.mode_repair {
                 total_files
             } else {
-                total_files - passed_files
+                total_files - passed_files.load(std::sync::atomic::Ordering::Acquire)
             },
         });
 
