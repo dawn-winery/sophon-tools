@@ -1,22 +1,20 @@
 [package]
 name = "sophon-cli"
-version = "0.1.8"
-edition = "2024"
+version = "0.2.0"
+homepage = "https://dawn.wine/dawn-winery/sophon-tools"
+repository = "https://dawn.wine/dawn-winery/sophon-tools"
 license = "GPL-3.0-or-later"
 rust-version = "1.94.1"
+edition = "2024"
+publish = false
 
 [dependencies]
-atty = "0.2.14"
-clap = { version = "4.5.47", features = ["derive"] }
-dialoguer = "0.12.0"
-indicatif = "0.18.0"
-serde = { version = "1.0.226", features = ["derive"] }
-serde_json = "1.0.145"
-sophon-lib = { version = "0.1.0", path = "../sophon-lib", features = ["extra-logs"] }
-tracing-subscriber = { version = "0.3.20", features = ["env-filter", "json"] }
-tracing-tracy = { version = "0.11.4", optional = true}
-
-[features]
-default = []
-tracy = ["dep:tracing-tracy"]
-rust-hdiff = ["sophon-lib/paimon"]
+sophon-lib = { path = "../sophon-lib" }
+tokio = { version = "1.52", features = ["rt-multi-thread"] }
+tracing-subscriber = "0.3"
+anyhow = "1.0"
+clap = { version = "4.6", features = ["derive"] }
+comfy-table = "7.2"
+nutmeg = "0.1.7"
+regex = "1.12"
+serde_json = "1.0"

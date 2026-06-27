@@ -1,30 +1,32 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// sophon-tools
+// Copyright (C) 2026  Nikita Podvirnyi <krypt0nn@vk.com>
+//                     "John the Cooling Fan"
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 include!(concat!(env!("OUT_DIR"), "/protos.rs"));
 
-impl SophonManifestProto {
-    pub fn total_bytes_compressed(&self) -> u64 {
-        self.assets
-            .iter()
-            .flat_map(|asset| &asset.asset_chunks)
-            .map(|asset_chunk| asset_chunk.chunk_size)
-            .sum()
+impl SophonDownloadAssetsInfoAsset {
+    #[inline]
+    pub const fn is_file(&self) -> bool {
+        self.r#type == 0
     }
 
-    pub fn total_bytes_decompressed(&self) -> u64 {
-        self.assets
-            .iter()
-            .flat_map(|asset| &asset.asset_chunks)
-            .map(|asset_chunk| asset_chunk.chunk_size_decompressed)
-            .sum()
-    }
-
-    pub fn total_chunks(&self) -> u64 {
-        self.assets
-            .iter()
-            .flat_map(|asset| &asset.asset_chunks)
-            .count() as u64
-    }
-
-    pub fn total_files(&self) -> u64 {
-        self.assets.len() as u64
+    #[inline]
+    pub const fn is_directory(&self) -> bool {
+        self.r#type == 64
     }
 }

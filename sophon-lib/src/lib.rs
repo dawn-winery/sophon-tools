@@ -1,163 +1,46 @@
-use std::{
-    fs::File,
-    io::{BufReader, Read, Seek, SeekFrom},
-    num::NonZeroUsize,
-    os::unix::fs::PermissionsExt,
-    path::Path,
-};
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// sophon-tools
+// Copyright (C) 2026  Nikita Podvirnyi <krypt0nn@vk.com>
+//                     "John the Cooling Fan"
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-pub use error::SophonError;
-pub use game_edition::GameEdition;
-use md5::{Digest, Md5};
-pub use reqwest;
+use std::time::Duration;
 
+/// `sophon-tools` version.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+pub mod export {
+    pub use reqwest;
+    pub use tokio;
+    pub use futures;
+}
+
+pub mod region;
 pub mod api;
-pub mod error;
-pub mod game_edition;
-pub mod installer;
 pub mod protos;
+pub mod verifier;
+pub mod patcher;
+pub mod downloader;
 pub mod updater;
-pub mod utils;
 
-const DEFAULT_CHUNK_RETRIES: u8 = 4;
-
-pub fn prettify_bytes(bytes: u64) -> String {
-    if bytes > 1024 * 1024 * 1024 {
-        format!("{:.2} GB", bytes as f64 / 1024.0 / 1024.0 / 1024.0)
-    } else if bytes > 1024 * 1024 {
-        format!("{:.2} MB", bytes as f64 / 1024.0 / 1024.0)
-    } else if bytes > 1024 {
-        format!("{:.2} KB", bytes as f64 / 1024.0)
-    } else {
-        format!("{:.2} B", bytes)
-    }
-}
-
-fn finalize_file(file: &Path, target: &Path, size: u64, hash: &str) -> Result<(), SophonError> {
-    if check_file(file, size, hash)? {
-        tracing::debug!(
-            result = ?file,
-            destination = ?target,
-            "File hash check passed, copying into final destination"
-        );
-        ensure_parent(target)?;
-        add_user_write_permission_to_file(target)?;
-        std::fs::copy(file, target)?;
-        Ok(())
-    } else {
-        Err(SophonError::FileHashMismatch {
-            path: file.to_owned(),
-            expected: hash.to_owned(),
-            got: file_md5_hash_str(file)?,
-        })
-    }
-}
-
-fn ensure_parent(path: impl AsRef<Path>) -> std::io::Result<()> {
-    #[allow(clippy::collapsible_if, reason = "only collapsible in Rust >= 1.88.0")]
-    if let Some(parent) = path.as_ref().parent() {
-        if !parent.exists() {
-            std::fs::create_dir_all(parent)?;
-        }
-    }
-
-    Ok(())
-}
-
-fn md5_hash_str(data: &[u8]) -> String {
-    format!("{:x}", Md5::digest(data))
-}
-
-#[allow(dead_code)]
-fn bytes_check_md5(data: &[u8], expected_hash: &str) -> bool {
-    let computed_hash = md5_hash_str(data);
-
-    expected_hash == computed_hash
-}
-
-// MD5 hash calculation without reading the whole file contents into RAM
-pub fn file_md5_hash_str(file_path: impl AsRef<Path>) -> std::io::Result<String> {
-    let mut file = BufReader::new(File::open(&file_path)?);
-    let mut md5 = Md5::new();
-
-    std::io::copy(&mut file, &mut md5)?;
-
-    Ok(format!("{:x}", md5.finalize()))
-}
-
-pub fn check_file(
-    file_path: impl AsRef<Path>,
-    expected_size: u64,
-    expected_md5: &str,
-) -> std::io::Result<bool> {
-    let Ok(fs_metadata) = std::fs::metadata(&file_path) else {
-        return Ok(false);
-    };
-
-    let file_size = fs_metadata.len();
-
-    if file_size != expected_size {
-        return Ok(false);
-    }
-
-    let file_md5 = file_md5_hash_str(&file_path)?;
-
-    Ok(file_md5 == expected_md5)
-}
-
-fn add_user_write_permission_to_file(path: impl AsRef<Path>) -> std::io::Result<()> {
-    if !path.as_ref().exists() {
-        return Ok(());
-    }
-
-    let mut permissions = std::fs::metadata(&path)?.permissions();
-
-    if permissions.readonly() {
-        let perm_mode = permissions.mode();
-        let user_write_mode = perm_mode | 0o200;
-
-        permissions.set_mode(user_write_mode);
-
-        std::fs::set_permissions(path, permissions)?;
-    }
-
-    Ok(())
-}
-
-fn file_region_hash_md5(file: &mut File, offset: u64, length: u64) -> std::io::Result<String> {
-    file.seek(SeekFrom::Start(offset))?;
-
-    let mut region_reader = BufReader::new(file.take(length));
-    let mut hasher = Md5::new();
-
-    std::io::copy(&mut region_reader, &mut hasher)?;
-
-    Ok(format!("{:x}", hasher.finalize()))
-}
-
-/// Divides thread count for the two pools. Element 0 is for downloading, element 1 is for
-/// patching/assembling
-fn divide_threads(thread_count: usize) -> Result<(NonZeroUsize, NonZeroUsize), SophonError> {
-    let thread_count =
-        NonZeroUsize::new(thread_count).ok_or(SophonError::InvalidThreadAmount(thread_count))?;
-    if thread_count.get() == 1 {
-        tracing::warn!(
-            "Thread count set to 1, but at least 2 are required, returning 1 for each pool"
-        );
-        // SAFETY: 1 is not zero
-        Ok(unsafe {
-            (
-                NonZeroUsize::new_unchecked(1),
-                NonZeroUsize::new_unchecked(1),
-            )
-        })
-    } else {
-        // division rounds towards zero, leave less threads for patching/assembly
-        let last = thread_count.get() / 2;
-        let first = thread_count.get() - last;
-        Ok((
-            NonZeroUsize::new(first).ok_or(SophonError::InvalidThreadAmount(first))?,
-            NonZeroUsize::new(last).ok_or(SophonError::InvalidThreadAmount(last))?,
-        ))
-    }
+/// Get standard `sophon-tools` reqwest client builder.
+pub fn client_builder() -> reqwest::ClientBuilder {
+    reqwest::ClientBuilder::new()
+        .user_agent(format!("sophon-tools/v{VERSION}"))
+        .pool_idle_timeout(Duration::from_secs(180))
+        .http2_keep_alive_interval(Some(Duration::from_secs(20)))
+        .http2_keep_alive_timeout(Duration::from_secs(10))
 }

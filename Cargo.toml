@@ -1,7 +1,8 @@
 [workspace]
 resolver = "3"
-members = ["sophon-cli", "sophon-lib"]
+members = ["sophon-lib", "sophon-cli"]
 
 [profile.release]
+opt-level = "s"
 strip = true
 lto = true

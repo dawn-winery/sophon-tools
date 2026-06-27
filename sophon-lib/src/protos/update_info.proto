@@ -1,0 +1,73 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// sophon-tools
+// Copyright (C) 2026  Nikita Podvirnyi <krypt0nn@vk.com>
+//                     "John the Cooling Fan"
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+syntax = "proto3";
+
+package protos;
+
+message SophonUpdateAssetsInfo {
+    repeated SophonUpdateAssetsInfoAsset assets = 1;
+
+    map<string, SophonUpdateAssetsInfoUnusedAsset> unused_assets = 2;
+}
+
+message SophonUpdateAssetsInfoAsset {
+    // Path to the asset relative to the base game directory.
+    string path = 1;
+
+    // Size of the entire asset in bytes.
+    uint64 size = 2;
+
+    // Hash of the patched asset.
+    string hash_md5 = 3;
+
+    map<string, SophonUpdateAssetsInfoAssetChunk> chunks = 4;
+}
+
+message SophonUpdateAssetsInfoAssetChunk {
+    string name = 1;
+    string version = 2;
+    string build_id = 3;
+
+    uint64 chunk_size = 4;
+    string chunk_hash_md5 = 5;
+    uint64 chunk_offset = 6;
+    uint64 chunk_length = 7;
+
+    string asset_name = 8;
+    uint64 asset_size = 9;
+
+    // Hash of the asset before patching.
+    string asset_hash_md5 = 10;
+}
+
+message SophonUpdateAssetsInfoUnusedAsset {
+    repeated SophonUpdateAssetsInfoUnusedAssetFile files = 1;
+}
+
+message SophonUpdateAssetsInfoUnusedAssetFile {
+    // File name.
+    string name = 1;
+
+    // File size in bytes.
+    uint64 size = 2;
+
+    // Hash of the file.
+    string hash_md5 = 3;
+}
