@@ -4,7 +4,7 @@ when:
     path: ['.crow.yml', 'Cargo.toml', 'Cargo.lock', '**/*.rs']
   - event: pull_request
   - event: tag
-    ref: ref/tags/v*
+    ref: refs/tags/v*
   - event: manual
 
 labels:
