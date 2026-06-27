@@ -642,8 +642,10 @@ impl SophonDownloader {
 
                 if let Some(timeout_per_mb) = self.fetch_chunk_timeout_per_mb {
                     request = request.timeout({
+                        // Add extra 5s of time for DNS request, TCP connection
+                        // establishing, and TLS handshake.
                         (chunk.compressed_size as f64 / 1024.0 / 1024.0).ceil() as u32
-                            * timeout_per_mb
+                            * timeout_per_mb + Duration::from_secs(5)
                     });
                 }
 
