@@ -25,7 +25,7 @@ use std::time::Duration;
 use std::io::{Cursor, Read, SeekFrom};
 
 use tokio::sync::{Mutex, RwLock};
-use tokio::io::{BufWriter, AsyncSeekExt, AsyncWriteExt};
+use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 use tokio::fs::File;
 
 use md5::{Md5, Digest};
@@ -585,10 +585,7 @@ impl SophonDownloader {
 
             file.set_len(asset.size).await?;
 
-            let file = Arc::new(Mutex::new(
-                // Increase default buffer to 64 KB because chunks are large.
-                BufWriter::with_capacity(64 * 1024, file)
-            ));
+            let file = Arc::new(Mutex::new(file));
 
             // Calculate memory needed to store all file chunks.
             let download_size = asset.chunks.iter()
