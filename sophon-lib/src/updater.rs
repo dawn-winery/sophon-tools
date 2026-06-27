@@ -365,6 +365,30 @@ type PatchQueueReceiver<'a, 'b> = SizeLimitedQueueReceiver<'b, PatchLocation, Fi
 
 type BoxPatchFn = Box<dyn Fn(PatchFnArgs<'_>) -> std::io::Result<()> + Sync>;
 
+type UpdaterFnBox<'a> = Box<dyn UpdaterFn<'a>>;
+
+pub trait UpdaterFn<'a>: Fn(Update) + Send + 'a {
+    fn clone_box(&self) -> UpdaterFnBox<'a>;
+}
+
+impl<'a, T> UpdaterFn<'a> for T
+where
+    T: Clone,
+    T: Fn(Update),
+    T: Send,
+    T: 'a,
+{
+    fn clone_box(&self) -> UpdaterFnBox<'a> {
+        Box::new(T::clone(self))
+    }
+}
+
+impl<'a> Clone for UpdaterFnBox<'a> {
+    fn clone(&self) -> Self {
+        (**self).clone_box()
+    }
+}
+
 pub struct SophonPatcher {
     pub client: Client,
     pub patch_manifest: SophonPatchProto,
@@ -414,14 +438,12 @@ impl SophonPatcher {
         })
     }
 
-    #[inline]
     pub fn with_free_space_check(mut self, check: bool) -> Self {
         self.check_free_space = check;
 
         self
     }
 
-    #[inline]
     pub fn with_temp_folder(mut self, temp_folder: impl Into<PathBuf>) -> Self {
         self.temp_folder = temp_folder.into();
 
@@ -433,7 +455,7 @@ impl SophonPatcher {
         target_dir: impl AsRef<Path>,
         from: Version,
         thread_count: usize,
-        updater: impl Fn(Update) + Clone + Send,
+        updater: UpdaterFnBox,
     ) -> Result<(), SophonError> {
         let (download_threads, patch_threads) = super::divide_threads(thread_count)?;
 
@@ -641,7 +663,7 @@ impl SophonPatcher {
         &self,
         from: Version,
         thread_count: usize,
-        updater: impl Fn(Update) + Clone + Send,
+        updater: UpdaterFnBox,
     ) -> Result<(), SophonError> {
         if self.check_free_space {
             tracing::info!("Checking free space availability");
@@ -1224,7 +1246,6 @@ impl SophonPatcher {
     }
 
     /// Folder to temporarily store files being updated (patched, created, etc).
-    #[inline]
     pub fn files_temp(&self) -> PathBuf {
         self.temp_folder
             .join(format!("updating-{}", self.diff_info.matching_field))
@@ -1239,7 +1260,6 @@ impl SophonPatcher {
     }
 
     /// Folder to temporarily store hdiff files
-    #[inline]
     fn patches_temp(&self) -> PathBuf {
         self.files_temp().join("patches")
     }
@@ -1254,7 +1274,6 @@ impl SophonPatcher {
     }
 
     /// Folder to temporarily store downloaded patch chunks
-    #[inline]
     fn patch_chunk_temp_folder(&self) -> PathBuf {
         self.files_temp().join("patch_chunks")
     }

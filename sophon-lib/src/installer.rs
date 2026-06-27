@@ -75,7 +75,6 @@ impl ChunkInfo<'_> {
 
     /// returns the expected size and md5 hash that will be used to download and
     /// check this chunk
-    #[inline(always)]
     fn chunk_file_info(&self) -> (u64, &str) {
         if self.is_compressed() {
             (
@@ -303,6 +302,30 @@ impl SizeLimitedQueuePayload for ChunkInfo<'_> {
 type ChunkQueueSender<'a, 'b> = SizeLimitedQueueSender<'b, ChunkLocation, ChunkInfo<'a>>;
 type ChunkQueueReceiver<'a, 'b> = SizeLimitedQueueReceiver<'b, ChunkLocation, ChunkInfo<'a>>;
 
+type UpdaterFnBox<'a> = Box<dyn UpdaterFn<'a>>;
+
+pub trait UpdaterFn<'a>: Fn(Update) + Send + 'a {
+    fn clone_box(&self) -> UpdaterFnBox<'a>;
+}
+
+impl<'a, T> UpdaterFn<'a> for T
+where
+    T: Clone,
+    T: Fn(Update),
+    T: Send,
+    T: 'a,
+{
+    fn clone_box(&self) -> UpdaterFnBox<'a> {
+        Box::new(T::clone(self))
+    }
+}
+
+impl<'a> Clone for UpdaterFnBox<'a> {
+    fn clone(&self) -> Self {
+        (**self).clone_box()
+    }
+}
+
 #[derive(Debug)]
 pub struct SophonInstaller {
     pub manifest: SophonManifestProto,
@@ -346,7 +369,7 @@ impl SophonInstaller {
         &self,
         output_folder: &Path,
         thread_count: usize,
-        updater: impl Fn(Update) + Clone + Send,
+        updater: UpdaterFnBox,
     ) -> Result<(), SophonError> {
         if self.check_free_space {
             tracing::info!("Checking free space availability");
@@ -666,7 +689,7 @@ impl SophonInstaller {
     pub fn pre_download(
         &self,
         thread_count: usize,
-        updater: impl Fn(Update) + Clone + Send,
+        updater: UpdaterFnBox,
     ) -> Result<(), SophonError> {
         if self.check_free_space {
             tracing::info!("Checking free space availability");
@@ -1200,14 +1223,12 @@ impl SophonInstaller {
         }
     }
 
-    #[inline]
     pub fn with_free_space_check(mut self, check: bool) -> Self {
         self.check_free_space = check;
 
         self
     }
 
-    #[inline]
     pub fn with_temp_folder(mut self, temp_folder: PathBuf) -> Self {
         self.temp_folder = temp_folder;
 
@@ -1215,7 +1236,6 @@ impl SophonInstaller {
     }
 
     /// Folder to temporarily store files being downloaded
-    #[inline]
     pub fn downloading_temp(&self) -> PathBuf {
         self.temp_folder
             .join(format!("downloading-{}", self.download_info.matching_field))
@@ -1226,12 +1246,10 @@ impl SophonInstaller {
     }
 
     /// Folder to temporarily store chunks
-    #[inline]
     fn chunk_temp_folder(&self) -> PathBuf {
         self.downloading_temp().join("chunks")
     }
 
-    #[inline]
     fn tmp_downloading_folder(&self) -> PathBuf {
         self.downloading_temp().join("files-in-progress")
     }

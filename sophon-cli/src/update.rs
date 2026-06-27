@@ -195,13 +195,13 @@ impl UpdateArgs {
                     &self.game.game_dir,
                     Version::from_str(&self.from).expect("API must have valid version string"),
                     thread_count,
-                    updater,
+                    Box::new(updater),
                 )
             } else {
                 patcher.pre_download(
                     Version::from_str(&self.from).expect("API must have valid version string"),
                     thread_count,
-                    updater,
+                    Box::new(updater),
                 )
             };
 

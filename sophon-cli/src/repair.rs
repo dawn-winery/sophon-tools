@@ -133,7 +133,7 @@ impl RepairArgs {
             downloader.skip_download_repair = self.dry_run;
             downloader.mode_repair = true;
 
-            if let Err(why) = downloader.install(&self.game.game_dir, threads, updater) {
+            if let Err(why) = downloader.install(&self.game.game_dir, threads, Box::new(updater)) {
                 output.abort_msg(&format!(
                     "Failed to repair component `{}`: {why:?}",
                     download_info.matching_field

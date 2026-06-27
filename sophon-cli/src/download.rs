@@ -123,9 +123,9 @@ impl DownloadArgs {
             downloader.chunks_queue_data_limit = self.extra.memory_buffer_limit;
 
             let res = if !self.extra.preload_pretend {
-                downloader.install(&self.game.game_dir, threads, updater)
+                downloader.install(&self.game.game_dir, threads, Box::new(updater))
             } else {
-                downloader.pre_download(threads, updater)
+                downloader.pre_download(threads, Box::new(updater))
             };
             if let Err(why) = res {
                 output.abort_msg(&format!(
