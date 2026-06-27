@@ -23,7 +23,10 @@ use std::io::{BufReader, Read};
 
 use md5::{Md5, Digest};
 
-use super::*;
+use crate::region::SophonRegion;
+
+use super::{SophonApi, SophonApiError};
+use super::responses::{GamePackageInfo, GameVersionsInfo, GameConfigInfo};
 use super::package::SophonApiPackage;
 
 /// Wrapper around the `SophonApi` struct that allows you to easily read
@@ -73,7 +76,7 @@ impl<'api> SophonApiGame<'api> {
     /// Try to find branch information about the current game.
     pub async fn fetch_branch_info(
         &self
-    ) -> Result<SophonApiGameBranch, SophonApiError> {
+    ) -> Result<GamePackageInfo, SophonApiError> {
         let game_branches = self.api.fetch_games_branches_info(
             self.region,
             Some(self.launcher_id.clone())
@@ -81,9 +84,9 @@ impl<'api> SophonApiGame<'api> {
 
         let Some(game_branch) = game_branches.iter()
             .find(|game_branch| {
-                game_branch.game_id == self.game_id
-                    || game_branch.game_biz == self.game_id
-                    || game_branch.package_id == self.game_id
+                game_branch.game.game_id == self.game_id
+                    || game_branch.game.game_biz == self.game_id
+                    || game_branch.branch.package_id == self.game_id
             })
         else {
             return Err(SophonApiError::GameNotFound {
@@ -99,7 +102,7 @@ impl<'api> SophonApiGame<'api> {
     /// Try to find versions info about the current game.
     pub async fn fetch_versions_info(
         &self
-    ) -> Result<SophonApiGameVersionsInfo, SophonApiError> {
+    ) -> Result<GameVersionsInfo, SophonApiError> {
         let versions_info = self.api.fetch_games_versions_info(
             self.region,
             Some(self.launcher_id.clone())
@@ -121,7 +124,7 @@ impl<'api> SophonApiGame<'api> {
     /// Try to find configs for the current game.
     pub async fn fetch_configs(
         &self
-    ) -> Result<SophonApiGameConfigs, SophonApiError> {
+    ) -> Result<GameConfigInfo, SophonApiError> {
         let game_configs = self.api.fetch_games_configs(
             self.region,
             Some(self.launcher_id.clone())
@@ -129,8 +132,8 @@ impl<'api> SophonApiGame<'api> {
 
         let Some(game_config) = game_configs.iter()
             .find(|game_config| {
-                game_config.game_id == self.game_id
-                    || game_config.game_biz == self.game_id
+                game_config.game.game_id == self.game_id
+                    || game_config.game.game_biz == self.game_id
             })
         else {
             return Err(SophonApiError::GameNotFound {
@@ -154,16 +157,16 @@ impl<'api> SophonApiGame<'api> {
         Ok(SophonApiPackage::new(
             self.api,
             self.region,
-            branch_info.branch,
-            branch_info.password,
-            branch_info.package_id,
-            version.unwrap_or(branch_info.version)
+            branch_info.branch.branch_name.clone(),
+            branch_info.branch.password,
+            branch_info.branch.package_id,
+            version.unwrap_or(branch_info.branch.version)
         ))
     }
 
     /// Get latest available game version.
     pub async fn latest_version(&self) -> Result<String, SophonApiError> {
-        Ok(self.fetch_branch_info().await?.version)
+        Ok(self.fetch_branch_info().await?.branch.version)
     }
 
     /// Get list of versions from which the game can be updated to the latest
@@ -171,7 +174,7 @@ impl<'api> SophonApiGame<'api> {
     pub async fn updatable_versions(
         &self
     ) -> Result<Box<[String]>, SophonApiError> {
-        Ok(self.fetch_branch_info().await?.diff_versions)
+        Ok(self.fetch_branch_info().await?.branch.diff_versions)
     }
 
     /// Try to detect downloaded game version. The algorithm will fetch expected

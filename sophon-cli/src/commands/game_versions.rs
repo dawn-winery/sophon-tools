@@ -44,6 +44,7 @@ pub fn run(
     let game_versions = match runtime.block_on(game.fetch_versions_info()) {
         Ok(game_versions) => game_versions,
 
+        // Guess game id from name.
         Err(SophonApiError::GameNotFound { .. }) => {
             let games_branches = runtime.block_on(api.fetch_games_branches_info(
                 api_args.region.into(),
@@ -51,14 +52,14 @@ pub fn run(
             )).map_err(|err| anyhow::anyhow!(err.to_string()))?;
 
             for game_branch in games_branches.iter() {
-                if game_branch.game_id == game_id
-                    || game_branch.game_biz == game_id
-                    || game_branch.package_id == game_id
+                if game_branch.game.game_id == game_id
+                    || game_branch.game.game_biz == game_id
+                    || game_branch.branch.package_id == game_id
                 {
                     game = api.game(
                         api_args.region.into(),
                         api_args.launcher_id,
-                        game_branch.game_id.clone()
+                        game_branch.game.game_id.clone()
                     );
 
                     break;

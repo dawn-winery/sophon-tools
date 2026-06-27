@@ -31,7 +31,7 @@ use tokio::fs::File;
 use md5::{Md5, Digest};
 use prost::{Message, DecodeError};
 
-use crate::api::package_download_info::SophonApiPackageManifest;
+use crate::api::responses::DownloadGameComponentInfo;
 use crate::protos::{SophonDownloadAssetsInfo, SophonDownloadAssetsInfoAsset};
 use crate::verifier::{SophonVerifier, SophonVerifierAsset, VerifyResult};
 
@@ -313,7 +313,7 @@ impl SophonDownloader {
     /// need to download.
     pub async fn fetch_download_info(
         &self,
-        download_info: &SophonApiPackageManifest
+        download_info: &DownloadGameComponentInfo
     ) -> Result<Arc<SophonDownloadAssetsInfo>, SophonDownloaderError> {
         if download_info.manifest_download.encrypted {
             return Err(SophonDownloaderError::EncryptionNotSupported);
@@ -453,7 +453,7 @@ impl SophonDownloader {
     ///    space to fit the asset - create new task for it and only it anyway.
     pub async fn download(
         self,
-        download_info: &SophonApiPackageManifest,
+        download_info: &DownloadGameComponentInfo,
         download_dir: &Path,
         progress_updater: Arc<dyn Fn(SophonDownloaderProgressMsg) + Send + Sync>
     ) -> Result<(), SophonDownloaderError> {

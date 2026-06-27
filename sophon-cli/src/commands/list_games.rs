@@ -65,17 +65,17 @@ pub fn run(
 
             for game_branch in games_branches.iter() {
                 let game_name = find_game_name(
-                    &game_branch.game_id,
-                    &game_branch.game_biz
+                    &game_branch.game.game_id,
+                    &game_branch.game.game_biz
                 );
 
                 table.add_row([
-                    &game_branch.game_id,
-                    &game_branch.game_biz,
+                    &game_branch.game.game_id,
+                    &game_branch.game.game_biz,
                     game_name.unwrap_or("-"),
-                    &game_branch.version,
-                    &game_branch.package_id,
-                    &game_branch.password
+                    &game_branch.branch.version,
+                    &game_branch.branch.package_id,
+                    &game_branch.branch.password
                 ]);
             }
 
@@ -88,16 +88,16 @@ pub fn run(
                     .map(|game_branch| {
                         serde_json::json!({
                             "game": {
-                                "id": game_branch.game_id,
-                                "biz": game_branch.game_biz
+                                "id": game_branch.game.game_id,
+                                "biz": game_branch.game.game_biz
                             },
                             "package": {
-                                "id": game_branch.package_id,
-                                "branch": game_branch.branch,
-                                "password": game_branch.password
+                                "id": game_branch.branch.package_id,
+                                "branch": game_branch.branch.branch_name,
+                                "password": game_branch.branch.password
                             },
-                            "version": game_branch.version,
-                            "diff_versions": game_branch.diff_versions
+                            "version": game_branch.branch.version,
+                            "diff_versions": game_branch.branch.diff_versions
                         })
                     })
                     .collect::<Vec<_>>()

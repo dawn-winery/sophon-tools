@@ -68,7 +68,7 @@ pub fn run(
                 "title"
             ]);
 
-            for category in game_branch.categories {
+            for category in game_branch.branch.categories {
                 if show_all || is_category_known(&category.name) {
                     table.add_row([
                         &category.id,
@@ -83,7 +83,7 @@ pub fn run(
 
         OutputFormat::Json => {
             println!("{}", serde_json::to_string(&serde_json::json!(
-                game_branch.categories.into_iter()
+                game_branch.branch.categories.into_iter()
                     .filter(|category| {
                         show_all || is_category_known(&category.name)
                     })

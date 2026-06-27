@@ -17,7 +17,15 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-use super::*;
+use std::sync::Arc;
+
+use crate::region::SophonRegion;
+
+use super::{SophonApi, SophonApiError};
+use super::responses::{
+    DownloadGameResponse, DownloadGameComponentInfo,
+    UpdateGameResponse, UpdateGameComponentInfo
+};
 
 /// Wrapper around the `SophonApi` struct that allows you to easily read
 /// information about the game package (branch).
@@ -82,7 +90,7 @@ impl<'api> SophonApiPackage<'api> {
     /// Fetch current game package files download info.
     pub async fn fetch_download_info(
         &self
-    ) -> Result<Arc<SophonApiPackageDownloadInfo>, SophonApiError> {
+    ) -> Result<Arc<DownloadGameResponse>, SophonApiError> {
         self.api.fetch_package_download_info(
             self.region,
             self.branch.clone(),
@@ -96,7 +104,7 @@ impl<'api> SophonApiPackage<'api> {
     /// selected version to the latest available one.
     pub async fn fetch_update_info(
         &self
-    ) -> Result<Arc<SophonApiPackageUpdateInfo>, SophonApiError> {
+    ) -> Result<Arc<UpdateGameResponse>, SophonApiError> {
         self.api.fetch_package_update_info(
             self.region,
             self.branch.clone(),
@@ -111,7 +119,7 @@ impl<'api> SophonApiPackage<'api> {
     pub async fn find_download_manifest(
         &self,
         query: &str
-    ) -> Result<Option<package_download_info::SophonApiPackageManifest>, SophonApiError> {
+    ) -> Result<Option<DownloadGameComponentInfo>, SophonApiError> {
         let download_info = self.fetch_download_info().await?;
 
         let manifest = download_info.manifests.iter()
@@ -129,7 +137,7 @@ impl<'api> SophonApiPackage<'api> {
     pub async fn find_update_manifest(
         &self,
         query: &str
-    ) -> Result<Option<package_update_info::SophonApiPackageManifest>, SophonApiError> {
+    ) -> Result<Option<UpdateGameComponentInfo>, SophonApiError> {
         let update_info = self.fetch_update_info().await?;
 
         let manifest = update_info.manifests.iter()

@@ -22,25 +22,20 @@ use std::time::Duration;
 
 use tokio::sync::RwLock;
 
-use serde_json::Value as Json;
-
-pub mod game_branch;
-pub mod game_versions_info;
-pub mod game_configs;
-pub mod sophon_manifest_info;
-pub mod sophon_download_info;
-pub mod package_download_info;
-pub mod package_update_info;
+pub mod responses;
 pub mod game;
 pub mod package;
 
 use crate::region::SophonRegion;
 
-use game_branch::SophonApiGameBranch;
-use game_versions_info::SophonApiGameVersionsInfo;
-use game_configs::SophonApiGameConfigs;
-use package_download_info::SophonApiPackageDownloadInfo;
-use package_update_info::SophonApiPackageUpdateInfo;
+use responses::{
+    SophonApiResponse,
+    GamesBranchesResponse, GamePackageInfo,
+    GameVersionsResponse, GameVersionsInfo,
+    GamesConfigsResponse, GameConfigInfo,
+    DownloadGameResponse,
+    UpdateGameResponse
+};
 use game::SophonApiGame;
 
 #[derive(Debug, thiserror::Error)]
@@ -74,32 +69,6 @@ pub enum SophonApiError {
     Other(Box<dyn std::error::Error>)
 }
 
-#[derive(Debug)]
-struct SophonApiResponse<'response> {
-    pub code: i64,
-    pub message: String,
-    pub data: Option<&'response Json>
-}
-
-impl<'response> TryFrom<&'response Json> for SophonApiResponse<'response> {
-    type Error = SophonApiError;
-
-    fn try_from(value: &'response Json) -> Result<Self, Self::Error> {
-        Ok(Self {
-            code: value.get("retcode")
-                .and_then(Json::as_i64)
-                .ok_or(SophonApiError::InvalidSophonResponse)?,
-
-            message: value.get("message")
-                .and_then(Json::as_str)
-                .map(String::from)
-                .ok_or(SophonApiError::InvalidSophonResponse)?,
-
-            data: value.get("data")
-        })
-    }
-}
-
 #[derive(Default)]
 struct GameCacheSlot<T> {
     pub region: SophonRegion,
@@ -127,12 +96,12 @@ pub struct SophonApi {
     package_download_info_timeout: Option<Duration>,
     package_update_info_timeout: Option<Duration>,
 
-    game_branches_cache: RwLock<Vec<GameCacheSlot<Box<[SophonApiGameBranch]>>>>,
-    game_versions_info_cache: RwLock<Vec<GameCacheSlot<Box<[SophonApiGameVersionsInfo]>>>>,
-    game_configs_cache: RwLock<Vec<GameCacheSlot<Box<[SophonApiGameConfigs]>>>>,
+    game_branches_cache: RwLock<Vec<GameCacheSlot<Box<[GamePackageInfo]>>>>,
+    game_versions_cache: RwLock<Vec<GameCacheSlot<Box<[GameVersionsInfo]>>>>,
+    game_configs_cache: RwLock<Vec<GameCacheSlot<Box<[GameConfigInfo]>>>>,
 
-    package_download_info_cache: RwLock<Vec<PackageCacheSlot<SophonApiPackageDownloadInfo>>>,
-    package_update_info_cache: RwLock<Vec<PackageCacheSlot<SophonApiPackageUpdateInfo>>>
+    package_download_info_cache: RwLock<Vec<PackageCacheSlot<DownloadGameResponse>>>,
+    package_update_info_cache: RwLock<Vec<PackageCacheSlot<UpdateGameResponse>>>
 }
 
 impl Default for SophonApi {
@@ -150,7 +119,7 @@ impl Default for SophonApi {
             package_update_info_timeout: None,
 
             game_branches_cache: RwLock::const_new(Vec::with_capacity(1)),
-            game_versions_info_cache: RwLock::const_new(Vec::with_capacity(1)),
+            game_versions_cache: RwLock::const_new(Vec::with_capacity(1)),
             game_configs_cache: RwLock::const_new(Vec::with_capacity(1)),
 
             package_download_info_cache: RwLock::const_new(Vec::with_capacity(1)),
@@ -232,7 +201,7 @@ impl SophonApi {
         &self,
         region: SophonRegion,
         launcher_id: Option<String>
-    ) -> Result<Arc<Box<[SophonApiGameBranch]>>, SophonApiError> {
+    ) -> Result<Arc<Box<[GamePackageInfo]>>, SophonApiError> {
         let launcher_id = launcher_id.unwrap_or_else(|| {
             region.launcher_id().to_string()
         });
@@ -271,11 +240,9 @@ impl SophonApi {
             .send()
             .await?;
 
-        let response = serde_json::from_slice::<Json>(
+        let response = serde_json::from_slice::<SophonApiResponse<GamesBranchesResponse>>(
             &response.bytes().await?
         )?;
-
-        let response = SophonApiResponse::try_from(&response)?;
 
         let Some(response) = response.data else {
             return Err(SophonApiError::InvalidSophonStatus {
@@ -284,20 +251,7 @@ impl SophonApi {
             });
         };
 
-        let Some(game_branches) = response.get("game_branches")
-            .and_then(Json::as_array)
-        else {
-            return Err(SophonApiError::InvalidSophonResponse);
-        };
-
-        let game_branches = game_branches.iter()
-            .map(|game_branch| {
-                SophonApiGameBranch::try_from(game_branch)
-                    .map_err(|err| SophonApiError::Other(err.into()))
-            })
-            .collect::<Result<Box<[_]>, SophonApiError>>()?;
-
-        let value = Arc::new(game_branches);
+        let value = Arc::new(response.values);
 
         self.game_branches_cache.write().await.push(GameCacheSlot {
             region,
@@ -317,12 +271,12 @@ impl SophonApi {
         &self,
         region: SophonRegion,
         launcher_id: Option<String>
-    ) -> Result<Arc<Box<[SophonApiGameVersionsInfo]>>, SophonApiError> {
+    ) -> Result<Arc<Box<[GameVersionsInfo]>>, SophonApiError> {
         let launcher_id = launcher_id.unwrap_or_else(|| {
             region.launcher_id().to_string()
         });
 
-        if let Some(slot) = self.game_versions_info_cache.read().await.iter()
+        if let Some(slot) = self.game_versions_cache.read().await.iter()
             .find(|slot| {
                 slot.region == region && slot.launcher_id == launcher_id
             })
@@ -356,11 +310,9 @@ impl SophonApi {
             .send()
             .await?;
 
-        let response = serde_json::from_slice::<Json>(
+        let response = serde_json::from_slice::<SophonApiResponse<GameVersionsResponse>>(
             &response.bytes().await?
         )?;
-
-        let response = SophonApiResponse::try_from(&response)?;
 
         let Some(response) = response.data else {
             return Err(SophonApiError::InvalidSophonStatus {
@@ -369,22 +321,9 @@ impl SophonApi {
             });
         };
 
-        let Some(versions_info) = response.get("game_scan_info")
-            .and_then(Json::as_array)
-        else {
-            return Err(SophonApiError::InvalidSophonResponse);
-        };
+        let value = Arc::new(response.values);
 
-        let versions_info = versions_info.iter()
-            .map(|versions_info| {
-                SophonApiGameVersionsInfo::try_from(versions_info)
-                    .map_err(|err| SophonApiError::Other(err.into()))
-            })
-            .collect::<Result<Box<[_]>, SophonApiError>>()?;
-
-        let value = Arc::new(versions_info);
-
-        self.game_versions_info_cache.write().await.push(GameCacheSlot {
+        self.game_versions_cache.write().await.push(GameCacheSlot {
             region,
             launcher_id,
             value: value.clone()
@@ -403,7 +342,7 @@ impl SophonApi {
         &self,
         region: SophonRegion,
         launcher_id: Option<String>
-    ) -> Result<Arc<Box<[SophonApiGameConfigs]>>, SophonApiError> {
+    ) -> Result<Arc<Box<[GameConfigInfo]>>, SophonApiError> {
         let launcher_id = launcher_id.unwrap_or_else(|| {
             region.launcher_id().to_string()
         });
@@ -442,11 +381,9 @@ impl SophonApi {
             .send()
             .await?;
 
-        let response = serde_json::from_slice::<Json>(
+        let response = serde_json::from_slice::<SophonApiResponse<GamesConfigsResponse>>(
             &response.bytes().await?
         )?;
-
-        let response = SophonApiResponse::try_from(&response)?;
 
         let Some(response) = response.data else {
             return Err(SophonApiError::InvalidSophonStatus {
@@ -455,20 +392,7 @@ impl SophonApi {
             });
         };
 
-        let Some(game_configs) = response.get("launch_configs")
-            .and_then(Json::as_array)
-        else {
-            return Err(SophonApiError::InvalidSophonResponse);
-        };
-
-        let game_configs = game_configs.iter()
-            .map(|game_config| {
-                SophonApiGameConfigs::try_from(game_config)
-                    .map_err(|err| SophonApiError::Other(err.into()))
-            })
-            .collect::<Result<Box<[_]>, SophonApiError>>()?;
-
-        let value = Arc::new(game_configs);
+        let value = Arc::new(response.values);
 
         self.game_configs_cache.write().await.push(GameCacheSlot {
             region,
@@ -492,7 +416,7 @@ impl SophonApi {
         password: String,
         package_id: String,
         version: String
-    ) -> Result<Arc<SophonApiPackageDownloadInfo>, SophonApiError> {
+    ) -> Result<Arc<DownloadGameResponse>, SophonApiError> {
         if let Some(slot) = self.package_download_info_cache.read().await.iter()
             .find(|slot| {
                 slot.region == region
@@ -540,11 +464,9 @@ impl SophonApi {
             .send()
             .await?;
 
-        let response = serde_json::from_slice::<Json>(
+        let response = serde_json::from_slice::<SophonApiResponse<DownloadGameResponse>>(
             &response.bytes().await?
         )?;
-
-        let response = SophonApiResponse::try_from(&response)?;
 
         let Some(response) = response.data else {
             return Err(SophonApiError::InvalidSophonStatus {
@@ -553,10 +475,7 @@ impl SophonApi {
             });
         };
 
-        let download_info = SophonApiPackageDownloadInfo::try_from(response)
-            .map_err(|err| SophonApiError::Other(err.into()))?;
-
-        let value = Arc::new(download_info);
+        let value = Arc::new(response);
 
         self.package_download_info_cache.write().await.push(PackageCacheSlot {
             region,
@@ -583,7 +502,7 @@ impl SophonApi {
         password: String,
         package_id: String,
         version: String
-    ) -> Result<Arc<SophonApiPackageUpdateInfo>, SophonApiError> {
+    ) -> Result<Arc<UpdateGameResponse>, SophonApiError> {
         if let Some(slot) = self.package_update_info_cache.read().await.iter()
             .find(|slot| {
                 slot.region == region
@@ -631,11 +550,9 @@ impl SophonApi {
             .send()
             .await?;
 
-        let response = serde_json::from_slice::<Json>(
+        let response = serde_json::from_slice::<SophonApiResponse<UpdateGameResponse>>(
             &response.bytes().await?
         )?;
-
-        let response = SophonApiResponse::try_from(&response)?;
 
         let Some(response) = response.data else {
             return Err(SophonApiError::InvalidSophonStatus {
@@ -644,10 +561,7 @@ impl SophonApi {
             });
         };
 
-        let package_info = SophonApiPackageUpdateInfo::try_from(response)
-            .map_err(|err| SophonApiError::Other(err.into()))?;
-
-        let value = Arc::new(package_info);
+        let value = Arc::new(response);
 
         self.package_update_info_cache.write().await.push(PackageCacheSlot {
             region,

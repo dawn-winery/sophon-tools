@@ -31,7 +31,7 @@ use tokio::io::{BufReader, AsyncReadExt};
 use md5::{Md5, Digest};
 use prost::{Message, DecodeError};
 
-use crate::api::package_update_info::SophonApiPackageManifest;
+use crate::api::responses::UpdateGameComponentInfo;
 use crate::protos::{SophonUpdateAssetsInfo, SophonUpdateAssetsInfoAsset};
 use crate::verifier::{SophonVerifier, SophonVerifierAsset, VerifyResult};
 use crate::patcher::HdiffPatcher;
@@ -391,7 +391,7 @@ impl SophonUpdater {
     /// need to update.
     pub async fn fetch_manifest(
         &self,
-        download_info: &SophonApiPackageManifest
+        download_info: &UpdateGameComponentInfo
     ) -> Result<Arc<SophonUpdateAssetsInfo>, SophonUpdaterError> {
         if download_info.manifest_download.encrypted {
             return Err(SophonUpdaterError::EncryptionNotSupported);
@@ -556,7 +556,7 @@ impl SophonUpdater {
     ///     space to fit the patch - create new task for it and only it anyway.
     pub async fn update(
         self,
-        update_info: &SophonApiPackageManifest,
+        update_info: &UpdateGameComponentInfo,
         update_version: &str,
         chunks_dir: &Path,
         update_dir: &Path,

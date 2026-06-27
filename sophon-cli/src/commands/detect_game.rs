@@ -44,7 +44,7 @@ pub fn run(
             .map_err(|err| anyhow::anyhow!(err.to_string()))?;
 
         for game_branch in games_branches.iter() {
-            let game = api.game(region, None, game_branch.game_id.clone());
+            let game = api.game(region, None, game_branch.game.game_id.clone());
 
             match runtime.block_on(game.detect_version(&game_dir)) {
                 Ok(Some(version)) => {
@@ -85,10 +85,10 @@ pub fn run(
             table.set_header(["field", "value"]);
 
             table.add_row(["id", game.game_id()]);
-            table.add_row(["biz", &game_configs.game_biz]);
+            table.add_row(["biz", &game_configs.game.game_biz]);
             table.add_row([
                 "name",
-                find_game_name(game.game_id(), &game_configs.game_biz)
+                find_game_name(game.game_id(), &game_configs.game.game_biz)
                     .unwrap_or("-")
             ]);
             table.add_row(["version", &version]);
@@ -101,7 +101,7 @@ pub fn run(
             println!("{}", serde_json::to_string(&serde_json::json!({
                 "game": {
                     "id": game.game_id(),
-                    "biz": game_configs.game_biz
+                    "biz": game_configs.game.game_biz
                 },
                 "version": version,
                 "binary": game_configs.binary_name

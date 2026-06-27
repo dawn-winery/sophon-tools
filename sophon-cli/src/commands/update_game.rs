@@ -22,6 +22,7 @@ use std::path::PathBuf;
 
 use regex::Regex;
 
+use sophon_lib::api::SophonApiError;
 use sophon_lib::verifier::VerifyResult;
 use sophon_lib::downloader::SophonDownloaderProgressMsg;
 use sophon_lib::updater::SophonUpdaterProgressMsg;
@@ -54,19 +55,52 @@ pub fn run(
 
     let api = api_client.build()?;
 
-    let game = api.game(
+    let mut game = api.game(
         api_args.region.into(),
-        api_args.launcher_id,
-        game_id
+        api_args.launcher_id.clone(),
+        game_id.clone()
     );
 
     // Detect current game version.
     let from_version = match from_version {
         Some(version) => version,
+
+        // Guess game id from name.
         None => {
-            runtime.block_on(game.detect_version(&game_dir))
-                .map_err(|err| anyhow::anyhow!(err.to_string()))?
-                .ok_or_else(|| anyhow::anyhow!("failed to detect installed game version"))?
+            let version = match runtime.block_on(game.detect_version(&game_dir)) {
+                Ok(version) => version,
+
+                Err(SophonApiError::GameNotFound { .. }) => {
+                    let games_branches = runtime.block_on(api.fetch_games_branches_info(
+                        api_args.region.into(),
+                        api_args.launcher_id.clone()
+                    )).map_err(|err| anyhow::anyhow!(err.to_string()))?;
+
+                    for game_branch in games_branches.iter() {
+                        if game_branch.game.game_id == game_id
+                            || game_branch.game.game_biz == game_id
+                            || game_branch.branch.package_id == game_id
+                        {
+                            game = api.game(
+                                api_args.region.into(),
+                                api_args.launcher_id,
+                                game_branch.game.game_id.clone()
+                            );
+
+                            break;
+                        }
+                    }
+
+                    runtime.block_on(game.detect_version(&game_dir))
+                        .map_err(|err| anyhow::anyhow!(err.to_string()))?
+                }
+
+                Err(err) => anyhow::bail!(err.to_string())
+            };
+
+            version.ok_or_else(|| {
+                anyhow::anyhow!("failed to detect installed game version")
+            })?
         }
     };
 
