@@ -1,0 +1,47 @@
+when:
+  - event: push
+    branch: ${CI_REPO_DEFAULT_BRANCH}
+  - event: pull_request
+  - event: tag
+    ref: "v*"
+  - event: manual
+
+steps:
+  - name: check
+    image: rust:trixie
+    commands:
+      - apt update
+      - apt install protobuf-compiler musl-tools
+      - ln -sf /usr/bin/musl-gcc /usr/local/bin/x86_64-unknown-linux-musl-gcc
+      - cargo check --target x86_64-unknown-linux-musl --verbose
+    when:
+      - event: [push, pull_request]
+
+  - name: build
+    image: rust:trixie
+    commands:
+      - apt update
+      - apt install protobuf-compiler musl-tools
+      - ln -sf /usr/bin/musl-gcc /usr/local/bin/x86_64-unknown-linux-musl-gcc
+      - cargo build --release --target x86_64-unknown-linux-musl --bin sophon-cli --verbose
+      - mv target/x86_64-unknown-linux-musl/release/sophon-cli sophon-tools
+    when:
+      - event: [tag, manual]
+
+  - name: release
+    image: alpine:3.24
+    commands:
+      - apk add --no-cache curl jq
+      - |
+        set -e
+        api="https://dawn.wine/api/v1/repos/${CI_REPO}"
+        release_id=$(curl -sS -H "Authorization: Bearer $FORGEJO_TOKEN" \
+          "${api}/releases/tags/${CI_TAG}" | jq -r '.id')
+        [ "$release_id" != "null" ] || { echo "Release not found for tag ${CI_TAG}"; exit 1; }
+        curl -X POST -S \
+          -H "Authorization: Bearer $FORGEJO_TOKEN" \
+          -F "attachment=@sophon-tools" \
+          "${api}/releases/${release_id}/assets"
+    when:
+      - event: tag
+    secrets: [FORGEJO_TOKEN]
