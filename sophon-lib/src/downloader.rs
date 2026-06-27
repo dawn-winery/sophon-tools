@@ -339,7 +339,7 @@ impl SophonDownloader {
             && let Some(content_length) = response.content_length()
             && content_length != download_info.manifest_info.compressed_size
         {
-            return Err(SophonDownloaderError::ChunkSizeMismatch {
+            return Err(SophonDownloaderError::ManifestSizeMismatch {
                 url,
                 actual: content_length,
                 expected: download_info.manifest_info.compressed_size
