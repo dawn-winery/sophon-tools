@@ -17,9 +17,9 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use regex::Regex;
 
@@ -42,6 +42,7 @@ pub fn run(
     version: Option<String>,
     regex: Option<String>,
     fast_verify: bool,
+    show_missing: bool,
     threads: usize,
     api_client: SophonApiClientArgs,
     output_format: OutputFormat
@@ -58,6 +59,8 @@ pub fn run(
 
     while let Some(path) = entries.pop_back() {
         if !path.is_dir() {
+            entries.push_front(path);
+
             break;
         }
 
@@ -111,12 +114,11 @@ pub fn run(
 
     let download_info = Arc::unwrap_or_clone(download_info);
 
+    let scanned_paths = Arc::new(Mutex::new(HashSet::with_capacity(entries.len())));
+
     let mut verifier = SophonVerifier::from(download_info.assets)
         .with_runtime(runtime.handle().clone())
-        .with_fast_verify(fast_verify)
-        .with_assets_filter(Box::new(move |path| {
-            entries.iter().any(|entry_path| entry_path == path)
-        }));
+        .with_fast_verify(fast_verify);
 
     match output_format {
         OutputFormat::Text => {
@@ -131,43 +133,92 @@ pub fn run(
                     .print_holdoff(std::time::Duration::ZERO)
             );
 
-            runtime.block_on(verifier.scan_directory(
-                game_dir,
-                Arc::new(move |update| {
-                    match update.result {
-                        VerifyResult::Valid   => view.message(format!("      valid  {:#?}\n", update.path)),
-                        VerifyResult::Invalid => view.message(format!("[!] invalid  {:#?}\n", update.path)),
-                        VerifyResult::Unknown => view.message(format!("[?] unknown  {:#?}\n", update.path)),
-                    };
+            // Scan installed game files.
+            {
+                let scanned_paths = scanned_paths.clone();
 
-                    view.update(move |model| {
-                        model.current = update.current;
-                        model.total = update.total;
-                    });
-                })
-            ))?;
+                runtime.block_on(verifier.scan_directory(
+                    game_dir.clone(),
+                    Arc::new(move |update| {
+                        if let Ok(mut lock) = scanned_paths.lock() {
+                            lock.insert(update.path.clone());
+                        }
+
+                        match update.result {
+                            VerifyResult::Valid   => view.message(format!("      valid  {:#?}\n", update.path)),
+                            VerifyResult::Invalid => view.message(format!("[!] invalid  {:#?}\n", update.path)),
+                            VerifyResult::Unknown => view.message(format!("[?] unknown  {:#?}\n", update.path)),
+                        };
+
+                        view.update(move |model| {
+                            model.current = update.current;
+                            model.total = update.total;
+                        });
+                    })
+                ))?;
+            }
+
+            // Show missing files.
+            if let Ok(lock) = scanned_paths.lock() && show_missing {
+                for path in verifier.assets()
+                    .iter()
+                    .map(|asset| game_dir.join(&asset.path))
+                    .filter(|path| !lock.contains(path))
+                    .filter(|path| is_regex_match(regex.as_ref(), &path.to_string_lossy()))
+                {
+                    println!("[!] missing  {path:#?}");
+                }
+            }
         }
 
         OutputFormat::Json => {
-            runtime.block_on(verifier.scan_directory(
-                game_dir,
-                Arc::new(move |update| {
-                    let result = &serde_json::json!({
-                        "current": update.current,
-                        "total": update.total,
-                        "path": update.path,
-                        "result": match update.result {
-                            VerifyResult::Valid => "valid",
-                            VerifyResult::Invalid => "invalid",
-                            VerifyResult::Unknown => "unknown"
-                        }
-                    });
+            // Scan installed game files.
+            {
+                let scanned_paths = scanned_paths.clone();
 
-                    if let Ok(result) = serde_json::to_string(result) {
-                        println!("{result}");
-                    }
-                })
-            ))?;
+                runtime.block_on(verifier.scan_directory(
+                    game_dir.clone(),
+                    Arc::new(move |update| {
+                        if let Ok(mut lock) = scanned_paths.lock() {
+                            lock.insert(update.path.clone());
+                        }
+
+                        let result = serde_json::json!({
+                            "available": {
+                                "current": update.current,
+                                "total": update.total,
+                                "path": update.path,
+                                "result": match update.result {
+                                    VerifyResult::Valid => "valid",
+                                    VerifyResult::Invalid => "invalid",
+                                    VerifyResult::Unknown => "unknown"
+                                }
+                            }
+                        });
+
+                        if let Ok(result) = serde_json::to_string(&result) {
+                            println!("{result}");
+                        }
+                    })
+                ))?;
+            }
+
+            // Show missing files.
+            if let Ok(lock) = scanned_paths.lock() && show_missing {
+                for path in verifier.assets()
+                    .iter()
+                    .map(|asset| game_dir.join(&asset.path))
+                    .filter(|path| !lock.contains(path))
+                    .filter(|path| is_regex_match(regex.as_ref(), &path.to_string_lossy()))
+                {
+                    println!("{}", serde_json::to_string(&serde_json::json!({
+                        "missing": {
+                            "path": path,
+                            "result": "missing"
+                        }
+                    }))?);
+                }
+            }
         }
     }
 

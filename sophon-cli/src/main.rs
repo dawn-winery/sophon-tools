@@ -21,7 +21,7 @@ use std::path::PathBuf;
 
 use tracing_subscriber::prelude::*;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ArgAction};
 
 pub mod utils;
 pub mod args;
@@ -99,8 +99,29 @@ enum CliCommands {
         regex: Option<String>,
 
         /// Use files sizes for verification instead of calculating md5 hashes.
-        #[arg(long, alias = "fast", alias = "fast-verifying")]
+        #[arg(
+            long, default_value_t = false,
+            value_parser = clap::value_parser!(bool),
+            action = ArgAction::Set,
+            alias = "fast",
+            alias = "fast-verifying"
+        )]
         fast_verify: bool,
+
+        /// Show missing files.
+        ///
+        /// If unset, only installed files will be verifier.
+        ///
+        /// If set, verifier will list all the files that are missing from the
+        /// given game directory.
+        #[arg(
+            long, default_value_t = true,
+            value_parser = clap::value_parser!(bool),
+            action = ArgAction::Set,
+            alias = "missing",
+            alias = "find-missing"
+        )]
+        show_missing: bool,
 
         /// Amount of threads to use in the tokio async runtime.
         ///
@@ -422,6 +443,7 @@ fn main() -> anyhow::Result<()> {
             version,
             regex,
             fast_verify,
+            show_missing,
             threads,
             api_client,
             output_format
@@ -434,6 +456,7 @@ fn main() -> anyhow::Result<()> {
                 version,
                 regex,
                 fast_verify,
+                show_missing,
                 threads,
                 api_client,
                 output_format
