@@ -17,6 +17,7 @@ steps:
       - apt-get update
       - apt-get install -y protobuf-compiler musl-tools
       - ln -sf /usr/bin/musl-gcc /usr/local/bin/x86_64-unknown-linux-musl-gcc
+      - rustup target add x86_64-unknown-linux-musl
       - cargo check --target x86_64-unknown-linux-musl --verbose
     when:
       - event: [push, pull_request]
@@ -28,6 +29,7 @@ steps:
       - apt-get update
       - apt-get install -y protobuf-compiler musl-tools
       - ln -sf /usr/bin/musl-gcc /usr/local/bin/x86_64-unknown-linux-musl-gcc
+      - rustup target add x86_64-unknown-linux-musl
       - cargo build --release --target x86_64-unknown-linux-musl --bin sophon-cli --verbose
       - mv target/x86_64-unknown-linux-musl/release/sophon-cli sophon-tools
     when:
