@@ -539,7 +539,7 @@ impl SophonDownloader {
         }
 
         // Pre-calculate tasks queue capacity.
-        let median_task_size = assets.get(assets.len() / 3)
+        let median_task_size = assets.get(assets.len() / 2)
             .map(|(_, size)| *size)
             .unwrap_or(u64::MAX);
 

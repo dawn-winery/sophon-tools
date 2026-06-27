@@ -697,7 +697,7 @@ impl SophonUpdater {
         }
 
         // Pre-calculate tasks queue capacity.
-        let median_task_size = assets.get(assets.len() / 3)
+        let median_task_size = assets.get(assets.len() / 2)
             .and_then(|(_, size)| *size)
             .unwrap_or(u64::MAX);
 
@@ -952,7 +952,7 @@ impl SophonUpdater {
         }
 
         // Pre-calculate tasks queue capacity.
-        let median_task_size = patches.get(patches.len() / 3)
+        let median_task_size = patches.get(patches.len() / 2)
             .map(|patch_info| patch_info.patch_size)
             .unwrap_or(u64::MAX);
 
