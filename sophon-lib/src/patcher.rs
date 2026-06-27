@@ -54,9 +54,17 @@ impl From<PathBuf> for HdiffPatcher {
     }
 }
 
+impl From<HdiffPatcher> for PathBuf {
+    #[inline]
+    fn from(patcher: HdiffPatcher) -> Self {
+        patcher.0
+    }
+}
+
 impl HdiffPatcher {
     /// Write bundled hpatchz binary to the temp directory and point the patcher
     /// to use it.
+    #[inline(never)]
     pub async fn export() -> std::io::Result<Self> {
         // FIXME: cache this value somewhere?
         let hash = hex::encode(Md5::digest(HPATCHZ));
@@ -86,6 +94,12 @@ impl HdiffPatcher {
         }
 
         Ok(Self(path))
+    }
+
+    /// Path to the `hpatchz` binary.
+    #[inline]
+    pub const fn path(&self) -> &PathBuf {
+        &self.0
     }
 
     /// Apply patch to the input file and save it under the output path. If

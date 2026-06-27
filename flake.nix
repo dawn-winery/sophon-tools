@@ -28,6 +28,7 @@
                         })
                         muslPkgs.buildPackages.gcc
                         protobuf
+                        lld
                     ];
                 };
 
