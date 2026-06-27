@@ -1,4 +1,7 @@
-on: 
+on:
+  push:
+    tags:
+      - "v*"
   release:
     types: [published]
 
@@ -14,16 +17,18 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt update
-          sudo apt install protobuf-compiler
+          sudo apt install protobuf-compiler musl-tools
+          sudo ln -sf /usr/bin/musl-gcc /usr/local/bin/x86_64-unknown-linux-musl-gcc
 
       - name: Build
         run: |
-          cargo build --release --bin sophon-cli
+          cargo build --release --target x86_64-unknown-linux-musl --bin sophon-cli --verbose
+          mv target/x86_64-unknown-linux-musl/release/sophon-cli target/x86_64-unknown-linux-musl/release/sophon-tools
 
       - name: Upload built binary to the release
         uses: https://git.michaelsasser.org/actions/upload-release-assets@v1
         with:
           assets: |
-            target/release/sophon-cli
+            target/x86_64-unknown-linux-musl/release/sophon-tools
           token: ${{ forge.token }}
           tag: ${{ forge.ref_name }}

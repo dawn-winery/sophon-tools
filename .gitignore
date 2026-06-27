@@ -1,3 +1,6 @@
 /target
 /.direnv
-.cache
+
+# Ignore all markdowns except readme
+/*.md
+!/README.md
