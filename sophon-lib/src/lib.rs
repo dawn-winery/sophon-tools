@@ -32,7 +32,4 @@ pub mod protos;
 pub mod verifier;
 pub mod patcher;
 pub mod downloader;
-
-// pub mod utils;
-// pub mod protos;
-// pub mod updater;
+pub mod updater;

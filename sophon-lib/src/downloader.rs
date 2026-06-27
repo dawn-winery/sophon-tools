@@ -419,7 +419,9 @@ impl SophonDownloader {
 
         // Skip assets downloading that are valid.
         if self.verify_before_downloading != SophonDownloaderVerifyMethod::None {
-            let mut verifier = SophonVerifier::from(download_manifest.assets.clone());
+            let mut verifier = SophonVerifier::from(
+                download_manifest.assets.clone()
+            );
 
             if self.verify_before_downloading == SophonDownloaderVerifyMethod::Fast {
                 verifier = verifier.with_fast_verify(true);
@@ -471,7 +473,7 @@ impl SophonDownloader {
             .unwrap_or(u64::MAX);
 
         let mut tasks = Vec::with_capacity(
-            (self.target_memory_usage / median_task_size) as usize
+            (self.target_memory_usage / median_task_size).max(1) as usize
         );
 
         let mut occupied_memory = 0;
@@ -554,7 +556,7 @@ impl SophonDownloader {
                 let progress_current = progress_current.clone();
                 let progress_updater = progress_updater.clone();
 
-                let url = format!(
+                let chunk_download_url = format!(
                     "{}{}/{}",
                     download_info.chunk_download.url_prefix,
                     download_info.chunk_download.url_suffix,
@@ -566,13 +568,13 @@ impl SophonDownloader {
                     asset = ?asset.path,
                     offset = ?chunk.offset,
                     size = ?chunk.decompressed_size,
-                    ?url,
+                    url = ?chunk_download_url,
                     "schedule chunk download"
                 );
 
                 let decompress_chunk = download_info.chunk_download.compressed;
 
-                let mut request = self.client.get(&url);
+                let mut request = self.client.get(&chunk_download_url);
 
                 if let Some(timeout_per_mb) = self.fetch_chunk_timeout_per_mb {
                     request = request.timeout({
@@ -593,7 +595,7 @@ impl SophonDownloader {
                         && content_length != chunk.compressed_size
                     {
                         return Err(SophonDownloaderError::ChunkSizeMismatch {
-                            url,
+                            url: chunk_download_url,
                             actual: content_length,
                             expected: chunk.compressed_size
                         });
@@ -619,7 +621,7 @@ impl SophonDownloader {
                     if self.verify_chunks != SophonDownloaderVerifyMethod::None {
                         if chunk_body.len() as u64 != chunk.decompressed_size {
                             return Err(SophonDownloaderError::ChunkSizeMismatch {
-                                url,
+                                url: chunk_download_url,
                                 actual: chunk_body.len() as u64,
                                 expected: chunk.decompressed_size
                             });
@@ -630,9 +632,9 @@ impl SophonDownloader {
 
                             if hash != chunk.decompressed_hash_md5 {
                                 return Err(SophonDownloaderError::ChunkHashMismatch {
-                                    url,
+                                    url: chunk_download_url,
                                     actual: hash,
-                                    expected: chunk.decompressed_hash_md5.clone()
+                                    expected: chunk.decompressed_hash_md5
                                 });
                             }
                         }
@@ -644,7 +646,7 @@ impl SophonDownloader {
                     tracing::trace!(
                         offset = ?chunk.offset,
                         size = ?chunk.decompressed_size,
-                        ?url,
+                        url = ?chunk_download_url,
                         "write chunk to disk"
                     );
 
