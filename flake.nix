@@ -24,11 +24,12 @@
                     nativeBuildInputs = with pkgs; [
                         (pkgs.pkgs.rust-bin.stable.latest.default.override {
                             targets = [ "x86_64-unknown-linux-musl" ];
-                            extensions = [ "rust-src" ];
+                            extensions = [ "rust-src" "llvm-tools-preview" ];
                         })
                         muslPkgs.buildPackages.gcc
                         protobuf
                         lld
+                        cargo-pgo
                     ];
                 };
 

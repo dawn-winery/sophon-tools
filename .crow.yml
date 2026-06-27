@@ -30,7 +30,25 @@ steps:
       - apt-get install -y protobuf-compiler musl-tools
       - ln -sf /usr/bin/musl-gcc /usr/local/bin/x86_64-unknown-linux-musl-gcc
       - rustup target add x86_64-unknown-linux-musl
-      - cargo build --release --target x86_64-unknown-linux-musl --bin sophon-cli --verbose
+      - rustup component add llvm-tools-preview
+      - cargo install cargo-pgo
+      - BINARY=target/x86_64-unknown-linux-musl/release/sophon-cli
+
+      # Build instrumented binary
+      - cargo pgo build -- --target x86_64-unknown-linux-musl --bin sophon-cli
+
+      # Generate PGO profiles on common tasks
+      - $BINARY api list-games --output-format json || true
+      - $BINARY api list-components nap_global --output-format json || true
+      - $BINARY api game-versions nap_global --output-format json || true
+      - $BINARY api game-download-info nap_global --output-format json || true
+      - $BINARY download nap_global zzz --version 2.8.0 --regex '^mhypbase\.dll|UnityPlayer\.dll|ZenlessZoneZero\.exe$' --output-format json || true
+      - $BINARY detect zzz --output-format json || true
+      - $BINARY verify nap_global zzz --version 2.8.0 --regex '^mhypbase\.dll|UnityPlayer\.dll|ZenlessZoneZero\.exe$' --output-format json || true
+      - $BINARY update nap_global zzz --from-version 2.8.0 --regex '^mhypbase\.dll|UnityPlayer\.dll|ZenlessZoneZero\.exe$' --output-format json || true
+
+      # Build optimized binary using PGO profiles
+      - cargo pgo optimize -- --target x86_64-unknown-linux-musl --bin sophon-cli --verbose
       - mv target/x86_64-unknown-linux-musl/release/sophon-cli sophon-tools
     when:
       - event: [tag, manual]
