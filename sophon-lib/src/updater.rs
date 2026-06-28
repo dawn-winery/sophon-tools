@@ -381,13 +381,16 @@ pub struct SophonPatcher {
 
 impl std::fmt::Debug for SophonPatcher {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // all this to not require Debug on BoxPatchFn and also not pull in debug_ignore
         f.debug_struct("SophonPatcher")
             .field("client", &self.client)
             .field("patch_manifest", &self.patch_manifest)
             .field("diff_info", &self.diff_info)
-            .field("check_free_space", &self.check_free_space)
             .field("temp_folder", &self.temp_folder)
             .field("last_file_suffix", &self.last_file_suffix)
+            .field("check_free_space", &self.check_free_space)
+            .field("patches_in_memory", &self.patches_in_memory)
+            .field("patch_queue_mem_limit", &self.patch_queue_mem_limit)
             .finish()
     }
 }
