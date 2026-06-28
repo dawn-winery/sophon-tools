@@ -8,4 +8,5 @@ pub(crate) mod read_reporter;
 pub(crate) mod read_take_region;
 pub mod semaphore;
 pub(crate) mod size_limited_queue;
+pub mod updater_clonebox;
 pub mod version;

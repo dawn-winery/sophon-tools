@@ -365,29 +365,7 @@ type PatchQueueReceiver<'a, 'b> = SizeLimitedQueueReceiver<'b, PatchLocation, Fi
 
 type BoxPatchFn = Box<dyn Fn(PatchFnArgs<'_>) -> std::io::Result<()> + Sync>;
 
-type UpdaterFnBox<'a> = Box<dyn UpdaterFn<'a>>;
-
-pub trait UpdaterFn<'a>: Fn(Update) + Send + 'a {
-    fn clone_box(&self) -> UpdaterFnBox<'a>;
-}
-
-impl<'a, T> UpdaterFn<'a> for T
-where
-    T: Clone,
-    T: Fn(Update),
-    T: Send,
-    T: 'a,
-{
-    fn clone_box(&self) -> UpdaterFnBox<'a> {
-        Box::new(T::clone(self))
-    }
-}
-
-impl<'a> Clone for UpdaterFnBox<'a> {
-    fn clone(&self) -> Self {
-        (**self).clone_box()
-    }
-}
+type UpdaterFnBox<'a> = crate::utils::updater_clonebox::UpdaterFnBox<'a, Update>;
 
 pub struct SophonPatcher {
     pub client: Client,
