@@ -53,7 +53,11 @@ pub fn run(
         .map(Regex::new)
         .transpose()?;
 
+    // Build the reqwest client inside the runtime context.
+    let guard = runtime.enter();
     let api = api_client.build()?;
+
+    drop(guard);
 
     let mut game = api.game(
         api_args.region.into(),

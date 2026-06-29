@@ -35,7 +35,11 @@ pub fn run(
         .enable_all()
         .build()?;
 
+    // Build the reqwest client inside the runtime context.
+    let guard = runtime.enter();
     let api = api_client.build()?;
+
+    drop(guard);
 
     let mut detected_game = None;
 
