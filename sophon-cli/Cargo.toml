@@ -1,6 +1,6 @@
 [package]
 name = "sophon-cli"
-version = "0.2.0"
+version = "0.2.1"
 homepage = "https://dawn.wine/dawn-winery/sophon-tools"
 repository = "https://dawn.wine/dawn-winery/sophon-tools"
 license = "GPL-3.0-or-later"
