@@ -163,7 +163,7 @@ impl Default for SophonDownloader {
             verify_before_downloading: SophonDownloaderVerifyMethod::Full,
 
             target_memory_usage: 256 * 1024 * 1024,
-            chunk_download_attempts: 3,
+            chunk_download_attempts: 5,
 
             assets_filter: None,
             assets_sorter: None,
@@ -280,7 +280,7 @@ impl SophonDownloader {
     /// Sometimes remote server drops the connection, so we can try to
     /// download the same chunk multiple times.
     ///
-    /// Default: `3`
+    /// Default: `5`
     pub fn with_chunk_download_attempts(mut self, attempts: u8) -> Self {
         self.chunk_download_attempts = attempts;
 
@@ -690,8 +690,8 @@ impl SophonDownloader {
                     if let Some(request) = request_copy && chunk_body.is_err() {
                         for attempt in 1..self.chunk_download_attempts {
                             // Wait for some time before making new download
-                            // attempt: 100ms, 200ms, 400ms, 800ms, 1600ms, ...
-                            tokio::time::sleep(Duration::from_millis(100 * (1 << attempt))).await;
+                            // attempt: 1s, 2s, 4s, 8s, 16s, ...
+                            tokio::time::sleep(Duration::from_millis(500 * (1 << attempt))).await;
 
                             #[cfg(feature = "tracing")]
                             tracing::debug!(
