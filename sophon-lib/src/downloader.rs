@@ -669,54 +669,82 @@ impl SophonDownloader {
 
                 // Start chunk downloading task.
                 let future = async move {
-                    let request_copy = request.try_clone();
+                    let mut chunk_body = None;
+                    let max_attempts = self.chunk_download_attempts.max(1);
 
-                    let response = request.send().await?;
+                    for attempt in 1..=max_attempts {
+                        let Some(request) = request.try_clone() else {
+                            break;
+                        };
 
-                    // Verify response size.
-                    if self.verify_chunks != SophonDownloaderVerifyMethod::None
-                        && let Some(content_length) = response.content_length()
-                        && content_length != chunk.compressed_size
-                    {
-                        return Err(SophonDownloaderError::ChunkSizeMismatch {
-                            url: chunk_download_url,
-                            actual: content_length,
-                            expected: chunk.compressed_size
-                        });
-                    }
+                        let response = match request.send().await {
+                            Ok(response) => response,
 
-                    let mut chunk_body = response.bytes().await;
+                            Err(err) if attempt < max_attempts => {
+                                #[cfg(feature = "tracing")]
+                                tracing::debug!(
+                                    url = ?chunk_download_url,
+                                    ?attempt,
+                                    ?err,
+                                    "failed to download chunk"
+                                );
 
-                    if let Some(request) = request_copy && chunk_body.is_err() {
-                        for attempt in 1..self.chunk_download_attempts {
-                            // Wait for some time before making new download
-                            // attempt: 1s, 2s, 4s, 8s, 16s, ...
-                            tokio::time::sleep(Duration::from_millis(500 * (1 << attempt))).await;
+                                // Wait for some time before making new download
+                                // attempt: 1s, 2s, 4s, 8s, 16s, ...
+                                tokio::time::sleep(Duration::from_millis(500 * (1 << attempt))).await;
 
-                            #[cfg(feature = "tracing")]
-                            tracing::debug!(
-                                url = ?chunk_download_url,
-                                ?attempt,
-                                "failed to download chunk"
-                            );
-
-                            let Some(request) = request.try_clone() else {
-                                break;
-                            };
-
-                            let Ok(request) = request.send().await else {
                                 continue;
-                            };
+                            }
 
-                            chunk_body = request.bytes().await;
+                            Err(err) => return Err(SophonDownloaderError::Reqwest(err))
+                        };
 
-                            if chunk_body.is_ok() {
+                        // Verify response size.
+                        if self.verify_chunks != SophonDownloaderVerifyMethod::None
+                            && let Some(content_length) = response.content_length()
+                            && content_length != chunk.compressed_size
+                        {
+                            return Err(SophonDownloaderError::ChunkSizeMismatch {
+                                url: chunk_download_url,
+                                actual: content_length,
+                                expected: chunk.compressed_size
+                            });
+                        }
+
+                        match response.bytes().await {
+                            Ok(body) => {
+                                chunk_body = Some(body.to_vec());
+
                                 break;
                             }
-                        }
+
+                            Err(err) if attempt < max_attempts => {
+                                #[cfg(feature = "tracing")]
+                                tracing::debug!(
+                                    url = ?chunk_download_url,
+                                    ?attempt,
+                                    ?err,
+                                    "failed to download chunk"
+                                );
+
+                                // Wait for some time before making new download
+                                // attempt: 1s, 2s, 4s, 8s, 16s, ...
+                                tokio::time::sleep(Duration::from_millis(500 * (1 << attempt))).await;
+
+                                continue;
+                            }
+
+                            Err(err) => return Err(SophonDownloaderError::Reqwest(err))
+                        };
                     }
 
-                    let mut chunk_body = chunk_body?.to_vec();
+                    let Some(mut chunk_body) = chunk_body else {
+                        // Should never happen since in that case an error would
+                        // return earlier above.
+                        return Err(SophonDownloaderError::Io(
+                            std::io::Error::other("failed to download chunk body")
+                        ));
+                    };
 
                     if decompress_chunk {
                         let mut decoder = ruzstd::decoding::StreamingDecoder::new(
