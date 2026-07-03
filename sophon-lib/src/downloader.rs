@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // sophon-tools
-// Copyright (C) 2026  Nikita Podvirnyi <krypt0nn@vk.com>
+// Copyright (C) 2026  Nikita Podvirnyi <krypt0nn@dawn.wine>
 //                     "John the Cooling Fan"
 //
 // This program is free software: you can redistribute it and/or modify

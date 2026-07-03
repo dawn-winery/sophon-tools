@@ -2,7 +2,7 @@
 name = "sophon-lib"
 version = "0.2.1"
 authors = [
-    "Nikita Podvirnyi <krypt0nn@vk.com>",
+    "Nikita Podvirnyi <krypt0nn@dawn.wine>",
     "John the Cooling Fan"
 ]
 homepage = "https://dawn.wine/dawn-winery/sophon-tools"
