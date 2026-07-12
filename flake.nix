@@ -19,6 +19,8 @@
                 };
 
                 muslPkgs = pkgs.pkgsCross.musl64;
+
+                config = builtins.fromTOML (builtins.readFile ./sophon-cli/Cargo.toml);
             in {
                 devShells.default = pkgs.mkShell {
                     nativeBuildInputs = with pkgs; [
@@ -34,8 +36,8 @@
                 };
 
                 packages.default = muslPkgs.rustPlatform.buildRustPackage {
-                    pname = "sophon-tools";
-                    version = "0.2.0";
+                    pname = config.package.name;
+                    version = config.package.version;
 
                     src = ./.;
                     cargoLock.lockFile = ./Cargo.lock;
