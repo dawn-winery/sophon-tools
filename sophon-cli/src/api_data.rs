@@ -350,8 +350,8 @@ impl SingleVersionFilter {
                 game_branches.get_package_by_id_or_biz_latest(&game, preload)
             {
                 dump_value_formatted(latest_branch, format, verbosity)?;
+                return Ok(());
             }
-            return Ok(());
         } else {
             let mut filtered_branches =
                 game_branches.get_packages_by_id_or_biz(&game, version.as_deref(), preload);
