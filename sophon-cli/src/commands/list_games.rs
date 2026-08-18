@@ -49,9 +49,9 @@ pub fn run(
             let mut table = comfy_table::Table::new();
 
             if ascii {
-                table.load_preset(comfy_table::presets::ASCII_FULL);
+                table.load_style(comfy_table::presets::ASCII_FULL);
             } else {
-                table.load_preset(comfy_table::presets::UTF8_FULL);
+                table.load_style(comfy_table::presets::UTF8_FULL);
             }
 
             table.set_content_arrangement(

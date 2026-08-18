@@ -8,7 +8,6 @@ authors = [
 homepage = "https://dawn.wine/dawn-winery/sophon-tools"
 repository = "https://dawn.wine/dawn-winery/sophon-tools"
 license = "GPL-3.0-or-later"
-rust-version = "1.94.1"
 edition = "2024"
 publish = false
 
@@ -31,12 +30,12 @@ default-features = false
 [dependencies]
 thiserror = "2.0"
 serde = { version = "1.0", features = ["derive"] }
-serde_with = "3.21"
+serde_with = "3.22"
 serde_json = "1.0"
-tokio = { version = "1.52", features = ["fs", "process"] }
+tokio = { version = "1.53", features = ["fs", "process"] }
 futures = "0.3"
 prost = "0.14"
-ruzstd = "0.8"
+ruzstd = "0.9"
 md-5 = "0.11"
 hex = "0.4"
 

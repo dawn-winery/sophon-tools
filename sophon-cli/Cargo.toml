@@ -4,17 +4,16 @@ version = "0.2.1"
 homepage = "https://dawn.wine/dawn-winery/sophon-tools"
 repository = "https://dawn.wine/dawn-winery/sophon-tools"
 license = "GPL-3.0-or-later"
-rust-version = "1.94.1"
 edition = "2024"
 publish = false
 
 [dependencies]
 sophon-lib = { path = "../sophon-lib" }
-tokio = { version = "1.52", features = ["rt-multi-thread"] }
+tokio = { version = "1.53", features = ["rt-multi-thread"] }
 tracing-subscriber = "0.3"
 anyhow = "1.0"
 clap = { version = "4.6", features = ["derive"] }
-comfy-table = "7.2"
-nutmeg = "0.1.7"
-regex = "1.12"
+comfy-table = "8.0"
+nutmeg = "0.1"
+regex = "1.13"
 serde_json = "1.0"
