@@ -138,6 +138,7 @@ pub struct SophonDownloader {
     verify_before_downloading: SophonDownloaderVerifyMethod,
 
     target_memory_usage: u64,
+    max_parallel_streams: u16,
     chunk_download_attempts: u8,
 
     assets_filter: Option<AssetsFilter>,
@@ -163,6 +164,7 @@ impl Default for SophonDownloader {
             verify_before_downloading: SophonDownloaderVerifyMethod::Full,
 
             target_memory_usage: 256 * 1024 * 1024,
+            max_parallel_streams: 64,
             chunk_download_attempts: 5,
 
             assets_filter: None,
@@ -274,6 +276,19 @@ impl SophonDownloader {
         self
     }
 
+    /// Max parallel streams is the maximal allowed amount of game assets which
+    /// can be downloaded in parallel at any given moment. This limit is applied
+    /// on top of `target_memory_usage` and is needed to fight soft OS limits
+    /// on maximal amount of files open by a single process.
+    ///
+    /// If set to `0`, then the limit is not applied.
+    ///
+    /// Default: `64`
+    pub fn with_max_parallel_streams(mut self, streams: u16) -> Self {
+        self.max_parallel_streams = streams;
+
+        self
+    }
 
     /// Amount of time downloader will try to download a chunk.
     ///
@@ -422,32 +437,34 @@ impl SophonDownloader {
     ///    order (so smaller assets are placed first).
     /// 3. If user provided a sort function, then apply it to the assets list.
     ///
-    /// Then, the user provides us with the `target_memory_usage` property. It
-    /// should indicate how much memory *on average* we want to spend on
-    /// assembling assets.
+    /// Then, the user provides us with `target_memory_usage` and
+    /// `max_parallel_streams` properties. They indicate how much memory
+    /// *on average* we want to spend on assembling assets and how many assets
+    /// we can assemble in parallel.
     ///
     /// Since we know each asset's decompressed chunks size - we can try to fit
     /// as many full assets assembling to the async runtime as possible, until
-    /// we reach the `target_memory_usage` memory usage level.
+    /// we reach the `target_memory_usage` memory usage level or start
+    /// processing `max_parallel_streams` chunks.
     ///
     /// 4. Start iterating over the assets list.
     /// 5. While current asset with all its chunks' decompressed size can fit
     ///    inside of the async runtime - create async tasks to download the
     ///    chunks and write their content to a shared buffered file mutex.
     ///
-    /// Once we fill the runtime with assets assembling tasks up to the
-    /// `target_memory_usage` level - next assets won't fit precisely to the
-    /// given target level. In that case, we will wait until enough space in
-    /// the runtime frees up.
+    /// Once we fill the runtime with assets assembling tasks up to either
+    /// `target_memory_usage` or `max_parallel_streams` level - next assets
+    /// won't fit precisely to the given target level. In that case, we will
+    /// wait until enough space in the runtime frees up.
     ///
     /// 6. While there are tasks in the runtime and not enough space to fit
     ///    a new one - iterate over the tasks and wait until they finish.
     ///    When enough space for a new asset appears - return to step 4.
     ///
-    /// If user set the `target_memory_usage` level too low and some assets
-    /// won't fit into it at all (which will happen more frequently at the end
-    /// of the download procedure since the ordering of the assets list) - then
-    /// we will wait until all the tasks finish.
+    /// If user set `target_memory_usage` or `max_parallel_streams` level too
+    /// low and some assets won't fit into it at all (which will happen more
+    /// frequently at the end of the download procedure since the ordering of
+    /// the assets list) - then we will wait until all the tasks finish.
     ///
     /// 7. If after waiting until all the tasks finish there's still not enough
     ///    space to fit the asset - create new task for it and only it anyway.
@@ -608,12 +625,16 @@ impl SophonDownloader {
                 .map(|chunk| chunk.decompressed_size)
                 .sum::<u64>();
 
-            // If we cannot fit all the file chunks in memory yet AND the tasks
-            // queue is not empty - then we wait until already scheduled files
-            // finish writing.
-            if occupied_memory + download_size > self.target_memory_usage
-                && !tasks.is_empty()
-            {
+            // If we cannot fit all the file chunks in memory yet or we're
+            // already downloading too many chunks, AND the tasks queue is not
+            // empty - then we wait until already scheduled files finish writing.
+            if (
+                occupied_memory + download_size > self.target_memory_usage
+                || (
+                    self.max_parallel_streams > 0 &&
+                    tasks.len() + asset.chunks.len() > self.max_parallel_streams as usize
+                )
+            ) && !tasks.is_empty() {
                 #[cfg(feature = "tracing")]
                 tracing::debug!(
                     tasks = tasks.len(),

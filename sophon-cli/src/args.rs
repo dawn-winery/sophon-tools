@@ -227,7 +227,8 @@ pub struct SophonDownloaderArgs {
     /// Majority of tasks are IO-bound and are executed asynchronously. Setting
     /// this value higher than default value will not improve download speed.
     ///
-    /// Download speed is bounded by `target_memory_usage` option.
+    /// Download speed is bounded by `target_memory_usage` and
+    /// `max_parallel_streams` options.
     #[arg(
         long, short('t'),
         alias = "workers",
@@ -257,6 +258,28 @@ pub struct SophonDownloaderArgs {
         alias = "mem"
     )]
     pub target_memory_usage: String,
+
+    /// Amount of chunks downloader can process in parallel.
+    ///
+    /// If set to `0`, then the limit is not applied.
+    #[arg(
+        long, short('s'), default_value_t = 64,
+        alias = "max-parallel-files",
+        alias = "max-parallel-chunks",
+        alias = "max-parallel-assets",
+        alias = "parallel-streams",
+        alias = "parallel-files",
+        alias = "parallel-chunks",
+        alias = "parallel-assets",
+        alias = "max-parallel",
+        alias = "max-streams",
+        alias = "max-files",
+        alias = "max-chunks",
+        alias = "max-assets",
+        alias = "parallel",
+        alias = "streams"
+    )]
+    pub max_parallel_streams: u16,
 
     /// Amount of attempts downloader will make to download a chunk.
     ///
@@ -309,6 +332,7 @@ impl SophonDownloaderArgs {
             .with_verify_chunks(self.verify_chunks.into())
             .with_verify_before_downloading(self.verify_before_downloading.into())
             .with_target_memory_usage(target_memory_usage)
+            .with_max_parallel_streams(self.max_parallel_streams)
             .with_chunk_download_attempts(self.chunk_download_attempts);
 
         if let Some(timeout) = &self.fetch_manifest_timeout {
@@ -337,6 +361,7 @@ impl From<&SophonUpdaterArgs> for SophonDownloaderArgs {
             verify_before_downloading: updater_args.verify_before_updating,
             threads: updater_args.threads,
             target_memory_usage: updater_args.target_memory_usage.clone(),
+            max_parallel_streams: updater_args.max_parallel_streams,
             chunk_download_attempts: updater_args.chunk_download_attempts,
             fetch_manifest_timeout: updater_args.fetch_manifest_timeout.clone(),
             fetch_chunk_per_mb_timeout: updater_args.fetch_chunk_per_mb_timeout.clone()
@@ -459,7 +484,8 @@ pub struct SophonUpdaterArgs {
     /// Majority of tasks are IO-bound and are executed asynchronously. Setting
     /// this value higher than default value will not improve download speed.
     ///
-    /// Download speed is bounded by `target_memory_usage` option.
+    /// Download speed is bounded by `target_memory_usage` and
+    /// `max_parallel_streams` options.
     #[arg(
         long, short('t'),
         alias = "workers",
@@ -489,6 +515,28 @@ pub struct SophonUpdaterArgs {
         alias = "mem"
     )]
     pub target_memory_usage: String,
+
+    /// Amount of game assets updater can patch in parallel.
+    ///
+    /// If set to `0`, then the limit is not applied.
+    #[arg(
+        long, short('s'), default_value_t = 64,
+        alias = "max-parallel-files",
+        alias = "max-parallel-chunks",
+        alias = "max-parallel-assets",
+        alias = "parallel-streams",
+        alias = "parallel-files",
+        alias = "parallel-chunks",
+        alias = "parallel-assets",
+        alias = "max-parallel",
+        alias = "max-streams",
+        alias = "max-files",
+        alias = "max-chunks",
+        alias = "max-assets",
+        alias = "parallel",
+        alias = "streams"
+    )]
+    pub max_parallel_streams: u16,
 
     /// Amount of attempts updater will make to download a chunk.
     ///
@@ -549,6 +597,7 @@ impl SophonUpdaterArgs {
             .with_patch_assets(self.patch_assets)
             .with_delete_applied_chunks(self.delete_applied_chunks)
             .with_target_memory_usage(target_memory_usage)
+            .with_max_parallel_streams(self.max_parallel_streams)
             .with_chunk_download_attempts(self.chunk_download_attempts);
 
         if let Some(patcher) = self.hpatchz_binary.clone() {

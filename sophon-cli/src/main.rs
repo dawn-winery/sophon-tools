@@ -304,7 +304,17 @@ enum CliApiCommands {
         alias = "game-info",
         alias = "package-info",
         alias = "package-download-info",
-        alias = "download-info"
+        alias = "download-info",
+        alias = "get-game-download-info",
+        alias = "get-game-info",
+        alias = "get-package-download-info",
+        alias = "get-package-info",
+        alias = "get-download-info",
+        alias = "list-game-download-info",
+        alias = "list-game-info",
+        alias = "list-package-download-info",
+        alias = "list-package-info",
+        alias = "list-download-info"
     )]
     GameDownloadInfo {
         /// Game name or identifier.

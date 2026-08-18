@@ -157,6 +157,7 @@ pub struct SophonUpdater {
     delete_applied_chunks: bool,
 
     target_memory_usage: u64,
+    max_parallel_streams: u16,
     chunk_download_attempts: u8,
 
     assets_filter: Option<AssetsFilter>,
@@ -188,6 +189,7 @@ impl Default for SophonUpdater {
             delete_applied_chunks: true,
 
             target_memory_usage: 256 * 1024 * 1024,
+            max_parallel_streams: 64,
             chunk_download_attempts: 5,
 
             assets_filter: None,
@@ -353,6 +355,20 @@ impl SophonUpdater {
         self
     }
 
+    /// Max parallel streams is the maximal allowed amount of game assets which
+    /// can be downloaded in parallel at any given moment. This limit is applied
+    /// on top of `target_memory_usage` and is needed to fight soft OS limits
+    /// on maximal amount of files open by a single process.
+    ///
+    /// If set to `0`, then the limit is not applied.
+    ///
+    /// Default: `64`
+    pub fn with_max_parallel_streams(mut self, streams: u16) -> Self {
+        self.max_parallel_streams = streams;
+
+        self
+    }
+
     /// Amount of time updater will try to download a chunk.
     ///
     /// Sometimes remote server drops the connection, so we can try to
@@ -511,13 +527,15 @@ impl SophonUpdater {
     /// 4. Start iterating over the unused assets list.
     /// 5. If the asset is available in the `update_dir` - then delete it.
     ///
-    /// Then, the user provides us with the `target_memory_usage` property. It
-    /// should indicate how much memory *on average* we want to spend on
-    /// downloading assets' chunks and patching game files.
+    /// Then, the user provides us with `target_memory_usage` and
+    /// `max_parallel_streams` properties. They indicate how much memory
+    /// *on average* we want to spend on downloading assets' chunks and patching
+    /// game files.
     ///
     /// Since we know each asset's chunk size - we can try to fit as many full
     /// assets' chunks downloading to the async runtime as possible, until we
-    /// reach the `target_memory_usage` memory usage level.
+    /// reach the `target_memory_usage` memory usage level or start processing
+    /// `max_parallel_streams` chunks.
     ///
     /// 6. Start iterating over the assets list.
     /// 7. Look at the download directory for the asset's chunk. If there is,
@@ -526,19 +544,20 @@ impl SophonUpdater {
     ///    runtime - create async task to download the chunk and write it to the
     ///    chunks download directory.
     ///
-    /// Once we fill the runtime with assets' chunks downloading tasks up to the
-    /// `target_memory_usage` level - next assets won't fit precisely to the
-    /// given target level. In that case, we will wait until enough space in
-    /// the runtime frees up.
+    /// Once we fill the runtime with assets' chunks downloading tasks up to
+    /// either `target_memory_usage` or `max_parallel_streams` level - next
+    /// assets won't fit precisely to the given target level. In that case, we
+    /// will wait until enough space in the runtime frees up.
     ///
     /// 9. While there are tasks in the runtime and not enough space to fit
     ///    a new one - iterate over the tasks and wait until they finish.
     ///    When enough space for a new asset appears - return to step 6.
     ///
-    /// If user set the `target_memory_usage` level too low and some assets
-    /// won't fit into it at all (which will happen more frequently at the end
-    /// of the chunks downloading procedure since the ordering of the assets
-    /// list) - then we will wait until all the tasks finish.
+    /// If user set the `target_memory_usage` or `max_parallel_streams` level
+    /// too low and some assets won't fit into it at all (which will happen more
+    /// frequently at the end of the chunks downloading procedure since the
+    /// ordering of the assets list) - then we will wait until all the tasks
+    /// finish.
     ///
     /// 10. If after waiting until all the tasks finish there's still not enough
     ///     space to fit the asset - create new task for it and only it anyway.
@@ -807,12 +826,16 @@ impl SophonUpdater {
                 continue;
             }
 
-            // If we cannot fit patch in memory yet AND the tasks queue is not
-            // empty - then we wait until already scheduled patches finish
-            // downloading.
-            if occupied_memory + patch_info.patch_size > self.target_memory_usage
-                && !tasks.is_empty()
-            {
+            // If we cannot fit patch in memory yet or we're already downloading
+            // too many patches, AND the tasks queue is not empty - then we wait
+            // until already scheduled patches finish downloading.
+            if (
+                occupied_memory + patch_info.patch_size > self.target_memory_usage
+                || (
+                    self.max_parallel_streams > 0 &&
+                    tasks.len() >= self.max_parallel_streams as usize
+                )
+            ) && !tasks.is_empty() {
                 #[cfg(feature = "tracing")]
                 tracing::debug!(
                     tasks = tasks.len(),
@@ -1022,12 +1045,17 @@ impl SophonUpdater {
 
         // Iterate over all the assets patches.
         while let Some(patch_info) = patches.pop() {
-            // If we cannot fit patch in memory yet AND the tasks queue is not
-            // empty - then we wait until already scheduled patches finish
-            // applying.
-            if occupied_memory + patch_info.input_asset_size + patch_info.patch_size
-                > self.target_memory_usage && !tasks.is_empty()
-            {
+            // If we cannot fit patch in memory yet or we're already processing
+            // too many patches, AND the tasks queue is not empty - then we wait
+            // until already scheduled patches finish applying.
+            if (
+                occupied_memory + patch_info.input_asset_size + patch_info.patch_size
+                    > self.target_memory_usage
+                || (
+                    self.max_parallel_streams > 0 &&
+                    tasks.len() >= self.max_parallel_streams as usize
+                )
+            ) && !tasks.is_empty() {
                 #[cfg(feature = "tracing")]
                 tracing::debug!(
                     tasks = tasks.len(),
