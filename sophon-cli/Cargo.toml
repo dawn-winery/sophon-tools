@@ -1,6 +1,10 @@
 [package]
 name = "sophon-cli"
 version = "0.2.1"
+authors = [
+    "Nikita Podvirnyi <krypt0nn@dawn.wine>",
+    "John the Cooling Fan <ivan8215145640@gmail.com>"
+]
 homepage = "https://dawn.wine/dawn-winery/sophon-tools"
 repository = "https://dawn.wine/dawn-winery/sophon-tools"
 license = "GPL-3.0-or-later"

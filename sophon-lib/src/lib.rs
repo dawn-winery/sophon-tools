@@ -2,7 +2,7 @@
 //
 // sophon-tools
 // Copyright (C) 2026  Nikita Podvirnyi <krypt0nn@dawn.wine>
-//                     "John the Cooling Fan"
+//                     "John the Cooling Fan" <ivan8215145640@gmail.com>
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
