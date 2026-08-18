@@ -1,6 +1,6 @@
 [package]
 name = "sophon-lib"
-version = "0.2.1"
+version = "0.2.2"
 authors = [
     "Nikita Podvirnyi <krypt0nn@dawn.wine>",
     "John the Cooling Fan <ivan8215145640@gmail.com>"
