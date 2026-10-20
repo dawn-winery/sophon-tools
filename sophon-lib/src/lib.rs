@@ -39,7 +39,7 @@ pub mod updater;
 /// Get standard `sophon-tools` reqwest client builder.
 pub fn client_builder() -> reqwest::ClientBuilder {
     reqwest::ClientBuilder::new()
-        .user_agent(format!("sophon-tools/v{VERSION}"))
+        .user_agent(format!("sophon-tools/{VERSION}"))
         .connect_timeout(Duration::from_secs(20))
         .pool_idle_timeout(Duration::from_secs(180))
         .http2_keep_alive_interval(Some(Duration::from_secs(30)))
