@@ -71,10 +71,10 @@ steps:
       - $BINARY api list-components nap_global --output-format json || true
       - $BINARY api game-versions nap_global --output-format json || true
       - $BINARY api game-download-info nap_global --regex $REGEX --output-format json || true
-      - $BINARY download nap_global zzz --version 2.8.0 --regex $REGEX --output-format json || true
+      - $BINARY download nap_global zzz --version 3.2.0 --regex $REGEX --output-format json || true
       - $BINARY detect zzz --output-format json || true
-      - $BINARY verify nap_global zzz --version 2.8.0 --regex $REGEX --output-format json || true
-      - $BINARY update nap_global zzz --from-version 2.8.0 --regex $REGEX --output-format json || true
+      - $BINARY verify nap_global zzz --version 3.2.0 --regex $REGEX --output-format json || true
+      - $BINARY update nap_global zzz --from-version 3.2.0 --regex $REGEX --output-format json || true
 
       # Build optimized binary using PGO profiles
       - cargo pgo optimize -- --target x86_64-unknown-linux-musl --bin sophon-cli --verbose
