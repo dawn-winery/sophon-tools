@@ -100,6 +100,9 @@ impl<'api> SophonApiGame<'api> {
     }
 
     /// Try to find versions info about the current game.
+    ///
+    /// Versions that are currently available only as a pre-download are
+    /// marked with `is_predownload`.
     pub async fn fetch_versions_info(
         &self
     ) -> Result<GameVersionsInfo, SophonApiError> {
@@ -108,8 +111,9 @@ impl<'api> SophonApiGame<'api> {
             Some(self.launcher_id.clone())
         ).await?;
 
-        let Some(version_info) = versions_info.iter()
+        let Some(mut version_info) = versions_info.iter()
             .find(|version_info| version_info.game_id == self.game_id)
+            .cloned()
         else {
             return Err(SophonApiError::GameNotFound {
                 region: self.region,
@@ -118,7 +122,20 @@ impl<'api> SophonApiGame<'api> {
             });
         };
 
-        Ok(version_info.clone())
+        // The `getGameScanInfo` endpoint doesn't tell whether a version is
+        // released or is a pre-download, so query the branches endpoint for
+        // the pre-download version tag.
+        let predownload_version = self.fetch_branch_info().await?
+            .pre_download
+            .map(|predownload| predownload.version);
+
+        if let Some(predownload_version) = predownload_version {
+            for version in version_info.versions.iter_mut() {
+                version.is_predownload = version.version == predownload_version;
+            }
+        }
+
+        Ok(version_info)
     }
 
     /// Try to find configs for the current game.

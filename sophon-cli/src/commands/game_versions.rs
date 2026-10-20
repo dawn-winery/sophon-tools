@@ -96,14 +96,28 @@ pub fn run(
                 "md5"
             ]);
 
+            let mut has_predownload = false;
+
             for game_version in game_versions.versions {
+                let version = if game_version.is_predownload {
+                    has_predownload = true;
+
+                    format!("{} (*)", game_version.version)
+                } else {
+                    game_version.version
+                };
+
                 table.add_row([
-                    game_version.version,
+                    version,
                     game_version.hash_md5
                 ]);
             }
 
             println!("{table}");
+
+            if has_predownload {
+                println!("* Pre-download available");
+            }
         }
 
         OutputFormat::Json => {
@@ -112,7 +126,8 @@ pub fn run(
                     .map(|game_version| {
                         serde_json::json!({
                             "version": game_version.version,
-                            "hash_md5": game_version.hash_md5
+                            "hash_md5": game_version.hash_md5,
+                            "predownload": game_version.is_predownload
                         })
                     })
                     .collect::<Vec<_>>()

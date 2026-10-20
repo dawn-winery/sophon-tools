@@ -115,7 +115,12 @@ pub struct GamePackageInfo {
 
     /// Game branch info.
     #[serde(rename = "main")]
-    pub branch: GameBranchInfo
+    pub branch: GameBranchInfo,
+
+    /// Pre-download branch info. Present only when a pre-download of the next
+    /// game version is currently available.
+    #[serde(default)]
+    pub pre_download: Option<GameBranchInfo>
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Deserialize)]
@@ -198,7 +203,14 @@ pub struct GameVersionInfo {
     ///
     /// Example: `eb8ee0dd5c5a7dd9aec6569182886539`
     #[serde(rename = "md5")]
-    pub hash_md5: String
+    pub hash_md5: String,
+
+    /// Whether this version is currently available only as a pre-download,
+    /// i.e. it's not released yet.
+    ///
+    /// Example: `false`
+    #[serde(skip)]
+    pub is_predownload: bool
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Deserialize)]
