@@ -1181,10 +1181,24 @@ impl SophonUpdater {
 
                     // If patched successfully - replace old asset by a new one.
                     if result {
-                        tokio::fs::rename(
-                            output_asset_path,
+                        match tokio::fs::rename(
+                            &output_asset_path,
                             &patch_info.asset_path
-                        ).await?;
+                        ).await {
+                            // Copy file from one disk to another, delete from
+                            // current disk.
+                            Err(err) if err.kind() == std::io::ErrorKind::CrossesDevices => {
+                                tokio::fs::copy(
+                                    &output_asset_path,
+                                    &patch_info.asset_path
+                                ).await?;
+
+                                tokio::fs::remove_file(output_asset_path).await?;
+                            }
+
+                            Ok(()) => (),
+                            Err(err) => return Err(SophonUpdaterError::Io(err))
+                        }
                     }
 
                     // Otherwise remove the output asset.
