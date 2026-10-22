@@ -399,7 +399,7 @@ impl SophonDownloader {
             }
 
             else if self.verify_manifest == SophonDownloaderVerifyMethod::Full {
-                let hash = hex::encode(Md5::digest(&manifest));
+                let hash = faster_hex::hex_string(&Md5::digest(&manifest));
 
                 if hash != download_info.manifest_info.hash_md5 {
                     return Err(SophonDownloaderError::ManifestHashMismatch {
@@ -792,7 +792,7 @@ impl SophonDownloader {
                         }
 
                         else if self.verify_chunks == SophonDownloaderVerifyMethod::Full {
-                            let hash = hex::encode(Md5::digest(&chunk_body));
+                            let hash = faster_hex::hex_string(&Md5::digest(&chunk_body));
 
                             if hash != chunk.decompressed_hash_md5 {
                                 return Err(SophonDownloaderError::ChunkHashMismatch {

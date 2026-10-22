@@ -416,7 +416,7 @@ impl SophonVerifier {
                     hasher.update(&buf[..n]);
                 }
 
-                let result = if hex::encode(hasher.finalize()) == asset.hash_md5 {
+                let result = if faster_hex::hex_string(&hasher.finalize()) == asset.hash_md5 {
                     VerifyResult::Valid
                 } else {
                     VerifyResult::Invalid
@@ -517,7 +517,7 @@ impl SophonVerifier {
             hasher.update(&buf[..n]);
         }
 
-        if hex::encode(hasher.finalize()) == asset.hash_md5 {
+        if faster_hex::hex_string(&hasher.finalize()) == asset.hash_md5 {
             self.cache.insert(path, true);
 
             Ok(VerifyResult::Valid)

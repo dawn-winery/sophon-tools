@@ -466,7 +466,7 @@ impl SophonUpdater {
             }
 
             else if self.verify_manifest == SophonUpdaterVerifyMethod::Full {
-                let hash = hex::encode(Md5::digest(&manifest));
+                let hash = faster_hex::hex_string(&Md5::digest(&manifest));
 
                 if hash != download_info.manifest_info.hash_md5 {
                     return Err(SophonUpdaterError::ManifestHashMismatch {
@@ -1152,7 +1152,7 @@ impl SophonUpdater {
                                 hasher.update(&buf[..n]);
                             }
 
-                            let hash = hex::encode(hasher.finalize());
+                            let hash = faster_hex::hex_string(&hasher.finalize());
 
                             if hash != patch_info.input_asset_hash_md5 {
                                 let current = progress_current.fetch_add(

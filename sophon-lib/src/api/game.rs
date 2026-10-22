@@ -226,7 +226,7 @@ impl<'api> SophonApiGame<'api> {
             hasher.update(&buf[..n]);
         }
 
-        let binary_hash = hex::encode(hasher.finalize());
+        let binary_hash = faster_hex::hex_string(&hasher.finalize());
 
         let versions_info = self.fetch_versions_info().await?;
 

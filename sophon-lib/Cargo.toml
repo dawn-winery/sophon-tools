@@ -37,7 +37,7 @@ futures = "0.3"
 prost = "0.14"
 ruzstd = "0.9"
 md-5 = "0.11"
-hex = "0.4"
+faster-hex = "1.0"
 
 tracing = { version = "0.1", optional = true }
 

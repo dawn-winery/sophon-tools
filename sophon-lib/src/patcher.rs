@@ -67,7 +67,7 @@ impl HdiffPatcher {
     #[inline(never)]
     pub async fn export() -> std::io::Result<Self> {
         // FIXME: cache this value somewhere?
-        let hash = hex::encode(Md5::digest(HPATCHZ));
+        let hash = faster_hex::hex_string(&Md5::digest(HPATCHZ));
 
         #[cfg(not(target_os = "windows"))]
         let path = std::env::temp_dir()
