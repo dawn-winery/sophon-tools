@@ -40,11 +40,19 @@ macro_rules! api_wrapper {
     ($wrapname:ident => $implname:ident) => {
         api_wrapper! {String: $wrapname => $implname}
     };
-    ($restype:ident: $wrapname:ident => $implname:ident) => {
+    ($restype:ty: $wrapname:ident => $implname:ident) => {
         pub fn $wrapname<'ctx>(&'ctx self) -> ApiResult<'ctx, $restype> {
             self.wrap($implname(&self.client, &self.edition))
         }
     };
+}
+
+macro_rules! api_wrappers {
+    ($($(($restype:ty))? $wrapname:ident => $implname:ident),+) => {
+        $(
+            api_wrapper! { $($restype:)? $wrapname => $implname }
+        )+
+    }
 }
 
 impl ApiContext {
@@ -52,12 +60,14 @@ impl ApiContext {
         v.map(|value| ApiContextWrapper { ctx: self, value })
     }
 
-    api_wrapper! {GameBranches: game_branches => get_game_branches_info}
-    api_wrapper! {game_branches_raw => get_game_branches_info_raw}
-    api_wrapper! {GameScanInfo: game_scan => get_game_scan_info}
-    api_wrapper! {game_scan_raw => get_game_scan_info_raw}
-    api_wrapper! {GameConfigs: game_configs => get_game_configs}
-    api_wrapper! {game_configs_raw => get_game_configs_raw}
+    api_wrappers! {
+        (GameBranches) game_branches => get_game_branches_info,
+        game_branches_raw => get_game_branches_info_raw,
+        (GameScanInfo) game_scan => get_game_scan_info,
+        game_scan_raw => get_game_scan_info_raw,
+        (GameConfigs) game_configs => get_game_configs,
+        game_configs_raw => get_game_configs_raw
+    }
 }
 
 impl<'ctx, T> ApiContextWrapper<'ctx, T> {
@@ -86,29 +96,47 @@ macro_rules! api_wrapper_val {
     ($wrapname:ident => $implname:ident) => {
         api_wrapper_val! {String: $wrapname => $implname}
     };
-    ($restype:ident: $wrapname:ident => $implname:ident) => {
+    ($restype:ty: $wrapname:ident => $implname:ident) => {
         pub fn $wrapname(&'ctx self) -> ApiResult<'ctx, $restype> {
             self.wrap($implname(&self.ctx.client, &self.value, &self.ctx.edition))
         }
     };
 }
 
+macro_rules! api_wrappers_val {
+    ($($(($restype:ty))? $wrapname:ident => $implname:ident),+) => {
+        $(
+            api_wrapper_val! { $($restype:)? $wrapname => $implname }
+        )+
+    }
+}
+
 impl<'ctx> ApiContextWrapper<'ctx, PackageInfo> {
-    api_wrapper_val! {SophonDownloads: downloads => get_game_download_sophon_info}
-    api_wrapper_val! {downloads_raw => get_game_download_sophon_info_raw}
-    api_wrapper_val! {SophonDiffs: diffs => get_game_diffs_sophon_info}
-    api_wrapper_val! {diffs_raw => get_game_diffs_sophon_info_raw}
+    api_wrappers_val! {
+        (SophonDownloads) downloads => get_game_download_sophon_info,
+        downloads_raw => get_game_download_sophon_info_raw,
+        (SophonDiffs) diffs => get_game_diffs_sophon_info,
+        diffs_raw => get_game_diffs_sophon_info_raw
+    }
 }
 
 macro_rules! api_wrapper_val_noedition {
     ($wrapname:ident => $implname:ident) => {
         api_wrapper_val_noedition! {Bytes: $wrapname => $implname}
     };
-    ($restype:ident: $wrapname:ident => $implname:ident) => {
+    ($restype:ty: $wrapname:ident => $implname:ident) => {
         pub fn $wrapname(&'ctx self) -> ApiResult<'ctx, $restype> {
             self.wrap($implname(&self.ctx.client, &self.value))
         }
     };
+}
+
+macro_rules! api_wrappers_val_noedition {
+    ($($(($restype:ty))? $wrapname:ident => $implname:ident),+) => {
+        $(
+            api_wrapper_val_noedition! { $($restype:)? $wrapname => $implname }
+        )+
+    }
 }
 
 impl<'ctx> ApiContextWrapper<'ctx, SophonDownloads> {
@@ -122,8 +150,10 @@ impl<'ctx> ApiContextWrapper<'ctx, SophonDownloads> {
 }
 
 impl<'ctx> ApiContextWrapper<'ctx, &SophonDownloadInfo> {
-    api_wrapper_val_noedition! {SophonManifestProto: download_manifest => get_download_manifest}
-    api_wrapper_val_noedition! {download_manifest_raw => get_download_manifest_raw}
+    api_wrappers_val_noedition! {
+        (SophonManifestProto) download_manifest => get_download_manifest,
+        download_manifest_raw => get_download_manifest_raw
+    }
 }
 
 impl<'ctx> ApiContextWrapper<'ctx, SophonDiffs> {
@@ -137,8 +167,10 @@ impl<'ctx> ApiContextWrapper<'ctx, SophonDiffs> {
 }
 
 impl<'ctx> ApiContextWrapper<'ctx, &SophonDiff> {
-    api_wrapper_val_noedition! {SophonPatchProto: patch_manifest => get_patch_manifest}
-    api_wrapper_val_noedition! {patch_manifest_raw => get_patch_manifest_raw}
+    api_wrappers_val_noedition! {
+        (SophonPatchProto) patch_manifest => get_patch_manifest,
+        patch_manifest_raw => get_patch_manifest_raw
+    }
 }
 
 // URLs
