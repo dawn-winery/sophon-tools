@@ -65,7 +65,7 @@ impl<'ctx, T> ApiContextWrapper<'ctx, T> {
         self.ctx.wrap(v)
     }
 
-    fn with<'a, T2: 'a, F: FnOnce(&'a T) -> T2>(&'a self, f: F) -> ApiContextWrapper<'ctx, T2> {
+    pub fn map<'a, T2: 'a, F: FnOnce(&'a T) -> T2>(&'a self, f: F) -> ApiContextWrapper<'ctx, T2> {
         ApiContextWrapper {
             ctx: self.ctx,
             value: f(&self.value),
@@ -116,7 +116,7 @@ impl<'ctx> ApiContextWrapper<'ctx, SophonDownloads> {
         &self,
         matching_field: &str,
     ) -> Option<ApiContextWrapper<'ctx, &SophonDownloadInfo>> {
-        self.with(|downloads| downloads.get_manifests_for(matching_field))
+        self.map(|downloads| downloads.get_manifests_for(matching_field))
             .into()
     }
 }
@@ -131,7 +131,7 @@ impl<'ctx> ApiContextWrapper<'ctx, SophonDiffs> {
         &self,
         matching_field: &str,
     ) -> Option<ApiContextWrapper<'ctx, &SophonDiff>> {
-        self.with(|diffs| diffs.get_manifests_for(matching_field))
+        self.map(|diffs| diffs.get_manifests_for(matching_field))
             .into()
     }
 }

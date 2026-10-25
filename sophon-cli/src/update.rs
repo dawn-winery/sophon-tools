@@ -8,7 +8,8 @@ use clap::Args;
 use sophon_lib::{
     GameEdition, SophonError,
     api::{
-        get_game_branches_info, get_game_configs, get_game_diffs_sophon_info, get_game_scan_info,
+        ApiContext, ApiContextWrapper, get_game_branches_info, get_game_configs,
+        get_game_diffs_sophon_info, get_game_scan_info, schemas::game_branches::PackageInfo,
     },
     reqwest::{self},
     updater::SophonPatcher,
@@ -24,8 +25,14 @@ pub fn autodetect_game_ver(
     edition: &GameEdition,
 ) -> Result<Option<String>, SophonError> {
     let client = reqwest::blocking::Client::new();
-    let game_scan_info = get_game_scan_info(&client, edition)?;
-    let game_configs = get_game_configs(&client, edition)?;
+    let api = ApiContext {
+        client,
+        edition: edition.clone(),
+    };
+
+    let game_scan_info = api.game_scan()?.value;
+    let game_configs = api.game_configs()?.value;
+
     let game_id = game_configs
         .launch_configs
         .iter()
@@ -134,43 +141,57 @@ impl UpdateArgs {
         .build()
         .expect("Must be a valid configuration");
 
-        let package_info = if let Some(adhoc_package_info) =
-            self.custom_package_info.assemble_adhoc()
-        {
-            output.print_msg("Using provided ad-hoc package info");
-            adhoc_package_info
-        } else {
-            output.print_msg("Fetching update information...");
-            let branches = get_game_branches_info(&client, &game_edition)
-                .expect("Failed to get game branches");
-            if self.to.is_some() {
-                branches
-                    .get_packages_by_id_or_biz(&self.game.game, self.to.as_deref(), self.preload)
-                    .next()
-                    .expect("Failed to find game branch")
-            } else {
-                branches
-                    .get_package_by_id_or_biz_latest(&self.game.game, self.preload)
-                    .expect("Failed to find game")
-            }
-            .clone()
+        let api = ApiContext {
+            client,
+            edition: game_edition,
         };
 
-        let mut diffs_info = get_game_diffs_sophon_info(&client, &package_info, &game_edition)
-            .expect("Failed to get update info");
+        let package_info =
+            if let Some(adhoc_package_info) = self.custom_package_info.assemble_adhoc() {
+                output.print_msg("Using provided ad-hoc package info");
+                ApiContextWrapper {
+                    ctx: &api,
+                    value: adhoc_package_info,
+                }
+            } else {
+                output.print_msg("Fetching update information...");
+                let branches = api.game_branches().expect("Failed to get game branches");
+                if self.to.is_some() {
+                    branches.map(|branches| {
+                        branches
+                            .get_packages_by_id_or_biz(
+                                &self.game.game,
+                                self.to.as_deref(),
+                                self.preload,
+                            )
+                            .next()
+                            .expect("Failed to find game branch")
+                    })
+                } else {
+                    branches.map(|branches| {
+                        branches
+                            .get_package_by_id_or_biz_latest(&self.game.game, self.preload)
+                            .expect("Failed to find game")
+                    })
+                }
+                .map(|p| (*p).clone())
+            };
 
-        if diffs_info.tag == self.from {
+        let mut diffs = package_info.diffs().expect("Failed to get update info");
+
+        if diffs.value.tag == self.from {
             output.abort_msg("Attempting to update the version to itself, this is a no-op");
             return Ok(());
         }
 
-        diffs_info
+        diffs
+            .value
             .manifests
             .retain(|diff| components.contains(&diff.matching_field));
 
-        output.update_info(&diffs_info)?;
+        output.update_info(&diffs.value)?;
 
-        for update_manifest in diffs_info.manifests {
+        for update_manifest in diffs.value.manifests {
             let total_download = update_manifest
                 .stats
                 .iter()
@@ -185,7 +206,7 @@ impl UpdateArgs {
                 .updater_update(total_download, &matching_field);
 
             let mut patcher =
-                SophonPatcher::new(client.clone(), &update_manifest, &cache_dir, None)
+                SophonPatcher::new(api.client.clone(), &update_manifest, &cache_dir, None)
                     .expect("Failed to construct updater")
                     .with_free_space_check(!self.extra.skip_free_space_check);
             patcher.patches_in_memory = self.extra.chunk_buffer_memory;
