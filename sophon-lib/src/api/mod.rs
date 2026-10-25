@@ -20,6 +20,127 @@ use crate::{
 
 pub mod schemas;
 
+/// Convenience struct for keepign the common arguments
+#[derive(Debug, Clone)]
+pub struct ApiContext {
+    pub client: Client,
+    pub edition: GameEdition,
+}
+
+/// A wrapper for chaining api calls that require a previosu api call result
+#[derive(Debug, Clone)]
+pub struct ApiContextWrapper<'ctx, T> {
+    pub ctx: &'ctx ApiContext,
+    pub value: T,
+}
+
+pub type ApiResult<'ctx, T> = Result<ApiContextWrapper<'ctx, T>, SophonError>;
+
+macro_rules! api_wrapper {
+    ($wrapname:ident => $implname:ident) => {
+        api_wrapper! {String: $wrapname => $implname}
+    };
+    ($restype:ident: $wrapname:ident => $implname:ident) => {
+        pub fn $wrapname<'ctx>(&'ctx self) -> ApiResult<'ctx, $restype> {
+            self.wrap($implname(&self.client, &self.edition))
+        }
+    };
+}
+
+impl ApiContext {
+    fn wrap<T>(&self, v: Result<T, SophonError>) -> ApiResult<'_, T> {
+        v.map(|value| ApiContextWrapper { ctx: self, value })
+    }
+
+    api_wrapper! {GameBranches: game_branches => get_game_branches_info}
+    api_wrapper! {game_branches_raw => get_game_branches_info_raw}
+    api_wrapper! {GameScanInfo: game_scan => get_game_scan_info}
+    api_wrapper! {game_scan_raw => get_game_scan_info_raw}
+    api_wrapper! {GameConfigs: game_configs => get_game_configs}
+    api_wrapper! {game_configs_raw => get_game_configs_raw}
+}
+
+impl<'ctx, T> ApiContextWrapper<'ctx, T> {
+    fn wrap<T2>(&self, v: Result<T2, SophonError>) -> ApiResult<'ctx, T2> {
+        self.ctx.wrap(v)
+    }
+
+    fn with<'a, T2: 'a, F: FnOnce(&'a T) -> T2>(&'a self, f: F) -> ApiContextWrapper<'ctx, T2> {
+        ApiContextWrapper {
+            ctx: self.ctx,
+            value: f(&self.value),
+        }
+    }
+}
+
+impl<'ctx, T> From<ApiContextWrapper<'ctx, Option<T>>> for Option<ApiContextWrapper<'ctx, T>> {
+    fn from(value: ApiContextWrapper<'ctx, Option<T>>) -> Self {
+        value.value.map(|v| ApiContextWrapper {
+            ctx: value.ctx,
+            value: v,
+        })
+    }
+}
+
+macro_rules! api_wrapper_val {
+    ($wrapname:ident => $implname:ident) => {
+        api_wrapper_val! {String: $wrapname => $implname}
+    };
+    ($restype:ident: $wrapname:ident => $implname:ident) => {
+        pub fn $wrapname(&'ctx self) -> ApiResult<'ctx, $restype> {
+            self.wrap($implname(&self.ctx.client, &self.value, &self.ctx.edition))
+        }
+    };
+}
+
+impl<'ctx> ApiContextWrapper<'ctx, PackageInfo> {
+    api_wrapper_val! {SophonDownloads: downloads => get_game_download_sophon_info}
+    api_wrapper_val! {downloads_raw => get_game_download_sophon_info_raw}
+    api_wrapper_val! {SophonDiffs: diffs => get_game_diffs_sophon_info}
+    api_wrapper_val! {diffs_raw => get_game_diffs_sophon_info_raw}
+}
+
+macro_rules! api_wrapper_val_noedition {
+    ($wrapname:ident => $implname:ident) => {
+        api_wrapper_val_noedition! {Bytes: $wrapname => $implname}
+    };
+    ($restype:ident: $wrapname:ident => $implname:ident) => {
+        pub fn $wrapname(&'ctx self) -> ApiResult<'ctx, $restype> {
+            self.wrap($implname(&self.ctx.client, &self.value))
+        }
+    };
+}
+
+impl<'ctx> ApiContextWrapper<'ctx, SophonDownloads> {
+    pub fn for_component(
+        &self,
+        matching_field: &str,
+    ) -> Option<ApiContextWrapper<'ctx, &SophonDownloadInfo>> {
+        self.with(|downloads| downloads.get_manifests_for(matching_field))
+            .into()
+    }
+}
+
+impl<'ctx> ApiContextWrapper<'ctx, &SophonDownloadInfo> {
+    api_wrapper_val_noedition! {SophonManifestProto: download_manifest => get_download_manifest}
+    api_wrapper_val_noedition! {download_manifest_raw => get_download_manifest_raw}
+}
+
+impl<'ctx> ApiContextWrapper<'ctx, SophonDiffs> {
+    pub fn for_component(
+        &self,
+        matching_field: &str,
+    ) -> Option<ApiContextWrapper<'ctx, &SophonDiff>> {
+        self.with(|diffs| diffs.get_manifests_for(matching_field))
+            .into()
+    }
+}
+
+impl<'ctx> ApiContextWrapper<'ctx, &SophonDiff> {
+    api_wrapper_val_noedition! {SophonPatchProto: patch_manifest => get_patch_manifest}
+    api_wrapper_val_noedition! {patch_manifest_raw => get_patch_manifest_raw}
+}
+
 // URLs
 
 fn get_game_branches_url(edition: &GameEdition) -> String {
