@@ -1,9 +1,10 @@
 use indicatif::HumanBytes;
 use sophon_lib::{
     api::schemas::{
-        game_branches::{GameBranchInfo, GameBranches, PackageInfo},
+        game_branches::{GameBranchInfo, GameBranches},
         game_configs::{GameConfigs, GameLaunchConfig},
         game_scan_info::{GameExeHash, GameScanInfo, ScanInfo},
+        package::PackageInfo,
         sophon_diff::{SophonDiff, SophonDiffs},
         sophon_manifests::{
             DownloadInfo, Manifest, ManifestStats, SophonDownloadInfo, SophonDownloads,

@@ -8,12 +8,8 @@ use clap::{Args, ValueEnum};
 use serde::Serialize;
 use sophon_lib::{
     GameEdition, SophonError,
-    api::{
-        get_download_manifest, get_download_manifest_raw, get_patch_manifest,
-        get_patch_manifest_raw,
-    },
+    api::{ApiContext, ApiContextWrapper, schemas::game_scan_info::ScanInfo},
     protos::{SophonManifestProto, SophonPatchProto},
-    reqwest::blocking::Client,
 };
 
 use crate::pretty_print::PrettyPrint;
@@ -134,34 +130,21 @@ impl DumpTarget {
         verbosity: u8,
     ) -> Result<(), String> {
         let client = sophon_lib::reqwest::blocking::Client::new();
+        let api = ApiContext { client, edition };
         match self {
-            DumpTarget::GameScanInfo(args) => {
-                args.dump_game_scan_info(&client, edition, format, verbosity)
-            }
-            DumpTarget::GameConfigs(args) => {
-                args.dump_game_launch_configs(&client, edition, format, verbosity)
-            }
+            DumpTarget::GameScanInfo(args) => args.dump_game_scan_info(api, format, verbosity),
+            DumpTarget::GameConfigs(args) => args.dump_game_launch_configs(api, format, verbosity),
 
-            DumpTarget::GameBranches(args) => {
-                args.dump_game_branches(&client, edition, format, verbosity)
-            }
-            DumpTarget::PackageInfo(args) => {
-                args.dump_package_info(&client, edition, format, verbosity)
-            }
+            DumpTarget::GameBranches(args) => args.dump_game_branches(api, format, verbosity),
+            DumpTarget::PackageInfo(args) => args.dump_package_info(api, format, verbosity),
 
-            DumpTarget::DownloadInfo(args) => {
-                args.dump_download_info(&client, edition, format, verbosity)
-            }
+            DumpTarget::DownloadInfo(args) => args.dump_download_info(api, format, verbosity),
             DumpTarget::DownloadManifest(args) => {
-                args.dump_download_manifest(&client, edition, format, verbosity)
+                args.dump_download_manifest(api, format, verbosity)
             }
 
-            DumpTarget::PatchInfo(args) => {
-                args.dump_patch_info(&client, edition, format, verbosity)
-            }
-            DumpTarget::PatchManifest(args) => {
-                args.dump_patch_manifest(&client, edition, format, verbosity)
-            }
+            DumpTarget::PatchInfo(args) => args.dump_patch_info(api, format, verbosity),
+            DumpTarget::PatchManifest(args) => args.dump_patch_manifest(api, format, verbosity),
         }
     }
 }
@@ -169,8 +152,7 @@ impl DumpTarget {
 impl MultipleVersionFilter {
     fn dump_game_scan_info(
         self,
-        client: &Client,
-        edition: GameEdition,
+        api: ApiContext,
         format: DumpFormat,
         verbosity: u8,
     ) -> Result<(), String> {
@@ -182,24 +164,28 @@ impl MultipleVersionFilter {
         if matches!(format, DumpFormat::Raw) {
             println!(
                 "{}",
-                sophon_lib::api::get_game_scan_info_raw(client, &edition)
-                    .map_err(DumpError::game_scan)?
+                api.game_scan_raw().map_err(DumpError::game_scan)?.value
             );
             return Ok(());
         }
 
-        let game_scan_info =
-            sophon_lib::api::get_game_scan_info(client, &edition).map_err(DumpError::game_scan)?;
+        let game_scan_info = api.game_scan().map_err(DumpError::game_scan)?;
 
         let Some(game_id) = game else {
-            dump_value_formatted(&game_scan_info, format, verbosity)?;
+            dump_value_formatted(&game_scan_info.value, format, verbosity)?;
             return Ok(());
         };
 
-        let Some(game_filtered) = game_scan_info
-            .game_scan_info
-            .iter()
-            .find(|info| info.game_id == game_id)
+        let Some(ApiContextWrapper::<&ScanInfo> {
+            value: game_filtered,
+            ..
+        }) = game_scan_info
+            .map(|scan| {
+                scan.game_scan_info
+                    .iter()
+                    .find(|info| info.game_id == game_id)
+            })
+            .into()
         else {
             return Err(format!(
                 "Failed to find scan info for game id `{}`",
@@ -237,8 +223,7 @@ impl MultipleVersionFilter {
 
     fn dump_game_branches(
         self,
-        client: &Client,
-        edition: GameEdition,
+        api: ApiContext,
         format: DumpFormat,
         verbosity: u8,
     ) -> Result<(), String> {
@@ -250,37 +235,38 @@ impl MultipleVersionFilter {
         if matches!(format, DumpFormat::Raw) {
             println!(
                 "{}",
-                sophon_lib::api::get_game_branches_info_raw(client, &edition)
+                api.game_branches_raw()
                     .map_err(DumpError::game_branches)?
+                    .value
             );
             return Ok(());
         }
 
-        let game_branches = sophon_lib::api::get_game_branches_info(client, &edition)
-            .map_err(DumpError::game_branches)?;
+        let game_branches = api.game_branches().map_err(DumpError::game_branches)?;
 
         let Some(game_id_or_biz) = game else {
-            dump_value_formatted(&game_branches, format, verbosity)?;
+            dump_value_formatted(&game_branches.value, format, verbosity)?;
             return Ok(());
         };
 
         if latest {
-            if let Some(latest_branch) =
-                game_branches.get_game_branch_by_id_or_biz_latest(&game_id_or_biz)
-            {
-                dump_value_formatted(latest_branch, format, verbosity)?;
+            if let Some(latest_branch) = game_branches.branch_latest(&game_id_or_biz) {
+                dump_value_formatted(latest_branch.value, format, verbosity)?;
                 return Ok(());
             }
         } else {
             let mut filtered_branches =
-                game_branches.get_game_branches_by_id_or_biz(&game_id_or_biz, version.as_deref());
-            if let Some(first_item) = filtered_branches.next() {
+                game_branches.branches_iter(&game_id_or_biz, version.as_deref());
+            if let Some(ApiContextWrapper {
+                value: first_item, ..
+            }) = filtered_branches.next()
+            {
                 dump_value_formatted(first_item, format, verbosity)?;
                 for branch in filtered_branches {
                     if matches!(format, DumpFormat::Pretty) {
                         print!("\n\n");
                     }
-                    dump_value_formatted(branch, format, verbosity)?;
+                    dump_value_formatted(branch.value, format, verbosity)?;
                 }
                 return Ok(());
             }
@@ -291,8 +277,7 @@ impl MultipleVersionFilter {
 
     fn dump_game_launch_configs(
         self,
-        client: &Client,
-        edition: GameEdition,
+        api: ApiContext,
         format: DumpFormat,
         verbosity: u8,
     ) -> Result<(), String> {
@@ -300,14 +285,14 @@ impl MultipleVersionFilter {
         if matches!(format, DumpFormat::Raw) {
             println!(
                 "{}",
-                sophon_lib::api::get_game_configs_raw(client, &edition)
+                api.game_configs_raw()
                     .map_err(DumpError::game_configs)?
+                    .value
             );
             return Ok(());
         }
 
-        let mut game_configs =
-            sophon_lib::api::get_game_configs(client, &edition).map_err(DumpError::game_configs)?;
+        let mut game_configs = api.game_configs().map_err(DumpError::game_configs)?.value;
 
         if let Some(game_id_or_biz) = game {
             game_configs.launch_configs.retain(|launch_config| {
@@ -327,8 +312,7 @@ impl MultipleVersionFilter {
 impl SingleVersionFilter {
     fn dump_package_info(
         self,
-        client: &Client,
-        edition: GameEdition,
+        api: ApiContext,
         format: DumpFormat,
         verbosity: u8,
     ) -> Result<(), String> {
@@ -342,26 +326,26 @@ impl SingleVersionFilter {
                 "Unable to filter and extract package information with raw formatting".to_string(),
             );
         }
-        let game_branches = sophon_lib::api::get_game_branches_info(client, &edition)
-            .map_err(DumpError::game_branches)?;
+        let game_branches = api.game_branches().map_err(DumpError::game_branches)?;
 
         if version.is_none() {
-            if let Some(latest_branch) =
-                game_branches.get_package_by_id_or_biz_latest(&game, preload)
-            {
-                dump_value_formatted(latest_branch, format, verbosity)?;
+            if let Some(latest_branch) = game_branches.package_latest(&game, preload) {
+                dump_value_formatted(latest_branch.value, format, verbosity)?;
                 return Ok(());
             }
         } else {
             let mut filtered_branches =
-                game_branches.get_packages_by_id_or_biz(&game, version.as_deref(), preload);
-            if let Some(first_item) = filtered_branches.next() {
+                game_branches.packages_iter(&game, version.as_deref(), preload);
+            if let Some(ApiContextWrapper {
+                value: first_item, ..
+            }) = filtered_branches.next()
+            {
                 dump_value_formatted(first_item, format, verbosity)?;
                 for branch in filtered_branches {
                     if matches!(format, DumpFormat::Pretty) {
                         print!("\n\n");
                     }
-                    dump_value_formatted(branch, format, verbosity)?;
+                    dump_value_formatted(branch.value, format, verbosity)?;
                 }
                 return Ok(());
             }
@@ -374,8 +358,7 @@ impl SingleVersionFilter {
 impl MultipleMatchingFieldFilter {
     fn dump_download_info(
         self,
-        client: &Client,
-        edition: GameEdition,
+        api: ApiContext,
         format: DumpFormat,
         verbosity: u8,
     ) -> Result<(), String> {
@@ -388,16 +371,9 @@ impl MultipleMatchingFieldFilter {
                 },
             matching_field,
         } = self;
-        let game_branches = sophon_lib::api::get_game_branches_info(client, &edition)
-            .map_err(DumpError::game_branches)?;
+        let game_branches = api.game_branches().map_err(DumpError::game_branches)?;
 
-        let package = if version.is_none() {
-            game_branches.get_package_by_id_or_biz_latest(&game, preload)
-        } else {
-            game_branches
-                .get_packages_by_id_or_biz(&game, version.as_deref(), preload)
-                .next()
-        };
+        let package = game_branches.package_latest_or_version(&game, version.as_deref(), preload);
 
         let Some(package) = package else {
             return Err("Unable to find package with specified query".to_string());
@@ -406,21 +382,22 @@ impl MultipleMatchingFieldFilter {
         if matches!(format, DumpFormat::Raw) {
             println!(
                 "{}",
-                sophon_lib::api::get_game_download_sophon_info_raw(client, package, &edition)
+                package
+                    .downloads_raw()
                     .map_err(DumpError::sophon_download)?
+                    .value
             );
         } else {
-            let mut downloads_info =
-                sophon_lib::api::get_game_download_sophon_info(client, package, &edition)
-                    .map_err(DumpError::sophon_download)?;
+            let mut downloads_info = package.downloads().map_err(DumpError::sophon_download)?;
 
             if !matching_field.is_empty() {
                 downloads_info
+                    .value
                     .manifests
                     .retain(|download_info| matching_field.contains(&download_info.matching_field));
             }
 
-            dump_value_formatted(&downloads_info, format, verbosity)?;
+            dump_value_formatted(&downloads_info.value, format, verbosity)?;
         }
 
         Ok(())
@@ -428,8 +405,7 @@ impl MultipleMatchingFieldFilter {
 
     fn dump_patch_info(
         self,
-        client: &Client,
-        edition: GameEdition,
+        api: ApiContext,
         format: DumpFormat,
         verbosity: u8,
     ) -> Result<(), String> {
@@ -442,16 +418,9 @@ impl MultipleMatchingFieldFilter {
                 },
             matching_field,
         } = self;
-        let game_branches = sophon_lib::api::get_game_branches_info(client, &edition)
-            .map_err(DumpError::game_branches)?;
+        let game_branches = api.game_branches().map_err(DumpError::game_branches)?;
 
-        let package = if version.is_none() {
-            game_branches.get_package_by_id_or_biz_latest(&game, preload)
-        } else {
-            game_branches
-                .get_packages_by_id_or_biz(&game, version.as_deref(), preload)
-                .next()
-        };
+        let package = game_branches.package_latest_or_version(&game, version.as_deref(), preload);
 
         let Some(package) = package else {
             return Err("Unable to find package with specified query".to_string());
@@ -460,20 +429,19 @@ impl MultipleMatchingFieldFilter {
         if matches!(format, DumpFormat::Raw) {
             println!(
                 "{}",
-                sophon_lib::api::get_game_diffs_sophon_info_raw(client, package, &edition)
-                    .map_err(DumpError::sophon_diffs)?
+                package.diffs_raw().map_err(DumpError::sophon_diffs)?.value
             );
         } else {
-            let mut diffs = sophon_lib::api::get_game_diffs_sophon_info(client, package, &edition)
-                .map_err(DumpError::sophon_diffs)?;
+            let mut diffs = package.diffs().map_err(DumpError::sophon_diffs)?;
 
             if !matching_field.is_empty() {
                 diffs
+                    .value
                     .manifests
                     .retain(|download_info| matching_field.contains(&download_info.matching_field));
             }
 
-            dump_value_formatted(&diffs, format, verbosity)?;
+            dump_value_formatted(&diffs.value, format, verbosity)?;
         }
 
         Ok(())
@@ -483,8 +451,7 @@ impl MultipleMatchingFieldFilter {
 impl SingleMatchingFieldFilter {
     fn dump_download_manifest(
         self,
-        client: &Client,
-        edition: GameEdition,
+        api: ApiContext,
         format: DumpFormat,
         verbosity: u8,
     ) -> Result<(), String> {
@@ -521,22 +488,23 @@ impl SingleMatchingFieldFilter {
             return Ok(());
         }
 
-        let game_branches = sophon_lib::api::get_game_branches_info(client, &edition)
-            .map_err(DumpError::game_branches)?;
+        let game_branches = api.game_branches().map_err(DumpError::game_branches)?;
 
-        let Some(package) = game_branches
-            .get_packages_by_id_or_biz(&game, version.as_deref(), preload)
-            .next()
+        let Some(package) =
+            game_branches.package_latest_or_version(&game, version.as_deref(), preload)
         else {
             return Err("Unable to find package with specified query".to_string());
         };
 
-        let downloads = sophon_lib::api::get_game_download_sophon_info(client, package, &edition)
-            .map_err(DumpError::sophon_download)?;
-        let Some(download_info) = downloads
-            .manifests
-            .iter()
-            .find(|download_info| download_info.matching_field == matching_field)
+        let downloads = package.downloads().map_err(DumpError::sophon_download)?;
+        let Some::<ApiContextWrapper<_>>(download_info) = downloads
+            .map(|downloads| {
+                downloads
+                    .manifests
+                    .iter()
+                    .find(|download_info| download_info.matching_field == matching_field)
+            })
+            .into()
         else {
             return Err(format!(
                 "Download info with `matching_field` == `{matching_field}` not found"
@@ -544,13 +512,17 @@ impl SingleMatchingFieldFilter {
         };
 
         if matches!(format, DumpFormat::Raw) {
-            let data = get_download_manifest_raw(client, download_info)
-                .map_err(|e| format!("Failed to get download manifest: {e:?}"))?;
+            let data = download_info
+                .download_manifest_raw()
+                .map_err(|e| format!("Failed to get download manifest: {e:?}"))?
+                .value;
             let mut output = stdout();
             output.write_all(&data).map_err(DumpError::output_io)?;
         } else {
-            let download_manifest = get_download_manifest(client, download_info)
-                .map_err(DumpError::download_manifest)?;
+            let download_manifest = download_info
+                .download_manifest()
+                .map_err(DumpError::download_manifest)?
+                .value;
             dump_value_formatted(&download_manifest, format, verbosity)?;
         }
 
@@ -559,8 +531,7 @@ impl SingleMatchingFieldFilter {
 
     fn dump_patch_manifest(
         self,
-        client: &Client,
-        edition: GameEdition,
+        api: ApiContext,
         format: DumpFormat,
         verbosity: u8,
     ) -> Result<(), String> {
@@ -595,22 +566,23 @@ impl SingleMatchingFieldFilter {
             return Ok(());
         }
 
-        let game_branches = sophon_lib::api::get_game_branches_info(client, &edition)
-            .map_err(DumpError::game_branches)?;
+        let game_branches = api.game_branches().map_err(DumpError::game_branches)?;
 
-        let Some(package) = game_branches
-            .get_packages_by_id_or_biz(&game, version.as_deref(), preload)
-            .next()
+        let Some(package) =
+            game_branches.package_latest_or_version(&game, version.as_deref(), preload)
         else {
             return Err("Unable to find package with specified query".to_string());
         };
 
-        let diffs = sophon_lib::api::get_game_diffs_sophon_info(client, package, &edition)
-            .map_err(DumpError::sophon_diffs)?;
-        let Some(diff_info) = diffs
-            .manifests
-            .iter()
-            .find(|download_info| download_info.matching_field == matching_field)
+        let diffs = package.diffs().map_err(DumpError::sophon_diffs)?;
+        let Some::<ApiContextWrapper<_>>(diff_info) = diffs
+            .map(|diffs| {
+                diffs
+                    .manifests
+                    .iter()
+                    .find(|download_info| download_info.matching_field == matching_field)
+            })
+            .into()
         else {
             return Err(format!(
                 "Download info with `matching_field` == `{matching_field}` not found"
@@ -618,13 +590,17 @@ impl SingleMatchingFieldFilter {
         };
 
         if matches!(format, DumpFormat::Raw) {
-            let data =
-                get_patch_manifest_raw(client, diff_info).map_err(DumpError::patch_manifest)?;
+            let data = diff_info
+                .patch_manifest_raw()
+                .map_err(DumpError::patch_manifest)?
+                .value;
             let mut output = stdout();
             output.write_all(&data).map_err(DumpError::output_io)?;
         } else {
-            let patch_manifest =
-                get_patch_manifest(client, diff_info).map_err(DumpError::patch_manifest)?;
+            let patch_manifest = diff_info
+                .patch_manifest()
+                .map_err(DumpError::patch_manifest)?
+                .value;
             dump_value_formatted(&patch_manifest, format, verbosity)?;
         }
 

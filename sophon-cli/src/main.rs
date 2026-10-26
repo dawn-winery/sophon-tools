@@ -1,7 +1,7 @@
 use std::{io::BufReader, path::PathBuf, str::FromStr};
 
 use clap::{Args, Parser, Subcommand, ValueHint};
-use sophon_lib::{GameEdition, api::schemas::game_branches::PackageInfo};
+use sophon_lib::{GameEdition, api::schemas::package::PackageInfo};
 use tracing_subscriber::{
     EnvFilter, Layer, filter::filter_fn, layer::SubscriberExt, util::SubscriberInitExt,
 };

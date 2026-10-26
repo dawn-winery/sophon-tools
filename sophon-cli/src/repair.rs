@@ -1,11 +1,7 @@
 use std::{path::PathBuf, time::Duration};
 
 use clap::Args;
-use sophon_lib::{
-    GameEdition,
-    api::{get_game_branches_info, get_game_download_sophon_info},
-    reqwest,
-};
+use sophon_lib::{GameEdition, api::ApiContext, reqwest};
 
 use super::{DownloadParameters, GameCommon};
 use crate::{CustomPackageInfo, status_format::StatusFormat};
@@ -73,60 +69,56 @@ impl RepairArgs {
         .build()
         .expect("Client configuration should be valid");
 
+        let api = ApiContext { client, edition };
+
         let package_info =
             if let Some(adhoc_package_info) = self.custom_package_info.assemble_adhoc() {
                 output.print_msg("Using provided ad-hoc package info");
-                adhoc_package_info
+                api.wrap(adhoc_package_info)
             } else {
                 output.print_msg("Fetching download information...");
-                let branches =
-                    get_game_branches_info(&client, &edition).expect("Failed to get game branches");
-                if self.version.is_some() {
-                    branches
-                        .get_packages_by_id_or_biz(&self.game.game, self.version.as_deref(), false)
-                        .next()
-                        .expect("Failed to find game branch")
-                } else {
-                    branches
-                        .get_package_by_id_or_biz_latest(&self.game.game, false)
-                        .expect("Failed to find game")
-                }
-                .clone()
+                let branches = api.game_branches().expect("Failed to get game branches");
+                branches
+                    .package_latest_or_version(&self.game.game, self.version.as_deref(), false)
+                    .expect("Failed to find game branch")
+                    .cloned()
             };
 
-        let mut downloads_info = get_game_download_sophon_info(&client, &package_info, &edition)
+        let mut downloads_info = package_info
+            .as_ref()
+            .downloads()
             .expect("Failed to get download info");
 
         downloads_info
+            .value
             .manifests
             .retain(|download_info| components.contains(&download_info.matching_field));
 
-        output.repair_info(&downloads_info)?;
+        output.repair_info(&downloads_info.value)?;
 
-        for download_info in downloads_info
-            .manifests
-            .iter()
-            .filter(|download_info| components.contains(&download_info.matching_field))
-        {
+        for download_info in downloads_info.map_iter(|downloads| {
+            downloads
+                .manifests
+                .iter()
+                .filter(|download_info| components.contains(&download_info.matching_field))
+        }) {
             let total_download = download_info
+                .value
                 .stats
                 .compressed_size
                 .parse::<u64>()
                 .expect("API must have valid integer");
 
-            let matching_field = download_info.matching_field.clone();
+            let matching_field = download_info.value.matching_field.clone();
 
             let updater = output
                 .clone()
                 .updater_repair(&matching_field, total_download);
 
-            let mut downloader = sophon_lib::installer::SophonInstaller::new(
-                client.clone(),
-                download_info,
-                &temp_dir,
-            )
-            .expect("Failed to construct downloader")
-            .with_free_space_check(!self.extra.skip_free_space_check);
+            let mut downloader =
+                sophon_lib::installer::SophonInstaller::new(download_info, &temp_dir)
+                    .expect("Failed to construct downloader")
+                    .with_free_space_check(!self.extra.skip_free_space_check);
             downloader.inplace = self.inplace;
             downloader.chunks_in_mem = self.extra.chunk_buffer_memory;
             downloader.chunks_queue_data_limit = self.extra.memory_buffer_limit;
@@ -136,12 +128,12 @@ impl RepairArgs {
             if let Err(why) = downloader.install(&self.game.game_dir, threads, Box::new(updater)) {
                 output.abort_msg(&format!(
                     "Failed to repair component `{}`: {why:?}",
-                    download_info.matching_field
+                    download_info.value.matching_field
                 ));
             } else if !output.is_finished() {
                 output.print_msg(&format!(
                     "Component `{}`: not all files passed the check",
-                    download_info.matching_field
+                    download_info.value.matching_field
                 ));
             }
         }

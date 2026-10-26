@@ -7,10 +7,7 @@ use std::{
 use clap::Args;
 use sophon_lib::{
     GameEdition, SophonError,
-    api::{
-        ApiContext, ApiContextWrapper, get_game_branches_info, get_game_configs,
-        get_game_diffs_sophon_info, get_game_scan_info, schemas::game_branches::PackageInfo,
-    },
+    api::{ApiContext, ApiContextWrapper},
     reqwest::{self},
     updater::SophonPatcher,
     utils::version::Version,
@@ -156,28 +153,16 @@ impl UpdateArgs {
             } else {
                 output.print_msg("Fetching update information...");
                 let branches = api.game_branches().expect("Failed to get game branches");
-                if self.to.is_some() {
-                    branches.map(|branches| {
-                        branches
-                            .get_packages_by_id_or_biz(
-                                &self.game.game,
-                                self.to.as_deref(),
-                                self.preload,
-                            )
-                            .next()
-                            .expect("Failed to find game branch")
-                    })
-                } else {
-                    branches.map(|branches| {
-                        branches
-                            .get_package_by_id_or_biz_latest(&self.game.game, self.preload)
-                            .expect("Failed to find game")
-                    })
-                }
-                .map(|p| (*p).clone())
+                branches
+                    .package_latest_or_version(&self.game.game, self.to.as_deref(), self.preload)
+                    .expect("Failed to find game branch")
+                    .cloned()
             };
 
-        let mut diffs = package_info.diffs().expect("Failed to get update info");
+        let mut diffs = package_info
+            .as_ref()
+            .diffs()
+            .expect("Failed to get update info");
 
         if diffs.value.tag == self.from {
             output.abort_msg("Attempting to update the version to itself, this is a no-op");
@@ -191,24 +176,24 @@ impl UpdateArgs {
 
         output.update_info(&diffs.value)?;
 
-        for update_manifest in diffs.value.manifests {
+        for update_manifest in diffs.map_iter(|diffs| diffs.manifests.iter()) {
             let total_download = update_manifest
+                .value
                 .stats
                 .iter()
                 .find(|(k, _)| **k == self.from)
                 .and_then(|(_, v)| v.compressed_size.parse::<u64>().ok())
                 .expect("Failed to find/parse download size");
 
-            let matching_field = update_manifest.matching_field.clone();
+            let matching_field = update_manifest.value.matching_field.clone();
 
             let updater = output
                 .clone()
                 .updater_update(total_download, &matching_field);
 
-            let mut patcher =
-                SophonPatcher::new(api.client.clone(), &update_manifest, &cache_dir, None)
-                    .expect("Failed to construct updater")
-                    .with_free_space_check(!self.extra.skip_free_space_check);
+            let mut patcher = SophonPatcher::new(update_manifest, &cache_dir, None)
+                .expect("Failed to construct updater")
+                .with_free_space_check(!self.extra.skip_free_space_check);
             patcher.patches_in_memory = self.extra.chunk_buffer_memory;
             patcher.patch_queue_mem_limit = self.extra.memory_buffer_limit;
             let res = if !self.extra.preload_pretend {
@@ -229,12 +214,12 @@ impl UpdateArgs {
             if let Err(why) = res {
                 output.abort_msg(&format!(
                     "Failed to update component `{}`: {why:?}",
-                    update_manifest.matching_field
+                    update_manifest.value.matching_field
                 ));
             } else {
                 output.print_msg(&format!(
                     "Done updating component `{}`",
-                    update_manifest.matching_field,
+                    update_manifest.value.matching_field,
                 ));
             }
         }
