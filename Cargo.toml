@@ -2,6 +2,9 @@
 resolver = "3"
 members = ["sophon-cli", "sophon-lib"]
 
+[workspace.package]
+version = "0.1.9"
+
 [profile.release]
 strip = true
 lto = true

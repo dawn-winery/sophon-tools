@@ -4,6 +4,7 @@ use std::{
     num::NonZeroUsize,
     os::unix::fs::PermissionsExt,
     path::Path,
+    time::Duration,
 };
 
 use base16ct::HexDisplay;
@@ -12,6 +13,7 @@ pub use error::SophonError;
 pub use game_edition::GameEdition;
 use md5::{Digest, Md5};
 pub use reqwest;
+use reqwest::blocking::{Client, ClientBuilder};
 
 pub mod api;
 pub mod error;
@@ -22,6 +24,16 @@ pub mod updater;
 pub mod utils;
 
 const DEFAULT_CHUNK_RETRIES: u8 = 4;
+
+pub fn client_builder() -> ClientBuilder {
+    // Taken from sophon-tools 0.2 branch
+    Client::builder()
+        .user_agent(format!("sophon-tools/{}", env!("CARGO_PKG_VERSION")))
+        .connect_timeout(Duration::from_secs(20))
+        .pool_idle_timeout(Duration::from_secs(180))
+    //.http2_keep_alive_interval(Some(Duration::from_secs(30)))
+    //.http2_keep_alive_timeout(Duration::from_secs(20))
+}
 
 pub fn prettify_bytes(bytes: u64) -> String {
     if bytes > 1024 * 1024 * 1024 {

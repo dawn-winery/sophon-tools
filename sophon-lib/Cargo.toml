@@ -1,6 +1,6 @@
 [package]
 name = "sophon-lib"
-version = "0.1.9"
+version.workspace = true
 edition = "2024"
 license = "GPL-3.0-or-later"
 rust-version = "1.94.1"
@@ -12,7 +12,7 @@ paimon = ["dep:paimon"]
 extra-logs = []
 
 [dependencies]
-reqwest = { version = "0.13", features = ["blocking", "h2", "http2", "json", "socks"], default-features = false }
+reqwest = { version = "0.13", features = ["blocking", "h2", "http2", "json", "socks", "gzip"], default-features = false }
 
 tokio = { version = "1.54.1", features = ["fs", "io-util", "sync"] }
 futures = { version = "0.3.34", features = ["cfg-target-has-atomic"] }
