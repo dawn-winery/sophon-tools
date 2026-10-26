@@ -15,10 +15,7 @@ use serde::Serialize;
 
 use super::{
     DEFAULT_CHUNK_RETRIES, SophonError,
-    api::{
-        get_patch_manifest,
-        schemas::{sophon_diff::SophonDiff, sophon_manifests::DownloadInfo},
-    },
+    api::schemas::{sophon_diff::SophonDiff, sophon_manifests::DownloadInfo},
     check_file, file_md5_hash_str, finalize_file, prettify_bytes,
     protos::{
         SophonPatchAssetChunk, SophonPatchAssetProperty, SophonPatchProto, SophonUnusedAssetInfo,
@@ -28,6 +25,7 @@ use super::{
         read_take_region::ReadTakeRegion, size_limited_queue::*, version::Version,
     },
 };
+use crate::api::{ApiContext, ApiContextWrapper};
 
 #[derive(Debug, Serialize)]
 pub enum Update {
@@ -368,7 +366,7 @@ type BoxPatchFn = Box<dyn Fn(PatchFnArgs<'_>) -> std::io::Result<()> + Sync>;
 type UpdaterFnBox<'a> = crate::utils::updater_clonebox::UpdaterFnBox<'a, Update>;
 
 pub struct SophonPatcher {
-    pub client: Client,
+    pub api: ApiContext,
     pub patch_manifest: SophonPatchProto,
     pub diff_info: SophonDiff,
     pub temp_folder: PathBuf,
@@ -383,7 +381,7 @@ impl std::fmt::Debug for SophonPatcher {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // all this to not require Debug on BoxPatchFn and also not pull in debug_ignore
         f.debug_struct("SophonPatcher")
-            .field("client", &self.client)
+            .field("api", &self.api)
             .field("patch_manifest", &self.patch_manifest)
             .field("diff_info", &self.diff_info)
             .field("temp_folder", &self.temp_folder)
@@ -397,8 +395,7 @@ impl std::fmt::Debug for SophonPatcher {
 
 impl SophonPatcher {
     pub fn new(
-        client: Client,
-        diff: &SophonDiff,
+        diff: ApiContextWrapper<&SophonDiff>,
         temp_dir: impl AsRef<Path>,
         patch_function: Option<BoxPatchFn>,
     ) -> Result<Self, SophonError> {
@@ -406,10 +403,13 @@ impl SophonPatcher {
         let patch_function = Some(patch_function.expect(
             "Hpatchz or rust hdiff parser not included with the crate, custom function required but was not provided",
         ));
+
+        let patch_manifest = diff.patch_manifest()?.value;
+
         Ok(Self {
-            patch_manifest: get_patch_manifest(&client, diff)?,
-            client,
-            diff_info: diff.clone(),
+            patch_manifest,
+            api: diff.ctx.clone(),
+            diff_info: diff.value.clone(),
             check_free_space: true,
             temp_folder: temp_dir.as_ref().to_owned(),
             patch_function,
@@ -417,6 +417,10 @@ impl SophonPatcher {
             patches_in_memory: false,
             patch_queue_mem_limit: None,
         })
+    }
+
+    fn client(&self) -> &reqwest::blocking::Client {
+        &self.api.client
     }
 
     pub fn with_free_space_check(mut self, check: bool) -> Self {
@@ -853,7 +857,7 @@ impl SophonPatcher {
         updater: impl Fn(Update),
     ) -> Result<(), SophonError> {
         let download_url = download_info.download_url(&chunk_info.patch_name);
-        let resp = self.client.get(download_url).send()?.error_for_status()?;
+        let resp = self.client().get(download_url).send()?.error_for_status()?;
 
         #[allow(clippy::collapsible_if, reason = "only collapsible in Rust >= 1.88.0")]
         if let Some(length) = resp.content_length() {
@@ -908,7 +912,7 @@ impl SophonPatcher {
         let out_filename = self.tmp_artifact_file_path(task);
 
         let resp = self
-            .client
+            .client()
             .get(download_url)
             .header(RANGE, download_range_val)
             .send()?

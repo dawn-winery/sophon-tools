@@ -15,16 +15,16 @@ use serde::Serialize;
 
 use super::{
     DEFAULT_CHUNK_RETRIES, SophonError,
-    api::{
-        get_download_manifest,
-        schemas::sophon_manifests::{DownloadInfo, SophonDownloadInfo},
-    },
+    api::schemas::sophon_manifests::{DownloadInfo, SophonDownloadInfo},
     check_file, divide_threads, ensure_parent, file_md5_hash_str, file_region_hash_md5,
     finalize_file, md5_hash_str, prettify_bytes,
     protos::{SophonManifestAssetChunk, SophonManifestAssetProperty, SophonManifestProto},
     utils::size_limited_queue::*,
 };
-use crate::utils::semaphore::Semaphore;
+use crate::{
+    api::{ApiContext, ApiContextWrapper},
+    utils::semaphore::Semaphore,
+};
 
 #[derive(Debug, Serialize)]
 pub enum Update {
@@ -308,7 +308,7 @@ pub type UpdaterFnBox<'a> = crate::utils::updater_clonebox::UpdaterFnBox<'a, Upd
 pub struct SophonInstaller {
     pub manifest: SophonManifestProto,
     pub download_info: SophonDownloadInfo,
-    pub client: reqwest::blocking::Client,
+    pub api: ApiContext,
     pub temp_folder: PathBuf,
     pub chunks_queue_data_limit: Option<u64>,
     pub last_file_suffix: Option<String>,
@@ -322,16 +322,15 @@ pub struct SophonInstaller {
 
 impl SophonInstaller {
     pub fn new(
-        client: Client,
-        download_info: &SophonDownloadInfo,
+        download_info: ApiContextWrapper<&SophonDownloadInfo>,
         temp_dir: impl AsRef<Path>,
     ) -> Result<Self, SophonError> {
-        let manifest = get_download_manifest(&client, download_info)?;
+        let manifest = download_info.download_manifest()?;
 
         Ok(Self {
-            client,
-            manifest,
-            download_info: download_info.clone(),
+            api: download_info.ctx.clone(),
+            manifest: manifest.value,
+            download_info: download_info.value.clone(),
             temp_folder: temp_dir.as_ref().to_owned(),
             check_free_space: true,
             inplace: true,
@@ -341,6 +340,10 @@ impl SophonInstaller {
             last_file_suffix: Some("globalgamemanagers".to_owned()),
             mode_repair: false,
         })
+    }
+
+    fn client(&self) -> &reqwest::blocking::Client {
+        &self.api.client
     }
 
     pub fn install(
@@ -840,7 +843,7 @@ impl SophonInstaller {
 
         let (chunk_size, _) = task.chunk_file_info();
 
-        let resp = self.client.get(download_url).send()?.error_for_status()?;
+        let resp = self.client().get(download_url).send()?.error_for_status()?;
 
         // In theory, can catch the size mismatch before writing to the disk?
         #[allow(clippy::collapsible_if, reason = "only collapsible in Rust >= 1.88.0")]

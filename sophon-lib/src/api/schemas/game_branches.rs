@@ -2,7 +2,13 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
-use crate::utils::version::Version;
+use crate::{
+    api::{
+        ApiContext, ApiContextWrapper, ApiContextWrapperIter,
+        schemas::package::{PackageInfo, PackageIter},
+    },
+    utils::version::Version,
+};
 
 #[derive(Debug)]
 pub struct GameBranchesIter<'a, 'b> {
@@ -33,29 +39,24 @@ impl<'a, 'b> Iterator for GameBranchesIter<'a, 'b> {
     }
 }
 
-#[derive(Debug)]
-pub struct PackageIter<'a, 'b> {
-    branches_iter: GameBranchesIter<'a, 'b>,
-    preload: bool,
-}
-
-impl<'a, 'b> Iterator for PackageIter<'a, 'b> {
-    type Item = &'b PackageInfo;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.branches_iter.find_map(|branch_info| {
-            if self.preload {
-                branch_info.pre_download.as_ref()
-            } else {
-                branch_info.main.as_ref()
-            }
-        })
-    }
-}
-
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GameBranches {
     pub game_branches: Vec<GameBranchInfo>,
+}
+
+impl ApiContext {
+    fn game_branches_url(&self) -> String {
+        format!(
+            "{}/hyp/hyp-connect/api/getGameBranches?launcher_id={}",
+            self.edition.branches_host(),
+            self.edition.launcher_id()
+        )
+    }
+
+    crate::api::api_methods! {
+        game_branches(get, url = game_branches_url()) -> GameBranches,
+        game_branches_raw(get, raw, url = game_branches_url()) -> String
+    }
 }
 
 impl GameBranches {
@@ -109,6 +110,47 @@ impl GameBranches {
     }
 }
 
+impl<'ctx> ApiContextWrapper<'ctx, GameBranches> {
+    pub fn branch_latest(
+        &self,
+        id_or_biz: &str,
+    ) -> Option<ApiContextWrapper<'ctx, &GameBranchInfo>> {
+        self.map(|branches| branches.get_game_branch_by_id_or_biz_latest(id_or_biz))
+            .into()
+    }
+
+    pub fn branch_version(
+        &self,
+        id_or_biz: &str,
+        version: &str,
+    ) -> Option<ApiContextWrapper<'ctx, &GameBranchInfo>> {
+        self.map(|branches| {
+            branches
+                .get_game_branches_by_id_or_biz(id_or_biz, Some(version))
+                .next()
+        })
+        .into()
+    }
+
+    pub fn branch_latest_or_version(
+        &self,
+        id_or_biz: &str,
+        version: Option<&str>,
+    ) -> Option<ApiContextWrapper<'ctx, &GameBranchInfo>> {
+        version
+            .map(|version| self.branch_version(id_or_biz, version))
+            .unwrap_or_else(|| self.branch_latest(id_or_biz))
+    }
+
+    pub fn branches_iter<'a>(
+        &'a self,
+        id_or_biz: &'a str,
+        version: Option<&'a str>,
+    ) -> ApiContextWrapperIter<'ctx, GameBranchesIter<'a, 'a>> {
+        self.map_iter(|branches| branches.get_game_branches_by_id_or_biz(id_or_biz, version))
+    }
+}
+
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GameBranchInfo {
     pub game: Game,
@@ -126,26 +168,4 @@ impl GameBranchInfo {
 pub struct Game {
     pub id: String,
     pub biz: String,
-}
-
-#[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PackageInfo {
-    pub package_id: String,
-    pub branch: String,
-    pub password: String,
-    pub tag: String,
-    pub diff_tags: Vec<String>,
-    pub categories: Vec<PackageCategory>,
-}
-
-impl PackageInfo {
-    pub fn version(&self) -> Option<Version> {
-        Version::from_str(&self.tag).ok()
-    }
-}
-
-#[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PackageCategory {
-    pub category_id: String,
-    pub matching_field: String,
 }
