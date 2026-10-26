@@ -6,6 +6,8 @@ use std::{
     path::Path,
 };
 
+use base16ct::HexDisplay;
+use digest_io::IoWrapper;
 pub use error::SophonError;
 pub use game_edition::GameEdition;
 use md5::{Digest, Md5};
@@ -65,7 +67,8 @@ fn ensure_parent(path: impl AsRef<Path>) -> std::io::Result<()> {
 }
 
 fn md5_hash_str(data: &[u8]) -> String {
-    format!("{:x}", Md5::digest(data))
+    let digest = Md5::digest(data);
+    format!("{:x}", HexDisplay(&digest))
 }
 
 #[allow(dead_code)]
@@ -78,11 +81,12 @@ fn bytes_check_md5(data: &[u8], expected_hash: &str) -> bool {
 // MD5 hash calculation without reading the whole file contents into RAM
 pub fn file_md5_hash_str(file_path: impl AsRef<Path>) -> std::io::Result<String> {
     let mut file = BufReader::new(File::open(&file_path)?);
-    let mut md5 = Md5::new();
+    let mut md5 = IoWrapper(Md5::new());
 
     std::io::copy(&mut file, &mut md5)?;
 
-    Ok(format!("{:x}", md5.finalize()))
+    let hash = md5.0.finalize();
+    Ok(format!("{:x}", HexDisplay(&hash)))
 }
 
 pub fn check_file(
@@ -128,11 +132,12 @@ fn file_region_hash_md5(file: &mut File, offset: u64, length: u64) -> std::io::R
     file.seek(SeekFrom::Start(offset))?;
 
     let mut region_reader = BufReader::new(file.take(length));
-    let mut hasher = Md5::new();
+    let mut hasher = IoWrapper(Md5::new());
 
     std::io::copy(&mut region_reader, &mut hasher)?;
 
-    Ok(format!("{:x}", hasher.finalize()))
+    let digest = hasher.0.finalize();
+    Ok(format!("{:x}", HexDisplay(&digest)))
 }
 
 /// Divides thread count for the two pools. Element 0 is for downloading, element 1 is for
