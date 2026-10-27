@@ -155,11 +155,9 @@ fn file_region_hash_md5(file: &mut File, offset: u64, length: u64) -> std::io::R
 /// Divides thread count for the two pools. Element 0 is for downloading, element 1 is for
 /// patching/assembling
 fn divide_threads(thread_count: usize) -> Result<(NonZeroUsize, NonZeroUsize), SophonError> {
-    let thread_count =
-        NonZeroUsize::new(thread_count).ok_or(SophonError::InvalidThreadAmount(thread_count))?;
-    if thread_count.get() == 1 {
+    if thread_count <= 1 {
         tracing::warn!(
-            "Thread count set to 1, but at least 2 are required, returning 1 for each pool"
+            "Thread count set to 1 or less, but at least 2 are required, using 1 for each pool"
         );
         // SAFETY: 1 is not zero
         Ok(unsafe {
@@ -170,8 +168,8 @@ fn divide_threads(thread_count: usize) -> Result<(NonZeroUsize, NonZeroUsize), S
         })
     } else {
         // division rounds towards zero, leave less threads for patching/assembly
-        let last = thread_count.get() / 2;
-        let first = thread_count.get() - last;
+        let last = thread_count / 2;
+        let first = thread_count - last;
         Ok((
             NonZeroUsize::new(first).ok_or(SophonError::InvalidThreadAmount(first))?,
             NonZeroUsize::new(last).ok_or(SophonError::InvalidThreadAmount(last))?,
