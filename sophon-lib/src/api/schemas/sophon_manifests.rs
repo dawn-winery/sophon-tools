@@ -21,7 +21,7 @@ impl SophonDownloads {
     }
 }
 
-impl<'ctx> ApiContextWrapper<'ctx, SophonDownloads> {
+impl<'ctx> ApiContextWrapper<'ctx, &SophonDownloads> {
     pub fn for_component(
         &self,
         matching_field: &str,

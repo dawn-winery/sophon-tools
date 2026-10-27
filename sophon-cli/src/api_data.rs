@@ -180,6 +180,7 @@ impl MultipleVersionFilter {
             value: game_filtered,
             ..
         }) = game_scan_info
+            .as_ref()
             .map(|scan| {
                 scan.game_scan_info
                     .iter()
@@ -250,13 +251,14 @@ impl MultipleVersionFilter {
         };
 
         if latest {
-            if let Some(latest_branch) = game_branches.branch_latest(&game_id_or_biz) {
+            if let Some(latest_branch) = game_branches.as_ref().branch_latest(&game_id_or_biz) {
                 dump_value_formatted(latest_branch.value, format, verbosity)?;
                 return Ok(());
             }
         } else {
-            let mut filtered_branches =
-                game_branches.branches_iter(&game_id_or_biz, version.as_deref());
+            let mut filtered_branches = game_branches
+                .as_ref()
+                .branches_iter(&game_id_or_biz, version.as_deref());
             if let Some(ApiContextWrapper {
                 value: first_item, ..
             }) = filtered_branches.next()
@@ -329,13 +331,15 @@ impl SingleVersionFilter {
         let game_branches = api.game_branches().map_err(DumpError::game_branches)?;
 
         if version.is_none() {
-            if let Some(latest_branch) = game_branches.package_latest(&game, preload) {
+            if let Some(latest_branch) = game_branches.as_ref().package_latest(&game, preload) {
                 dump_value_formatted(latest_branch.value, format, verbosity)?;
                 return Ok(());
             }
         } else {
             let mut filtered_branches =
-                game_branches.packages_iter(&game, version.as_deref(), preload);
+                game_branches
+                    .as_ref()
+                    .packages_iter(&game, version.as_deref(), preload);
             if let Some(ApiContextWrapper {
                 value: first_item, ..
             }) = filtered_branches.next()
@@ -373,7 +377,10 @@ impl MultipleMatchingFieldFilter {
         } = self;
         let game_branches = api.game_branches().map_err(DumpError::game_branches)?;
 
-        let package = game_branches.package_latest_or_version(&game, version.as_deref(), preload);
+        let package =
+            game_branches
+                .as_ref()
+                .package_latest_or_version(&game, version.as_deref(), preload);
 
         let Some(package) = package else {
             return Err("Unable to find package with specified query".to_string());
@@ -420,7 +427,10 @@ impl MultipleMatchingFieldFilter {
         } = self;
         let game_branches = api.game_branches().map_err(DumpError::game_branches)?;
 
-        let package = game_branches.package_latest_or_version(&game, version.as_deref(), preload);
+        let package =
+            game_branches
+                .as_ref()
+                .package_latest_or_version(&game, version.as_deref(), preload);
 
         let Some(package) = package else {
             return Err("Unable to find package with specified query".to_string());
@@ -491,13 +501,16 @@ impl SingleMatchingFieldFilter {
         let game_branches = api.game_branches().map_err(DumpError::game_branches)?;
 
         let Some(package) =
-            game_branches.package_latest_or_version(&game, version.as_deref(), preload)
+            game_branches
+                .as_ref()
+                .package_latest_or_version(&game, version.as_deref(), preload)
         else {
             return Err("Unable to find package with specified query".to_string());
         };
 
         let downloads = package.downloads().map_err(DumpError::sophon_download)?;
         let Some::<ApiContextWrapper<_>>(download_info) = downloads
+            .as_ref()
             .map(|downloads| {
                 downloads
                     .manifests
@@ -569,13 +582,16 @@ impl SingleMatchingFieldFilter {
         let game_branches = api.game_branches().map_err(DumpError::game_branches)?;
 
         let Some(package) =
-            game_branches.package_latest_or_version(&game, version.as_deref(), preload)
+            game_branches
+                .as_ref()
+                .package_latest_or_version(&game, version.as_deref(), preload)
         else {
             return Err("Unable to find package with specified query".to_string());
         };
 
         let diffs = package.diffs().map_err(DumpError::sophon_diffs)?;
         let Some::<ApiContextWrapper<_>>(diff_info) = diffs
+            .as_ref()
             .map(|diffs| {
                 diffs
                     .manifests

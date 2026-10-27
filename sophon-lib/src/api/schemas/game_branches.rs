@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     api::{
-        ApiContext, ApiContextWrapper, ApiContextWrapperIter,
+        ApiContext, ApiContextWrapper,
         schemas::package::{PackageInfo, PackageIter},
     },
     utils::version::Version,
@@ -110,7 +110,7 @@ impl GameBranches {
     }
 }
 
-impl<'ctx> ApiContextWrapper<'ctx, GameBranches> {
+impl<'ctx, 'a> ApiContextWrapper<'ctx, &'a GameBranches> {
     pub fn branch_latest(
         &self,
         id_or_biz: &str,
@@ -142,12 +142,12 @@ impl<'ctx> ApiContextWrapper<'ctx, GameBranches> {
             .unwrap_or_else(|| self.branch_latest(id_or_biz))
     }
 
-    pub fn branches_iter<'a>(
-        &'a self,
-        id_or_biz: &'a str,
-        version: Option<&'a str>,
-    ) -> ApiContextWrapperIter<'ctx, GameBranchesIter<'a, 'a>> {
-        self.map_iter(|branches| branches.get_game_branches_by_id_or_biz(id_or_biz, version))
+    pub fn branches_iter<'b>(
+        &self,
+        id_or_biz: &'b str,
+        version: Option<&'b str>,
+    ) -> ApiContextWrapper<'ctx, GameBranchesIter<'b, 'a>> {
+        self.map(|branches| branches.get_game_branches_by_id_or_biz(id_or_biz, version))
     }
 }
 

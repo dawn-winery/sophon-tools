@@ -25,7 +25,7 @@ impl SophonDiffs {
     }
 }
 
-impl<'ctx> ApiContextWrapper<'ctx, SophonDiffs> {
+impl<'ctx> ApiContextWrapper<'ctx, &SophonDiffs> {
     pub fn for_component(
         &self,
         matching_field: &str,

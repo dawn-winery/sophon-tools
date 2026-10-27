@@ -73,6 +73,7 @@ impl DownloadArgs {
             output.print_msg("Fetching download information...");
             let branches = api.game_branches().expect("Failed to get game branches");
             branches
+                .as_ref()
                 .package_latest_or_version(&self.game.game, self.version.as_deref(), self.preload)
                 .expect("Failed to find game branch")
                 .cloned()
@@ -93,7 +94,7 @@ impl DownloadArgs {
 
         output.dl_info(&downloads_info.value)?;
 
-        for download_info in downloads_info.map_iter(|downloads| downloads.manifests.iter()) {
+        for download_info in downloads_info.map(|downloads| downloads.manifests.into_iter()) {
             let total_download = download_info
                 .value
                 .stats
@@ -108,7 +109,7 @@ impl DownloadArgs {
                 .updater_download(&matching_field, total_download);
 
             let mut downloader =
-                sophon_lib::installer::SophonInstaller::new(download_info, &temp_dir)
+                sophon_lib::installer::SophonInstaller::new(download_info.as_ref(), &temp_dir)
                     .expect("Failed to construct downloader")
                     .with_free_space_check(!self.extra.skip_free_space_check);
             downloader.inplace = self.inplace;

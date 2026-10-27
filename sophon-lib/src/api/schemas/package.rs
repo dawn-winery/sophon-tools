@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     GameEdition,
     api::{
-        ApiContextWrapper, ApiContextWrapperIter,
+        ApiContextWrapper,
         schemas::{
             game_branches::{GameBranches, GameBranchesIter},
             sophon_diff::SophonDiffs,
@@ -96,12 +96,12 @@ pub struct PackageCategory {
     pub matching_field: String,
 }
 
-impl<'ctx> ApiContextWrapper<'ctx, GameBranches> {
+impl<'ctx, 'b> ApiContextWrapper<'ctx, &'b GameBranches> {
     pub fn package_latest(
         &self,
         id_or_biz: &str,
         preload: bool,
-    ) -> Option<ApiContextWrapper<'ctx, &PackageInfo>> {
+    ) -> Option<ApiContextWrapper<'ctx, &'b PackageInfo>> {
         self.map(|branches| branches.get_package_by_id_or_biz_latest(id_or_biz, preload))
             .into()
     }
@@ -111,7 +111,7 @@ impl<'ctx> ApiContextWrapper<'ctx, GameBranches> {
         id_or_biz: &str,
         version: &str,
         preload: bool,
-    ) -> Option<ApiContextWrapper<'ctx, &PackageInfo>> {
+    ) -> Option<ApiContextWrapper<'ctx, &'b PackageInfo>> {
         self.map(|branches| {
             branches
                 .get_packages_by_id_or_biz(id_or_biz, Some(version), preload)
@@ -125,18 +125,18 @@ impl<'ctx> ApiContextWrapper<'ctx, GameBranches> {
         id_or_biz: &str,
         version: Option<&str>,
         preload: bool,
-    ) -> Option<ApiContextWrapper<'ctx, &PackageInfo>> {
+    ) -> Option<ApiContextWrapper<'ctx, &'b PackageInfo>> {
         version
             .map(|version| self.package_version(id_or_biz, version, preload))
             .unwrap_or_else(|| self.package_latest(id_or_biz, preload))
     }
 
     pub fn packages_iter<'a>(
-        &'a self,
+        &self,
         id_or_biz: &'a str,
         version: Option<&'a str>,
         preload: bool,
-    ) -> ApiContextWrapperIter<'ctx, PackageIter<'a, 'a>> {
-        self.map_iter(|branches| branches.get_packages_by_id_or_biz(id_or_biz, version, preload))
+    ) -> ApiContextWrapper<'ctx, PackageIter<'a, 'b>> {
+        self.map(|branches| branches.get_packages_by_id_or_biz(id_or_biz, version, preload))
     }
 }

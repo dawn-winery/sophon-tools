@@ -154,6 +154,7 @@ impl UpdateArgs {
                 output.print_msg("Fetching update information...");
                 let branches = api.game_branches().expect("Failed to get game branches");
                 branches
+                    .as_ref()
                     .package_latest_or_version(&self.game.game, self.to.as_deref(), self.preload)
                     .expect("Failed to find game branch")
                     .cloned()
@@ -176,7 +177,7 @@ impl UpdateArgs {
 
         output.update_info(&diffs.value)?;
 
-        for update_manifest in diffs.map_iter(|diffs| diffs.manifests.iter()) {
+        for update_manifest in diffs.map(|diffs| diffs.manifests.into_iter()) {
             let total_download = update_manifest
                 .value
                 .stats
@@ -191,7 +192,7 @@ impl UpdateArgs {
                 .clone()
                 .updater_update(total_download, &matching_field);
 
-            let mut patcher = SophonPatcher::new(update_manifest, &cache_dir, None)
+            let mut patcher = SophonPatcher::new(update_manifest.as_ref(), &cache_dir, None)
                 .expect("Failed to construct updater")
                 .with_free_space_check(!self.extra.skip_free_space_check);
             patcher.patches_in_memory = self.extra.chunk_buffer_memory;

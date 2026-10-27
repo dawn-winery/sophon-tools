@@ -71,21 +71,14 @@ impl ApiContext {
 }
 
 impl<'ctx, T> ApiContextWrapper<'ctx, T> {
-    pub fn map<'a, T2: 'a, F: FnOnce(&'a T) -> T2>(&'a self, f: F) -> ApiContextWrapper<'ctx, T2> {
+    pub fn map<T2, F: FnOnce(T) -> T2>(self, f: F) -> ApiContextWrapper<'ctx, T2> {
         ApiContextWrapper {
             ctx: self.ctx,
-            value: f(&self.value),
+            value: f(self.value),
         }
     }
 
-    pub fn map_iter<'a, I: Iterator + 'a, F: FnOnce(&'a T) -> I>(
-        &'a self,
-        f: F,
-    ) -> ApiContextWrapperIter<'ctx, I> {
-        ApiContextWrapperIter { iter: self.map(f) }
-    }
-
-    pub fn as_ref(&self) -> ApiContextWrapper<'ctx, &T> {
+    pub fn as_ref<'a>(&'a self) -> ApiContextWrapper<'ctx, &'a T> {
         ApiContextWrapper {
             ctx: self.ctx,
             value: &self.value,
@@ -120,16 +113,11 @@ impl<'ctx, T> From<ApiContextWrapper<'ctx, Result<T, SophonError>>> for ApiResul
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct ApiContextWrapperIter<'ctx, I> {
-    iter: ApiContextWrapper<'ctx, I>,
-}
-
-impl<'ctx, I: Iterator> Iterator for ApiContextWrapperIter<'ctx, I> {
+impl<'ctx, I: Iterator> Iterator for ApiContextWrapper<'ctx, I> {
     type Item = ApiContextWrapper<'ctx, <I as Iterator>::Item>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.iter.ctx.wrap(self.iter.value.next()).into()
+        self.ctx.wrap(self.value.next()).into()
     }
 }
 
