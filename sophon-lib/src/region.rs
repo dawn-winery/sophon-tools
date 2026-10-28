@@ -17,7 +17,10 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(
+    Default, Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize,
+    serde::Deserialize
+)]
 pub enum SophonRegion {
     #[default]
     Global,
