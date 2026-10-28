@@ -55,18 +55,12 @@ pub enum SophonApiError {
         message: String
     },
 
-    #[error("sophon API returned invalid response")]
-    InvalidSophonResponse,
-
     #[error("sophon api with region '{region:?}' and launcher id '{launcher_id}' doesn't contain information about the game with id '{game_id}'")]
     GameNotFound {
         region: SophonRegion,
         launcher_id: String,
         game_id: String
-    },
-
-    #[error(transparent)]
-    Other(Box<dyn std::error::Error>)
+    }
 }
 
 #[derive(Default)]
