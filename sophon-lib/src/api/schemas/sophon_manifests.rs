@@ -1,8 +1,12 @@
+use std::str::FromStr;
+
 use bytes::Bytes;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 
-use crate::{SophonError, api::ApiContextWrapper, protos::SophonManifestProto};
+use crate::{
+    SophonError, api::ApiContextWrapper, protos::SophonManifestProto, utils::version::Version,
+};
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SophonDownloads {
@@ -19,13 +23,17 @@ impl SophonDownloads {
             .iter()
             .find(|manifest| manifest.matching_field == matching_field)
     }
+
+    pub fn version(&self) -> Option<Version> {
+        Version::from_str(&self.tag).ok()
+    }
 }
 
-impl<'ctx> ApiContextWrapper<'ctx, &SophonDownloads> {
+impl<'ctx, 'a> ApiContextWrapper<'ctx, &'a SophonDownloads> {
     pub fn for_component(
-        &self,
+        self,
         matching_field: &str,
-    ) -> Option<ApiContextWrapper<'ctx, &SophonDownloadInfo>> {
+    ) -> Option<ApiContextWrapper<'ctx, &'a SophonDownloadInfo>> {
         self.map(|downloads| downloads.get_manifests_for(matching_field))
             .into()
     }

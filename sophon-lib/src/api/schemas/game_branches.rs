@@ -114,7 +114,7 @@ impl<'ctx, 'a> ApiContextWrapper<'ctx, &'a GameBranches> {
     pub fn branch_latest(
         &self,
         id_or_biz: &str,
-    ) -> Option<ApiContextWrapper<'ctx, &GameBranchInfo>> {
+    ) -> Option<ApiContextWrapper<'ctx, &'a GameBranchInfo>> {
         self.map(|branches| branches.get_game_branch_by_id_or_biz_latest(id_or_biz))
             .into()
     }
@@ -123,7 +123,7 @@ impl<'ctx, 'a> ApiContextWrapper<'ctx, &'a GameBranches> {
         &self,
         id_or_biz: &str,
         version: &str,
-    ) -> Option<ApiContextWrapper<'ctx, &GameBranchInfo>> {
+    ) -> Option<ApiContextWrapper<'ctx, &'a GameBranchInfo>> {
         self.map(|branches| {
             branches
                 .get_game_branches_by_id_or_biz(id_or_biz, Some(version))
@@ -136,7 +136,7 @@ impl<'ctx, 'a> ApiContextWrapper<'ctx, &'a GameBranches> {
         &self,
         id_or_biz: &str,
         version: Option<&str>,
-    ) -> Option<ApiContextWrapper<'ctx, &GameBranchInfo>> {
+    ) -> Option<ApiContextWrapper<'ctx, &'a GameBranchInfo>> {
         version
             .map(|version| self.branch_version(id_or_biz, version))
             .unwrap_or_else(|| self.branch_latest(id_or_biz))
@@ -148,6 +148,16 @@ impl<'ctx, 'a> ApiContextWrapper<'ctx, &'a GameBranches> {
         version: Option<&'b str>,
     ) -> ApiContextWrapper<'ctx, GameBranchesIter<'b, 'a>> {
         self.map(|branches| branches.get_game_branches_by_id_or_biz(id_or_biz, version))
+    }
+}
+
+impl<'ctx, 'a> ApiContextWrapper<'ctx, &'a GameBranchInfo> {
+    pub fn main(self) -> Option<ApiContextWrapper<'ctx, &'a PackageInfo>> {
+        self.map(|branch| branch.main.as_ref()).into()
+    }
+
+    pub fn pre_download(self) -> Option<ApiContextWrapper<'ctx, &'a PackageInfo>> {
+        self.map(|branch| branch.pre_download.as_ref()).into()
     }
 }
 

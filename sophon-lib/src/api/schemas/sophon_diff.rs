@@ -1,11 +1,13 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, str::FromStr};
 
 use bytes::Bytes;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 
 use super::sophon_manifests::{DownloadInfo, Manifest, ManifestStats};
-use crate::{SophonError, api::ApiContextWrapper, protos::SophonPatchProto};
+use crate::{
+    SophonError, api::ApiContextWrapper, protos::SophonPatchProto, utils::version::Version,
+};
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SophonDiffs {
@@ -23,13 +25,17 @@ impl SophonDiffs {
             .iter()
             .find(|manifest| manifest.matching_field == matching_field)
     }
+
+    pub fn version(&self) -> Option<Version> {
+        Version::from_str(&self.tag).ok()
+    }
 }
 
-impl<'ctx> ApiContextWrapper<'ctx, &SophonDiffs> {
+impl<'ctx, 'a> ApiContextWrapper<'ctx, &'a SophonDiffs> {
     pub fn for_component(
-        &self,
+        self,
         matching_field: &str,
-    ) -> Option<ApiContextWrapper<'ctx, &SophonDiff>> {
+    ) -> Option<ApiContextWrapper<'ctx, &'a SophonDiff>> {
         self.map(|diffs| diffs.get_manifests_for(matching_field))
             .into()
     }

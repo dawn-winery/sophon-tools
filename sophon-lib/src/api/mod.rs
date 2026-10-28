@@ -31,6 +31,14 @@ pub type ApiResult<'ctx, T> = Result<ApiContextWrapper<'ctx, T>, SophonError>;
 impl<T: Copy> Copy for ApiContextWrapper<'_, T> {}
 
 impl ApiContext {
+    /// Create new [`ApiContext`] using the default client from [`crate::client_builder()`]
+    pub fn new(edition: GameEdition) -> Self {
+        Self {
+            client: crate::client_builder().build().unwrap(),
+            edition,
+        }
+    }
+
     pub fn wrap<T>(&self, value: T) -> ApiContextWrapper<'_, T> {
         ApiContextWrapper { ctx: self, value }
     }

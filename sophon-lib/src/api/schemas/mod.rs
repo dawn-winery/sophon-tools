@@ -22,3 +22,15 @@ pub enum DownloadOrDiff {
     Download(SophonDownloadInfo),
     Patch(SophonDiff),
 }
+
+impl From<SophonDownloadInfo> for DownloadOrDiff {
+    fn from(value: SophonDownloadInfo) -> Self {
+        Self::Download(value)
+    }
+}
+
+impl From<SophonDiff> for DownloadOrDiff {
+    fn from(value: SophonDiff) -> Self {
+        Self::Patch(value)
+    }
+}
